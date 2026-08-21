@@ -1,0 +1,7 @@
+"""Canonical domain event type names (arch §9.2)."""
+OFFER_ACCEPTED = "offer.accepted"
+MILESTONE_SUBMITTED = "milestone.submitted"
+MILESTONE_DECIDED = "milestone.decided"
+THESIS_SUBMITTED = "thesis.submitted"
+FUNDING_CHANGED = "funding.changed"
+STUDENT_GRADUATED = "student.graduated"

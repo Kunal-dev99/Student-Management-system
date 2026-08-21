@@ -1,0 +1,42 @@
+# Local full stack (arch §5, §19). Requires Docker (not installed in the current
+# dev box — the backend also boots standalone against SQLite for quick checks).
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: pgr
+      POSTGRES_PASSWORD: pgr
+      POSTGRES_DB: pgr
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgr_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pgr"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+  api:
+    build:
+      context: ../../backend
+    environment:
+      APP_ENV: dev
+      DATABASE_URL: postgresql+asyncpg://pgr:pgr@db:5432/pgr
+      REDIS_URL: redis://redis:6379/0
+      BROKER_URL: redis://redis:6379/1
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+volumes:
+  pgr_db:

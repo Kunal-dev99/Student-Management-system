@@ -1,0 +1,24 @@
+# PGR Platform backend — Phase 0 foundations
+# (Poetry is not installed in this environment; using pip + venv.)
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+pydantic-settings==2.7.1
+email-validator==2.2.0    # required by pydantic EmailStr
+SQLAlchemy==2.0.36
+greenlet==3.1.1           # required by SQLAlchemy async (not auto-pulled on Python 3.13)
+alembic==1.14.0
+asyncpg==0.30.0            # async PostgreSQL driver (production)
+aiosqlite==0.20.0         # async SQLite driver (local boot without Postgres)
+python-jose[cryptography]==3.3.0   # JWT (identity module, Phase 1)
+passlib[bcrypt]==1.7.4    # password hashing (identity module, Phase 1)
+httpx==0.28.1
+
+# Phase 4 — real infrastructure
+APScheduler==3.11.0        # background worker: periodic scheduled jobs + outbox dispatch
+python-multipart==0.0.20   # FastAPI file uploads (document storage)
+aiosmtplib==3.0.2          # async SMTP email delivery (notifications)
+
+# Dev / test
+pytest==8.3.4
+pytest-asyncio==0.25.0
