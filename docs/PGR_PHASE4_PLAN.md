@@ -40,6 +40,42 @@ something an institution could pilot. Everything in 4B builds on them.
 
 ---
 
+## 4A build status — ✅ TRACK 4A COMPLETE (2026-08-21)
+**62/62 tests green.** Migrations `72da2f21478b` (4A) + `9716adbdff2d` (4B.8) applied to Postgres.
+Frontend production build clean (24 routes). All items verified live in the browser.
+
+| Task | Status | Notes |
+|---|---|---|
+| BE-4A.1 worker | ✅ | `app/worker.py` (APScheduler) runs scheduled jobs + dispatch + notifications; `start-worker.bat` (added to `start-all.bat`); verified auto-dispatching 2 events on interval with no manual click. |
+| BE-4A.2 outbox retry/dead-letter | ✅ | attempts/backoff/dead_lettered on `outbox_event`; real HTTP delivery when `INTEGRATION_<sys>_URL` set; `/integration/dead-letters/{id}/replay`. Test covers retry→dead-letter→replay. |
+| BE-4A.3 documents (files) | ✅ | `core/storage.py` LocalObjectStore; `document` table + `/documents` upload/list/download/delete, row-scoped. Byte-identical round-trip verified live; out-of-scope supervisor gets 403. |
+| FE-4A.4 uploader UI | ✅ | `DocumentsPanel` on student detail (upload/list/download/delete) — verified rendering an uploaded file. |
+| BE-4A.5 email + prefs | ✅ | `core/email.py` (console/SMTP), `notification_preference`, delivery via `NotificationService.deliver_queued`; unread-count + preferences endpoints. |
+| FE-4A.6 notification centre + prefs | ✅ | `NotificationBell` in header (unread badge + popover + mark-read); Settings → Notifications (email/digest/per-event mute) verified live. |
+| BE-4A.7 auth hardening | ✅ | refresh-token store + rotation + real revocation (logout/logout-all), lockout, password-reset request/confirm. Tests: lockout, logout-revokes, full reset cycle. |
+| FE-4A.8 reset pages | ✅ | `/forgot-password` + `/reset-password` (neutral messaging, Suspense-wrapped), "Forgot password?" on login; logout now revokes server-side. |
+| BE-4A.9 audit trail | ✅ | `audit_log` + AuditMiddleware (actor from JWT, no DB hit) + `/audit` viewer. Verified capturing PATCH/POST with actor. |
+| FE-4A.10 audit viewer | ✅ | `/audit` page (permission-gated, filters) + History section on student detail — both verified showing real entries. |
+| 4A.8 SSO | ⛔ | deferred by decision. |
+
+## 4B build status — ✅ ALL FOUR PRIORITY MODULES COMPLETE (backend), 75/75 tests
+Migrations applied to Postgres: `9716adbdff2d` (thesis) → `3f62e34f4e6f` (supervision) →
+`cff59f95ecca` (progression) → `3a5a0cd9be93` (funding). Head = `3a5a0cd9be93`.
+
+| Task | Status | Notes |
+|---|---|---|
+| BE-4B.8 Thesis & examination | ✅ | Examiner **affiliation + conflict-of-interest** (declared CoI blocks approval), `independent_chair` examiner type, **viva scheduling** (`POST /theses/{id}/viva` — date/format/location, requires an approved examiner, notifies the student, moves thesis to under_examination), **corrections tracking** (`thesis_correction`: minor=28d / major=182d deadline auto-opened by outcome; submit → sign-off → approved). 3 new tests. |
+| BE-4B.5 Supervision meetings | ✅ | **`supervision_meeting`** log (date, format, duration, notes, actions, next-meeting, student confirmation) at `/students/{id}/supervision-meetings`, row-scoped so supervisors log their own; **compliance** endpoint (90-day expectation) + `lastMeetingOn`/`meetingOverdue` surfaced on the caseload; **capacity guard** (max 8 supervisees, `/supervisors/{id}/capacity`); co-supervisor **weighting**; **end-with-reason**. 4 new tests. |
+| BE-4B.6 Progression panels | ✅ | **`review_panel_member`** (chair / internal / independent assessor / observer) — a formal review requires chair + independent assessor, and the independent assessor **cannot be one of the student's supervisors**. Panel requirement is *configuration* (milestone_definition.review_panel.required), so existing simple reviews still work. **Conditions** mandatory on conditional outcomes, with an auto-scheduled **re-review (90d)** and **sign-off**; **outcome letters**; **appeals** with a 14-day window, duplicate guard, and an upheld appeal **reopening** the milestone. 4 new tests. |
+| BE-4B.7 Funding payments | ✅ | **Cost centre / project code / funder reference / contribution %** on arrangements (blended funding); **`stipend_payment`** schedule generator (monthly/quarterly/termly/annual/one-off, month-end-safe date maths) → approve → mark paid (emits `funding.changed` to the **Finance adapter via the outbox**); **payment summary** (paid/committed/outstanding + overdue); ending an arrangement **auto-cancels unpaid instalments**; regeneration blocked once anything is paid; **`fee_waiver`** (full/partial/bench, amount or %, approval). 5 new tests. |
+| FE-4B.* | ⏳ | UI for viva/corrections, meeting log, panels/appeals, and payment schedules still to build. |
+
+**Verified live** (Postgres, real HTTP): £18,000 arrangement → 4 quarterly instalments of £4,500 →
+approve → mark paid (`FIN-LIVE-1`) → summary showed paid 4,500 / committed 18,000 / outstanding
+13,500 → the **worker auto-dispatched** the payment event to the Finance adapter on its next tick.
+
+---
+
 ## Track 4A — Make the stand-ins real
 
 ### 4A.1 Real background worker & scheduler

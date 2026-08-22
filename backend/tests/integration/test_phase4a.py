@@ -14,7 +14,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.security import hash_password
 from app.db.base import Base
-from app.db.session import get_session
+from app.db.session import get_read_session, get_session
 from app.main import app
 from app.modules.identity.constants import PERMISSIONS
 from app.modules.identity.models import Permission, Role, User
@@ -61,6 +61,7 @@ async def ctx():
             yield session
 
     app.dependency_overrides[get_session] = _get_session
+    app.dependency_overrides[get_read_session] = _get_session
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c, sm, ids

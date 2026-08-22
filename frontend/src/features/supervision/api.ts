@@ -21,6 +21,9 @@ export interface CaseloadItem {
   studentRef: string
   personName: string
   role: SupervisorRole
+  /** Phase 4B.5 — supervision-record health, surfaced on the caseload. */
+  lastMeetingOn: string | null
+  meetingOverdue: boolean
 }
 
 export const useSupervisors = (studentId: string) =>

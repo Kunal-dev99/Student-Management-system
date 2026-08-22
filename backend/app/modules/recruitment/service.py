@@ -4,12 +4,13 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from app.core.errors import NotFoundError, WorkflowError
+from app.core.errors import NotFoundError, ValidationAppError, WorkflowError
 from app.modules.person.repository import PersonRepository
 from app.modules.person.service import PersonService
 from app.modules.recruitment.constants import (
     OPPORTUNITY_TRANSITIONS,
     TERMINAL_STAGES,
+    ApplicationRoute,
     CandidateStage,
     OpportunityStatus,
 )
@@ -86,6 +87,27 @@ class RecruitmentService:
     async def create_application(self, data: ApplicationCreate) -> Application:
         # Ensure the person exists (service-to-service, arch §6.1).
         await PersonService(PersonRepository(self.repo.session)).get_person(data.person_id)
+        # Phase 6.0 — route integrity (CIO vision: two distinct entry routes).
+        # Route A (opportunity_led) starts from an advertised PGR position; Route B (student_led)
+        # starts from a person and their own research proposal. Each must carry its own evidence,
+        # so the route a student took stays provable later in reporting.
+        if data.route == ApplicationRoute.opportunity_led:
+            if data.research_opportunity_id is None:
+                raise ValidationAppError(
+                    "An opportunity-led application must reference a research opportunity"
+                )
+            opportunity = await self.repo.get_opportunity(data.research_opportunity_id)
+            if opportunity is None:
+                raise NotFoundError("Research opportunity not found")
+        else:  # student_led
+            if data.research_opportunity_id is not None:
+                raise ValidationAppError(
+                    "A student-led application must not reference a research opportunity"
+                )
+            if data.research_area_id is None and not (data.proposal_document_ref or "").strip():
+                raise ValidationAppError(
+                    "A student-led application needs a research area or a research proposal"
+                )
         app = Application(
             person_id=data.person_id,
             route=data.route,

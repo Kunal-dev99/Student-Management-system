@@ -37,6 +37,8 @@ export interface SidebarUser {
 export interface SidebarProps {
   mainNav: NavItem[]
   adminNav?: NavItem[]
+  /** Optional "Advanced" group rendered after Administration (e.g. Pattern Lab). */
+  advancedNav?: NavItem[]
   /** Full brand name shown when expanded. */
   brandName?: string
   /** Tagline under the brand name (e.g. "Oracle Partner"). */
@@ -62,6 +64,7 @@ function readSidebarOpen(): boolean {
 export function Sidebar({
   mainNav,
   adminNav,
+  advancedNav,
   brandName = 'Brand',
   brandTagline,
   brandShort = 'BR',
@@ -169,6 +172,20 @@ export function Sidebar({
                 </div>
               )}
               <nav className="space-y-0.5 px-2">{adminNav.map(renderItem)}</nav>
+            </>
+          )}
+
+          {advancedNav && advancedNav.length > 0 && (
+            <>
+              <Separator className="my-4 mx-2 bg-border" />
+              {sidebarOpen && (
+                <div className="px-4 mb-2">
+                  <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest">
+                    Advanced
+                  </span>
+                </div>
+              )}
+              <nav className="space-y-0.5 px-2">{advancedNav.map(renderItem)}</nav>
             </>
           )}
         </ScrollArea>

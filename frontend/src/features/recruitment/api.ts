@@ -16,6 +16,10 @@ export interface Opportunity {
   currency: string | null
   eligibility: string | null
   positionsAvailable: number
+  positionsFilled: number
+  // Phase 6.1 — provenance: the demand this position answers and the award funding it.
+  researchDemandId: string | null
+  researchAwardId: string | null
   status: OpportunityStatus
   createdAt: string
 }
@@ -80,9 +84,18 @@ export const usePipeline = () =>
 export function useCreateOpportunity() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (body: { title: string; stipendAmount?: number; currency?: string; eligibility?: string }) =>
-      api.post<Opportunity>('/opportunities', body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['opportunities'] }),
+    mutationFn: (body: {
+      title: string
+      stipendAmount?: number
+      currency?: string
+      eligibility?: string
+      researchDemandId?: string
+      researchAwardId?: string
+    }) => api.post<Opportunity>('/opportunities', body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['opportunities'] })
+      qc.invalidateQueries({ queryKey: ['research-demands'] })
+    },
   })
 }
 

@@ -4,6 +4,8 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel, ConfigDict
+from pydantic.alias_generators import to_camel
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -53,3 +55,123 @@ async def download_export(
         content=content, media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{job.filename or "export.csv"}"'},
     )
+
+
+# --- Phase 6.6 — statutory reporting profiles (configuration, not code) ---
+
+class ProfileCreate(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+    code: str
+    name: str
+    academic_year: str
+    description: str | None = None
+
+
+class FieldCreate(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+    target_field: str
+    source_expression: str
+    position: int | None = None
+    transform: str | None = None
+    default_value: str | None = None
+    required: bool = False
+    allowed_values: list[str] | None = None
+
+
+class CloneRequest(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+    academic_year: str
+
+
+profiles_router = APIRouter(prefix="/report-profiles", tags=["exports"])
+
+
+def _engine(session: AsyncSession):
+    from app.modules.exports.statutory import StatutoryEngine
+
+    return StatutoryEngine(session)
+
+
+@profiles_router.get("", summary="Statutory report profiles")
+async def list_profiles(
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("reporting.read")),
+) -> list[dict]:
+    return await _engine(session).list_profiles()
+
+
+@profiles_router.get("/transforms", summary="Transforms a field mapping may use")
+async def list_transforms(_=Depends(require_permission("reporting.read"))) -> dict:
+    from app.modules.exports.statutory import TRANSFORMS
+
+    return {"transforms": sorted(TRANSFORMS)}
+
+
+@profiles_router.post("", status_code=201, summary="Create a statutory profile")
+async def create_profile(
+    body: ProfileCreate,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("admin.configure")),
+) -> dict:
+    eng = _engine(session)
+    p = await eng.create_profile(code=body.code, name=body.name,
+                                 academic_year=body.academic_year, description=body.description)
+    return eng.profile_out(p)
+
+
+@profiles_router.get("/{profile_id}", summary="Profile with its field mappings")
+async def profile_detail(
+    profile_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("reporting.read")),
+) -> dict:
+    return await _engine(session).profile_detail(profile_id)
+
+
+@profiles_router.post("/{profile_id}/fields", status_code=201, summary="Map a field")
+async def add_field(
+    profile_id: uuid.UUID,
+    body: FieldCreate,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("admin.configure")),
+) -> dict:
+    eng = _engine(session)
+    m = await eng.add_field(
+        profile_id, target_field=body.target_field, source_expression=body.source_expression,
+        position=body.position, transform=body.transform, default_value=body.default_value,
+        required=body.required, allowed_values=body.allowed_values,
+    )
+    return eng.mapping_out(m)
+
+
+@profiles_router.post("/{profile_id}/clone", status_code=201, summary="Carry a return to a new year")
+async def clone_profile(
+    profile_id: uuid.UUID,
+    body: CloneRequest,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("admin.configure")),
+) -> dict:
+    eng = _engine(session)
+    return eng.profile_out(await eng.clone_profile(profile_id, academic_year=body.academic_year))
+
+
+@profiles_router.get("/{profile_id}/validate", summary="Validation report without producing a file")
+async def validate_profile(
+    profile_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("reporting.read")),
+) -> dict:
+    result = await _engine(session).generate(profile_id)
+    return {"profile": result["profile"], "rowCount": result["rowCount"],
+            "validation": result["validation"]}
+
+
+@profiles_router.post("/{profile_id}/generate", status_code=201, summary="Produce the statutory extract")
+async def generate_profile(
+    profile_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("reporting.read")),
+) -> dict:
+    from app.modules.exports.service import ExportService
+
+    return await ExportService(session).run_statutory_profile(profile_id)

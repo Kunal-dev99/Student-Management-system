@@ -54,6 +54,15 @@ async def logs(
     )
 
 
+@router.get("/reconciliation", summary="Is the integration boundary healthy, and what needs a human?")
+async def reconciliation(
+    windowDays: int = 30,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("admin.configure")),
+) -> dict:
+    return await _svc(session).reconciliation(window_days=windowDays)
+
+
 @router.post("/dead-letters/{event_id}/replay", summary="Replay a dead-lettered event")
 async def replay_dead_letter(
     event_id: uuid.UUID,

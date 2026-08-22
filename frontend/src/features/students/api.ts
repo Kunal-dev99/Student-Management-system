@@ -14,6 +14,8 @@ export interface Student {
   programmeId: string | null
   startDate: string | null
   expectedEndDate: string | null
+  /** The end date agreed at registration, before any suspension/extension (Phase 6.5). */
+  originalExpectedEndDate: string | null
   studyMode: 'full_time' | 'part_time'
   status: StudentStatus
   createdAt: string

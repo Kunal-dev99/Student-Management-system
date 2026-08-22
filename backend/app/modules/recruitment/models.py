@@ -29,6 +29,15 @@ class ResearchOpportunity(UUIDMixin, TimestampMixin, Base):
     start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     expected_duration_months: Mapped[int | None] = mapped_column(Integer, nullable=True)
     positions_available: Mapped[int] = mapped_column(Integer, default=1)
+    # Phase 6.1 — provenance: the demand this position answers, and the award funding it.
+    # Both optional: a position may be raised directly, and demand may be strategic (no award).
+    research_demand_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("research_demand.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    research_award_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("research_award.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    positions_filled: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[OpportunityStatus] = mapped_column(
         Enum(OpportunityStatus, name="opportunity_status"), default=OpportunityStatus.draft
     )

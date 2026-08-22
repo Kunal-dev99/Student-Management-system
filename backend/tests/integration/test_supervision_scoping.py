@@ -136,3 +136,84 @@ async def test_assign_and_end_supervisor(ctx):
     r = await client.post(f"/api/v1/supervisors/{rel_id}/end", headers=h)
     assert r.status_code == 200 and r.json()["validTo"] is not None
     assert (await client.get("/api/v1/students", headers=hs)).json()["page"]["total"] == 1
+
+
+# --- Phase 4B.5 — supervision meeting log, capacity, change-with-reason ---
+
+@pytest.mark.asyncio
+async def test_supervision_meeting_log_and_compliance(ctx):
+    client, token, ids = ctx
+    hs = await token("sup@t.com")   # a supervisor records their own meeting
+    # No meetings yet -> compliance says overdue.
+    comp = (await client.get(f"/api/v1/students/{ids['a']}/supervision-compliance", headers=hs)).json()
+    assert comp["lastMeetingOn"] is None and comp["overdue"] is True
+
+    r = await client.post(
+        f"/api/v1/students/{ids['a']}/supervision-meetings", headers=hs,
+        json={"supervisorPersonId": ids["elena"], "metOn": date.today().isoformat(),
+              "format": "online", "durationMinutes": 45,
+              "notes": "Discussed chapter 2 draft.", "actions": "Revise methodology by next month.",
+              "nextMeetingOn": "2030-01-01"},
+    )
+    assert r.status_code == 201, r.text
+    m = r.json()
+    assert m["format"] == "online" and m["supervisorName"] == "Elena Ford"
+    assert m["studentConfirmed"] is False
+
+    listed = (await client.get(f"/api/v1/students/{ids['a']}/supervision-meetings", headers=hs)).json()
+    assert len(listed) == 1 and listed[0]["actions"].startswith("Revise")
+
+    # Compliance now current.
+    comp = (await client.get(f"/api/v1/students/{ids['a']}/supervision-compliance", headers=hs)).json()
+    assert comp["daysSince"] == 0 and comp["overdue"] is False
+
+    # Student confirms the record.
+    conf = await client.post(f"/api/v1/supervisors/meetings/{m['id']}/confirm", headers=hs)
+    assert conf.status_code == 200 and conf.json()["studentConfirmed"] is True
+
+    # Caseload surfaces meeting health.
+    case = (await client.get(f"/api/v1/supervisors/{ids['elena']}/students", headers=hs)).json()
+    mine = next(c for c in case if c["studentId"] == ids["a"])
+    assert mine["meetingOverdue"] is False and mine["lastMeetingOn"] == date.today().isoformat()
+
+
+@pytest.mark.asyncio
+async def test_meeting_out_of_scope_is_denied(ctx):
+    client, token, ids = ctx
+    hs = await token("sup@t.com")
+    # student_b is not supervised by Elena -> recording is refused.
+    r = await client.post(
+        f"/api/v1/students/{ids['b']}/supervision-meetings", headers=hs,
+        json={"metOn": date.today().isoformat(), "notes": "should not be allowed"},
+    )
+    assert r.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_no_future_meetings(ctx):
+    client, token, ids = ctx
+    hs = await token("sup@t.com")
+    r = await client.post(
+        f"/api/v1/students/{ids['a']}/supervision-meetings", headers=hs,
+        json={"metOn": "2099-01-01", "notes": "time travel"},
+    )
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_supervisor_capacity_and_end_reason(ctx):
+    client, token, ids = ctx
+    h = await token("admin@t.com")
+    cap = (await client.get(f"/api/v1/supervisors/{ids['elena']}/capacity", headers=h)).json()
+    assert cap["current"] == 1 and cap["max"] >= 1 and cap["atCapacity"] is False
+
+    # Assign with a weighting, then end with a recorded reason.
+    r = await client.post(
+        f"/api/v1/students/{ids['b']}/supervisors", headers=h,
+        json={"supervisorPersonId": ids["elena"], "role": "co_supervisor", "weightingPct": 40},
+    )
+    assert r.status_code == 201
+    rel_id = r.json()["id"]
+    ended = await client.post(f"/api/v1/supervisors/{rel_id}/end", headers=h,
+                              json={"reason": "Supervisor on sabbatical"})
+    assert ended.status_code == 200 and ended.json()["validTo"] is not None

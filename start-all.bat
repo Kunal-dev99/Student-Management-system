@@ -36,6 +36,9 @@ if errorlevel 1 (
 echo Launching backend window...
 start "PGR Backend (API :8000)" cmd /k "%~dp0start-backend.bat"
 
+echo Launching worker window...
+start "PGR Worker (background jobs)" cmd /k "%~dp0start-worker.bat"
+
 echo Launching frontend window...
 start "PGR Frontend (:3000)" cmd /k "%~dp0start-frontend.bat"
 

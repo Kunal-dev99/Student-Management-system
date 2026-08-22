@@ -7,7 +7,12 @@ from datetime import date, datetime
 from pydantic import BaseModel, ConfigDict
 from pydantic.alias_generators import to_camel
 
-from app.modules.student_record.constants import StudentStatus, StudyMode
+from app.modules.student_record.constants import (
+    LifecycleEventStatus,
+    LifecycleEventType,
+    StudentStatus,
+    StudyMode,
+)
 
 
 class _Camel(BaseModel):
@@ -29,10 +34,46 @@ class StudentOut(_Camel):
     research_area_id: uuid.UUID | None = None
     start_date: date | None = None
     expected_end_date: date | None = None
+    # The date agreed at registration, before any suspension/extension (Phase 6.5).
+    original_expected_end_date: date | None = None
     study_mode: StudyMode
     status: StudentStatus
     created_at: datetime
     project: ResearchProjectOut | None = None
+
+
+class LifecycleEventRequest(_Camel):
+    event_type: LifecycleEventType
+    reason: str
+    start_date: date
+    end_date: date | None = None            # required for a suspension
+    extension_days: int | None = None       # required for an extension
+    new_mode: StudyMode | None = None       # required for a mode change
+
+
+class LifecycleDecision(_Camel):
+    note: str | None = None
+
+
+class ReturnRequest(_Camel):
+    returned_on: date | None = None
+
+
+class LifecycleEventOut(_Camel):
+    id: str
+    student_id: str
+    event_type: LifecycleEventType
+    status: LifecycleEventStatus
+    start_date: str
+    end_date: str | None = None
+    actual_end_date: str | None = None
+    extension_days: int | None = None
+    previous_mode: StudyMode | None = None
+    new_mode: StudyMode | None = None
+    reason: str
+    days_applied: int | None = None
+    decision_note: str | None = None
+    decided_at: str | None = None
 
 
 class StudentUpdate(_Camel):

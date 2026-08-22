@@ -91,3 +91,55 @@ async def test_no_duplicate_examiner(ctx):
     body = {"examinerPersonId": ids["examiner"], "examinerType": "internal"}
     assert (await c.post(f"/api/v1/theses/{tid}/examiners", json=body)).status_code == 201
     assert (await c.post(f"/api/v1/theses/{tid}/examiners", json=body)).status_code == 409
+
+
+# --- Phase 4B.8 deepening: conflict of interest, viva scheduling, corrections ---
+
+@pytest.mark.asyncio
+async def test_conflict_of_interest_blocks_approval(ctx):
+    c, ids = ctx
+    tid = await _submitted_thesis(c, ids["student"])
+    r = await c.post(f"/api/v1/theses/{tid}/examiners", json={
+        "examinerPersonId": ids["examiner"], "examinerType": "external",
+        "affiliation": "Rival University", "conflictOfInterest": True, "conflictNote": "co-authored recently",
+    })
+    assert r.status_code == 201
+    nom = r.json()
+    assert nom["conflictOfInterest"] is True and nom["affiliation"] == "Rival University"
+    # Approval is blocked while a conflict stands.
+    blocked = await c.post(f"/api/v1/examiner-nominations/{nom['id']}/approve")
+    assert blocked.status_code == 422 and blocked.json()["error"]["code"] == "workflow_error"
+
+
+@pytest.mark.asyncio
+async def test_viva_requires_approved_examiner_then_schedules(ctx):
+    c, ids = ctx
+    tid = await _submitted_thesis(c, ids["student"])
+    # No approved examiner yet -> scheduling refused.
+    early = await c.post(f"/api/v1/theses/{tid}/viva", json={"vivaDate": "2030-06-01", "vivaFormat": "online"})
+    assert early.status_code == 422
+    # Nominate + approve, then schedule.
+    nom = (await c.post(f"/api/v1/theses/{tid}/examiners", json={"examinerPersonId": ids["examiner"], "examinerType": "external"})).json()
+    await c.post(f"/api/v1/examiner-nominations/{nom['id']}/approve")
+    ok = await c.post(f"/api/v1/theses/{tid}/viva", json={"vivaDate": "2030-06-01", "vivaFormat": "online", "location": "Room 1"})
+    assert ok.status_code == 200, ok.text
+    body = ok.json()
+    assert body["status"] == "under_examination"
+    assert body["examination"]["vivaFormat"] == "online" and body["examination"]["vivaLocation"] == "Room 1"
+
+
+@pytest.mark.asyncio
+async def test_corrections_lifecycle(ctx):
+    c, ids = ctx
+    tid = await _submitted_thesis(c, ids["student"])
+    # Outcome pass_with_corrections opens a minor corrections period with a deadline.
+    out = await c.post(f"/api/v1/theses/{tid}/examination/outcome", json={"outcome": "pass_with_corrections", "vivaDate": "2030-06-01"})
+    assert out.status_code == 200 and out.json()["status"] == "corrections"
+    corrections = (await c.get(f"/api/v1/theses/{tid}/corrections")).json()
+    assert len(corrections) == 1 and corrections[0]["kind"] == "minor" and corrections[0]["deadline"]
+    # Cannot approve before submission.
+    assert (await c.post(f"/api/v1/theses/{tid}/corrections/approve")).status_code == 422
+    # Submit then approve -> thesis approved.
+    assert (await c.post(f"/api/v1/theses/{tid}/corrections/submit")).status_code == 200
+    done = await c.post(f"/api/v1/theses/{tid}/corrections/approve")
+    assert done.status_code == 200 and done.json()["status"] == "approved"

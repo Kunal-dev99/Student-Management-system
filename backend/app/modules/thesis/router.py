@@ -12,10 +12,12 @@ from app.db.session import get_session
 from app.modules.student_record.router import scoped_ids
 from app.modules.thesis.repository import ThesisRepository
 from app.modules.thesis.schemas import (
+    CorrectionOut,
     ExaminerNominationOut,
     IntentionRequest,
     NominateRequest,
     OutcomeRequest,
+    ScheduleVivaRequest,
     SubmitThesisRequest,
     ThesisOut,
 )
@@ -78,7 +80,11 @@ async def nominate_examiner(
     session: AsyncSession = Depends(get_session),
     _=Depends(require_permission("student.write")),
 ) -> ExaminerNominationOut:
-    nomination = await _svc(session).nominate_examiner(thesis_id, body.examiner_person_id, body.examiner_type)
+    nomination = await _svc(session).nominate_examiner(
+        thesis_id, body.examiner_person_id, body.examiner_type,
+        affiliation=body.affiliation, conflict_of_interest=body.conflict_of_interest,
+        conflict_note=body.conflict_note,
+    )
     rows = await _svc(session).examiners_for_thesis(thesis_id)
     return ExaminerNominationOut.model_validate(next(r for r in rows if r["id"] == nomination.id))
 
@@ -94,6 +100,18 @@ async def approve_nomination(
     return ExaminerNominationOut.model_validate(next(r for r in rows if r["id"] == nomination.id))
 
 
+@thesis_router.post("/{thesis_id}/viva", response_model=ThesisOut, summary="Schedule the viva")
+async def schedule_viva(
+    thesis_id: uuid.UUID,
+    body: ScheduleVivaRequest,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("student.write")),
+) -> ThesisOut:
+    return ThesisOut.model_validate(
+        await _svc(session).schedule_viva(thesis_id, body.viva_date, body.viva_format, body.location)
+    )
+
+
 @thesis_router.post("/{thesis_id}/examination/outcome", response_model=ThesisOut, summary="Record examination outcome")
 async def record_outcome(
     thesis_id: uuid.UUID,
@@ -102,3 +120,30 @@ async def record_outcome(
     _=Depends(require_permission("student.write")),
 ) -> ThesisOut:
     return ThesisOut.model_validate(await _svc(session).record_outcome(thesis_id, body.outcome, body.viva_date))
+
+
+@thesis_router.get("/{thesis_id}/corrections", response_model=list[CorrectionOut], summary="List corrections")
+async def list_corrections(
+    thesis_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("student.read")),
+) -> list[CorrectionOut]:
+    return [CorrectionOut.model_validate(c) for c in await _svc(session).corrections_for_thesis(thesis_id)]
+
+
+@thesis_router.post("/{thesis_id}/corrections/submit", response_model=CorrectionOut, summary="Submit corrections")
+async def submit_corrections(
+    thesis_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("student.write")),
+) -> CorrectionOut:
+    return CorrectionOut.model_validate(await _svc(session).submit_corrections(thesis_id))
+
+
+@thesis_router.post("/{thesis_id}/corrections/approve", response_model=ThesisOut, summary="Sign off corrections")
+async def approve_corrections(
+    thesis_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_permission("student.write")),
+) -> ThesisOut:
+    return ThesisOut.model_validate(await _svc(session).approve_corrections(thesis_id, principal.user_id))

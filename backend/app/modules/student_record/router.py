@@ -16,8 +16,13 @@ from app.core.pagination import PageParams, list_envelope, page_params
 from app.core.principal import Principal
 from app.db.session import get_session
 from app.modules.student_record.repository import StudentRepository
+from app.modules.student_record.lifecycle import LifecycleService
 from app.modules.student_record.schemas import (
+    LifecycleDecision,
+    LifecycleEventOut,
+    LifecycleEventRequest,
     ResearchProjectOut,
+    ReturnRequest,
     StudentOut,
     StudentSummary,
     StudentUpdate,
@@ -26,6 +31,7 @@ from app.modules.student_record.service import StudentService
 
 router = APIRouter(prefix="/students", tags=["student"])
 programmes_router = APIRouter(prefix="/programmes", tags=["student"])
+lifecycle_router = APIRouter(prefix="/lifecycle-events", tags=["student"])
 
 
 def _svc(session: AsyncSession) -> StudentService:
@@ -111,3 +117,73 @@ async def get_summary(
 ) -> StudentSummary:
     allowed = await scoped_ids(principal, session)
     return StudentSummary.model_validate(await _svc(session).summary(student_id, allowed_ids=allowed))
+
+
+# --- Phase 6.5 — PGR exception lifecycle (suspension / extension / mode change) ---
+
+@router.get("/{student_id}/lifecycle-events", response_model=list[LifecycleEventOut],
+            summary="Suspensions, extensions and mode changes")
+async def list_lifecycle_events(
+    student_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_permission("student.read")),
+) -> list[LifecycleEventOut]:
+    allowed = await scoped_ids(principal, session)
+    if allowed is not None and student_id not in allowed:
+        return []
+    svc = LifecycleService(session)
+    return [LifecycleEventOut.model_validate(svc.out(e)) for e in await svc.events_for_student(student_id)]
+
+
+@router.post("/{student_id}/lifecycle-events", response_model=LifecycleEventOut, status_code=201,
+             summary="Request a suspension, extension or mode change")
+async def request_lifecycle_event(
+    student_id: uuid.UUID,
+    body: LifecycleEventRequest,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_permission("student.write")),
+) -> LifecycleEventOut:
+    svc = LifecycleService(session)
+    event = await svc.request_event(
+        student_id, event_type=body.event_type, reason=body.reason,
+        start_date=body.start_date, end_date=body.end_date,
+        extension_days=body.extension_days, new_mode=body.new_mode,
+        requested_by_user_id=principal.user_id,
+    )
+    return LifecycleEventOut.model_validate(svc.out(event))
+
+
+@router.post("/{student_id}/return", summary="Record a return from suspension")
+async def record_return(
+    student_id: uuid.UUID,
+    body: ReturnRequest | None = None,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("student.write")),
+) -> dict:
+    return await LifecycleService(session).record_return(
+        student_id, returned_on=body.returned_on if body else None
+    )
+
+
+@lifecycle_router.post("/{event_id}/approve", summary="Approve — this is what moves the dates")
+async def approve_lifecycle_event(
+    event_id: uuid.UUID,
+    body: LifecycleDecision | None = None,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_permission("student.lifecycle.approve")),
+) -> dict:
+    return await LifecycleService(session).approve_event(
+        event_id, approver_user_id=principal.user_id, note=body.note if body else None
+    )
+
+
+@lifecycle_router.post("/{event_id}/reject", summary="Reject a lifecycle request")
+async def reject_lifecycle_event(
+    event_id: uuid.UUID,
+    body: LifecycleDecision | None = None,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_permission("student.lifecycle.approve")),
+) -> dict:
+    return await LifecycleService(session).reject_event(
+        event_id, approver_user_id=principal.user_id, note=body.note if body else None
+    )

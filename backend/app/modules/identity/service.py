@@ -34,6 +34,13 @@ def _utc_from_ts(ts: int) -> datetime:
     return datetime.fromtimestamp(ts, tz=timezone.utc)
 
 
+def _aware(dt: datetime | None) -> datetime | None:
+    """Coerce a possibly-naive datetime (SQLite drops tz) to UTC-aware for safe comparison."""
+    if dt is not None and dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
 def _permissions_for(user: User) -> list[str]:
     codes: set[str] = set()
     for role in user.roles:
@@ -79,7 +86,8 @@ class IdentityService:
             raise AuthError("Invalid email or password")
         # Lockout gate (arch §12.1): reject while locked, without revealing account state further.
         now = datetime.now(timezone.utc)
-        if user.locked_until is not None and user.locked_until > now:
+        locked_until = _aware(user.locked_until)
+        if locked_until is not None and locked_until > now:
             raise AuthError("Account temporarily locked. Try again later.")
         if not verify_password(password, user.password_hash):
             user.failed_login_count = (user.failed_login_count or 0) + 1
@@ -108,7 +116,7 @@ class IdentityService:
         # Revocation check: the jti must exist, be unrevoked, and unexpired (arch §12.1).
         stored = await self.repo.get_refresh_token(claims.get("jti", ""))
         now = datetime.now(timezone.utc)
-        if stored is None or stored.revoked_at is not None or stored.expires_at <= now:
+        if stored is None or stored.revoked_at is not None or _aware(stored.expires_at) <= now:
             raise AuthError("Refresh token is no longer valid")
         user = await self.repo.get_user_by_id(uuid.UUID(subject))
         if user is None or not user.is_active:
@@ -152,7 +160,7 @@ class IdentityService:
     async def confirm_password_reset(self, token: str, new_password: str) -> None:
         row = await self.repo.get_reset_token(hash_opaque(token))
         now = datetime.now(timezone.utc)
-        if row is None or row.used_at is not None or row.expires_at <= now:
+        if row is None or row.used_at is not None or _aware(row.expires_at) <= now:
             raise AuthError("Reset link is invalid or expired")
         if len(new_password) < 8:
             raise AuthError("Password must be at least 8 characters")

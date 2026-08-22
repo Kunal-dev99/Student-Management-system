@@ -16,6 +16,7 @@ import {
 } from '@/features/thesis/api'
 import { useCompletion, useConfirmCompletion, useGraduate } from './api'
 import { ExaminersSection } from '@/features/thesis/ExaminersSection'
+import { VivaSection } from '@/features/thesis/VivaSection'
 
 const OUTCOMES: ExaminationOutcome[] = ['pass', 'pass_with_corrections', 'major_corrections', 'resubmission', 'fail']
 const THESIS_VARIANT = (s: string) =>
@@ -27,7 +28,7 @@ export function ThesisCompletionPanel({ studentId }: { studentId: string }) {
   const completionQ = useCompletion(studentId)
   const declare = useDeclareIntention(studentId)
   const submit = useSubmitThesis(studentId)
-  const outcome = useRecordOutcome(studentId)
+  const outcome = useRecordOutcome(studentId, thesisQ.data?.id)
   const confirm = useConfirmCompletion(studentId)
   const graduate = useGraduate(studentId)
   const [oc, setOc] = useState<ExaminationOutcome | ''>('')
@@ -80,6 +81,11 @@ export function ThesisCompletionPanel({ studentId }: { studentId: string }) {
 
           {/* Examiners (once the thesis is submitted) */}
           {t?.submittedAt && <ExaminersSection studentId={studentId} thesisId={t.id} />}
+
+          {/* Viva scheduling + corrections period (Phase 4B.4) */}
+          {t?.submittedAt && (
+            <VivaSection studentId={studentId} thesisId={t.id} examination={t.examination} />
+          )}
 
           {/* Completion */}
           <div className="pt-3 border-t border-border">

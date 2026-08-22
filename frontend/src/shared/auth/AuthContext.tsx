@@ -12,6 +12,7 @@ import {
 import {
   api,
   rawLogin,
+  rawLogout,
   rawRefresh,
   setAccessToken,
   setOnAuthFailure,
@@ -64,6 +65,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const logout = useCallback(() => {
+    // Best-effort server-side revocation before dropping local tokens (arch §12.1).
+    const rt = refreshToken.current ?? (typeof window !== 'undefined' ? localStorage.getItem(REFRESH_KEY) : null)
+    if (rt) void rawLogout(rt)
     setAccessToken(null)
     refreshToken.current = null
     try { localStorage.removeItem(REFRESH_KEY) } catch {}

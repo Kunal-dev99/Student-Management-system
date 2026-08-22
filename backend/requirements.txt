@@ -19,6 +19,15 @@ APScheduler==3.11.0        # background worker: periodic scheduled jobs + outbox
 python-multipart==0.0.20   # FastAPI file uploads (document storage)
 aiosmtplib==3.0.2          # async SMTP email delivery (notifications)
 
+# Phase 5 — "Ask PGR" assistant. Needs ANTHROPIC_API_KEY; without one the assistant still
+# serves the deterministic path (lookups + navigation).
+anthropic==0.40.0
+
+# Pattern Lab PL-3 — the [ml] extra (plan: docs/PGR_PATTERN_LAB_PLAN.md §4). OPTIONAL:
+# the platform runs fully without it; only model training/scoring needs it. Deliberately
+# sklearn-only — no pandas (plain lists suffice at institutional scale), no XGBoost/AutoML.
+scikit-learn==1.9.0
+
 # Dev / test
 pytest==8.3.4
 pytest-asyncio==0.25.0

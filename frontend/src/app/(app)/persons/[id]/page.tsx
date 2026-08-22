@@ -2,12 +2,12 @@
 
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, User, Layers, Activity } from 'lucide-react'
+import { ArrowLeft, User, Activity } from 'lucide-react'
 import { PageHeader } from '@/components/common/PageHeader'
 import { PageSection } from '@/components/common/PageSection'
 import { Skeleton } from '@/components/ui/skeleton'
 import { usePerson, usePersonTimeline } from '@/features/persons/api'
-import { RelationshipBadge } from '@/features/persons/RelationshipBadge'
+import { IdentitiesSection } from '@/features/persons/IdentitiesSection'
 
 function Field({ label, value }: { label: string; value: string | null | undefined }) {
   return (
@@ -52,25 +52,7 @@ export default function PersonDetailPage() {
           )}
         </PageSection>
 
-        <PageSection icon={Layers} title="Identities over time" accent="accent">
-          {p?.relationships.length ? (
-            <div className="space-y-2">
-              {p.relationships
-                .slice()
-                .sort((a, b) => a.validFrom.localeCompare(b.validFrom))
-                .map((r) => (
-                  <div key={r.id} className="flex items-center justify-between border-b border-border/60 last:border-0 pb-2 last:pb-0">
-                    <RelationshipBadge type={r.relationshipType} current={r.validTo === null} />
-                    <span className="text-sm text-muted-foreground num">
-                      {r.validFrom} → {r.validTo ?? 'current'}
-                    </span>
-                  </div>
-                ))}
-            </div>
-          ) : (
-            <p className="text-helper">No identities recorded.</p>
-          )}
-        </PageSection>
+        <IdentitiesSection personId={id} />
 
         <PageSection icon={Activity} title="Lifecycle timeline" accent="primary">
           {timeline.isLoading ? (

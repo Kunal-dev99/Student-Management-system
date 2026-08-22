@@ -14,8 +14,6 @@ from datetime import datetime, timezone
 
 from jose import JWTError
 from sqlalchemy.ext.asyncio import AsyncSession
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.requests import Request
 
 from app.core.database import SessionFactory
 from app.core.security import decode_token
@@ -58,8 +56,7 @@ def parse_entity(path: str) -> tuple[str | None, uuid.UUID | None]:
     return entity_type, _first_uuid(segs)
 
 
-def _actor_from_request(request: Request) -> tuple[uuid.UUID | None, str | None]:
-    auth = request.headers.get("Authorization", "")
+def _actor_from_auth_header(auth: str) -> tuple[uuid.UUID | None, str | None]:
     if not auth.startswith("Bearer "):
         return None, None
     try:
@@ -91,42 +88,71 @@ async def record_audit(
     ))
 
 
-class AuditMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        response = await call_next(request)
+class AuditMiddleware:
+    """Pure ASGI middleware (see `core/middleware` for why not BaseHTTPMiddleware).
+
+    Observes the response status by wrapping `send`, then writes one audit row per successful
+    state-changing request. Never buffers the body and never spawns a task group.
+    """
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+
+        method = scope.get("method", "")
+        path = scope.get("path", "")
+        auditable = (
+            method in MUTATING
+            and path.startswith("/api/")
+            and not any(path.startswith(p) for p in SKIP_PREFIXES)
+        )
+        if not auditable:
+            return await self.app(scope, receive, send)
+
+        status_code = 500
+
+        async def send_wrapper(message):
+            nonlocal status_code
+            if message["type"] == "http.response.start":
+                status_code = message["status"]
+            await send(message)
+
+        await self.app(scope, receive, send_wrapper)
+
+        if status_code >= 400:
+            return
         try:
-            if (
-                request.method in MUTATING
-                and response.status_code < 400
-                and not any(request.url.path.startswith(p) for p in SKIP_PREFIXES)
-                and request.url.path.startswith("/api/")
-            ):
-                actor_id, actor_email = _actor_from_request(request)
-                entity_type, entity_id = parse_entity(request.url.path)
-                row = AuditLog(
-                    actor_user_id=actor_id, actor_email=actor_email,
-                    action=f"{request.method} {request.url.path}", method=request.method,
-                    entity_type=entity_type, entity_id=entity_id,
-                    status_code=response.status_code,
-                    request_id=getattr(request.state, "request_id", None),
-                    detail=None, created_at=datetime.now(timezone.utc),
-                )
-                # Use the same DB the request used. Under test, get_session is overridden with an
-                # in-memory engine; honouring that keeps audit correct and avoids writing to the
-                # live DB. In production there is no override, so we use the app SessionFactory.
-                override = request.app.dependency_overrides.get(get_session)
-                if override is not None:
-                    agen = override()
-                    session = await agen.__anext__()
-                    try:
-                        session.add(row)
-                        await session.commit()
-                    finally:
-                        await agen.aclose()
-                else:
-                    async with SessionFactory() as session:
-                        session.add(row)
-                        await session.commit()
+            headers = dict(scope.get("headers") or [])
+            raw_auth = headers.get(b"authorization", b"")
+            actor_id, actor_email = _actor_from_auth_header(raw_auth.decode("latin-1"))
+            entity_type, entity_id = parse_entity(path)
+            row = AuditLog(
+                actor_user_id=actor_id, actor_email=actor_email,
+                action=f"{method} {path}", method=method,
+                entity_type=entity_type, entity_id=entity_id,
+                status_code=status_code,
+                request_id=(scope.get("state") or {}).get("request_id"),
+                detail=None, created_at=datetime.now(timezone.utc),
+            )
+            # Use the same DB the request used. Under test, get_session is overridden with an
+            # in-memory engine; honouring that keeps audit correct and avoids writing to the
+            # live DB. In production there is no override, so we use the app SessionFactory.
+            app_obj = scope.get("app")
+            override = getattr(app_obj, "dependency_overrides", {}).get(get_session) if app_obj else None
+            if override is not None:
+                agen = override()
+                session = await agen.__anext__()
+                try:
+                    session.add(row)
+                    await session.commit()
+                finally:
+                    await agen.aclose()
+            else:
+                async with SessionFactory() as session:
+                    session.add(row)
+                    await session.commit()
         except Exception:  # auditing must never break the request
             logger.warning("audit write failed", exc_info=True)
-        return response

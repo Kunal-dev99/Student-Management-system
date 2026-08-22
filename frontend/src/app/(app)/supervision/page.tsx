@@ -9,11 +9,16 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Skeleton } from '@/components/ui/skeleton'
 import { useAuth } from '@/shared/auth/AuthContext'
 import { useSupervisorDashboard } from '@/features/reporting/api'
+import { useCaseload } from '@/features/supervision/api'
 
 export default function SupervisionPage() {
   const { principal } = useAuth()
   const { data, isLoading } = useSupervisorDashboard()
   const caseload = data?.caseload ?? []
+  // The dashboard read-model carries milestone/funding/risk; the supervision module carries
+  // the meeting-log health (Phase 4B.5). Join them by studentId.
+  const meetingHealth = useCaseload(principal?.personId)
+  const health = new Map((meetingHealth.data ?? []).map((c) => [c.studentId, c]))
 
   return (
     <>
@@ -36,6 +41,8 @@ export default function SupervisionPage() {
                     <TableHead>Student</TableHead>
                     <TableHead>Current milestone</TableHead>
                     <TableHead>Funding</TableHead>
+                    <TableHead>Last meeting</TableHead>
+                    <TableHead>Supervision record</TableHead>
                     <TableHead>Risk</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -55,6 +62,14 @@ export default function SupervisionPage() {
                       </TableCell>
                       <TableCell>
                         <Badge variant={c.funding === 'active' ? 'success' : 'warning'}>{c.funding}</Badge>
+                      </TableCell>
+                      <TableCell className="num whitespace-nowrap">
+                        {health.get(c.studentId)?.lastMeetingOn ?? '—'}
+                      </TableCell>
+                      <TableCell>
+                        {health.get(c.studentId)?.meetingOverdue
+                          ? <Badge variant="warning">meetings overdue</Badge>
+                          : <Badge variant="success">up to date</Badge>}
                       </TableCell>
                       <TableCell>
                         {c.risk ? (

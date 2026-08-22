@@ -29,6 +29,81 @@ export function useDispatch() {
   })
 }
 
+/* ------------------------------------------------------------------ *
+ * Reconciliation (Phase 7 R3) — "is the boundary healthy, and what
+ * needs a human?" Backed by GET /integration/reconciliation.
+ * ------------------------------------------------------------------ */
+
+export interface DeadLetter {
+  id: string
+  eventType: string
+  attempts: number
+  lastError: string | null
+  createdAt: string | null
+}
+
+export interface FailedInbound {
+  id: string
+  system: string
+  eventType: string
+  sourceId: string | null
+  error: string | null
+  createdAt: string | null
+}
+
+export interface UnmatchedHrRecord {
+  taskId: string
+  title: string
+  /** Free-form task payload; keys seen so far: givenName, familyName, email, reason. */
+  payload: Record<string, unknown> | null
+  createdAt: string | null
+}
+
+/** status -> count. A system may report only one direction, so both are optional. */
+export type StatusCounts = Record<string, number>
+export interface SystemTraffic {
+  inbound?: StatusCounts
+  outbound?: StatusCounts
+}
+
+export interface ReconciliationReport {
+  windowDays: number
+  outbound: {
+    pending: number
+    dispatchedInWindow: number
+    deadLettered: number
+    oldestPendingAt: string | null
+    deadLetters: DeadLetter[]
+  }
+  inbound: {
+    bySystem: Record<string, SystemTraffic>
+    failed: FailedInbound[]
+  }
+  awaitingPeople: { unmatchedHrRecords: UnmatchedHrRecord[] }
+  healthy: boolean
+  issueCount: number
+}
+
+export const useReconciliation = (windowDays = 30) =>
+  useQuery({
+    queryKey: ['integration', 'reconciliation', windowDays],
+    queryFn: () => api.get<ReconciliationReport>(`/integration/reconciliation?windowDays=${windowDays}`),
+    refetchInterval: 60_000,
+  })
+
+/** Reset a dead-lettered outbox event so the next dispatch retries it. */
+export function useReplayDeadLetter() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (eventId: string) =>
+      api.post<{ data: { replayed: boolean } }>(`/integration/dead-letters/${eventId}/replay`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['integration'] })
+      qc.invalidateQueries({ queryKey: ['integration', 'reconciliation'] })
+    },
+  })
+}
+
 export interface ScheduledRunResult {
   milestonesGenerated: number
   fundingExpiringFlagged: number

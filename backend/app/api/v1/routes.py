@@ -11,6 +11,7 @@ from app.modules.recruitment.router import app_router as application_router
 from app.modules.recruitment.router import opp_router, pipeline_router
 from app.modules.student_record.router import router as student_router
 from app.modules.student_record.router import programmes_router
+from app.modules.student_record.router import lifecycle_router
 from app.modules.supervision.router import student_scoped as supervision_student_router
 from app.modules.supervision.router import sup_router
 from app.modules.progression.router import (
@@ -38,9 +39,21 @@ from app.modules.integration.router import router as integration_router
 from app.modules.scheduler.router import router as scheduler_router
 from app.modules.portal.router import router as portal_router
 from app.modules.exports.router import router as exports_router
+from app.modules.exports.router import profiles_router as report_profiles_router
 from app.modules.documents.router import router as documents_router
 from app.modules.notifications.router import router as notification_prefs_router
 from app.modules.audit.router import router as audit_router
+from app.modules.assistant.router import router as assistant_router
+from app.modules.identity.admin_router import admin_router
+from app.modules.pattern_lab.router import router as pattern_lab_router
+from app.modules.settings.router import reference_router, settings_router
+from app.modules.research.router import (
+    areas_router,
+    awards_router,
+    demand_router,
+    lineage_router,
+    matching_router,
+)
 
 api_router = APIRouter()
 
@@ -63,6 +76,7 @@ api_router.include_router(offer_router)
 # Student record
 api_router.include_router(student_router)
 api_router.include_router(programmes_router)
+api_router.include_router(lifecycle_router)
 
 # Supervision
 api_router.include_router(supervision_student_router)
@@ -107,8 +121,23 @@ api_router.include_router(portal_router)
 
 # Exports (statutory)
 api_router.include_router(exports_router)
+api_router.include_router(report_profiles_router)
 
 # Phase 4A — documents, notification preferences, audit trail
 api_router.include_router(documents_router)
 api_router.include_router(notification_prefs_router)
 api_router.include_router(audit_router)
+
+# Phase 5 — "Ask PGR" assistant (read-only, admin pilot)
+api_router.include_router(assistant_router)
+
+# Phase 6.1 — research context: awards, demand, and position lineage
+api_router.include_router(awards_router)
+api_router.include_router(demand_router)
+api_router.include_router(lineage_router)
+api_router.include_router(matching_router)
+api_router.include_router(areas_router)
+api_router.include_router(settings_router)
+api_router.include_router(reference_router)
+api_router.include_router(admin_router)
+api_router.include_router(pattern_lab_router)

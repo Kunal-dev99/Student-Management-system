@@ -47,6 +47,40 @@ class ExportService:
         await self.session.refresh(job)
         return job
 
+    async def run_statutory_profile(self, profile_id) -> dict:
+        """Phase 6.6 — run a configured statutory profile as an export job.
+
+        The validation report travels with the job, so an administrator sees what is wrong
+        *before* the file is submitted anywhere.
+        """
+        from app.modules.exports.statutory import StatutoryEngine
+
+        engine = StatutoryEngine(self.session)
+        result = await engine.generate(profile_id)
+
+        buf = io.StringIO()
+        w = csv.writer(buf)
+        w.writerow(result["header"])
+        w.writerows(result["rows"])
+        profile = result["profile"]
+        stamp = _now().strftime("%Y%m%d")
+        filename = f"{profile['code'].lower()}_{profile['academicYear'].replace('/', '-')}_{stamp}.csv"
+
+        job = ExportJob(
+            kind=f"statutory:{profile['code']}", status=ExportStatus.complete,
+            filename=filename, row_count=result["rowCount"], content=buf.getvalue(),
+            created_at=_now(), completed_at=_now(),
+        )
+        self.session.add(job)
+        await self.session.commit()
+        await self.session.refresh(job)
+        return {
+            "job": {"id": str(job.id), "filename": job.filename, "rowCount": job.row_count,
+                    "status": job.status.value},
+            "profile": profile,
+            "validation": result["validation"],
+        }
+
     async def _run_students_statutory(self) -> tuple[str, int, str]:
         # One population, statutory fields (arch §13.2 statutory lens).
         programmes = {p.id: p.name for p in (await self.session.execute(select(Programme))).scalars().all()}
@@ -61,11 +95,19 @@ class ExportService:
         rows = (await self.session.execute(
             select(Student, Person).join(Person, Person.id == Student.person_id).order_by(Student.student_ref)
         )).all()
+        # Phase 6.2 — how each student entered (opportunity-led vs student-led) is a statutory
+        # dimension, not just an internal detail.
+        from app.modules.recruitment.models import Application
+
+        entry_routes: dict = {}
+        for a in (await self.session.execute(select(Application))).scalars().unique().all():
+            entry_routes.setdefault(a.person_id, a.route.value if hasattr(a.route, "value") else a.route)
 
         buf = io.StringIO()
         w = csv.writer(buf)
         w.writerow(["student_ref", "given_name", "family_name", "nationality", "programme",
-                    "status", "study_mode", "start_date", "expected_end_date", "funding_type"])
+                    "status", "study_mode", "start_date", "expected_end_date", "funding_type",
+                    "entry_route"])
         for student, person in rows:
             w.writerow([
                 student.student_ref, person.given_name, person.family_name, person.nationality or "",
@@ -73,6 +115,7 @@ class ExportService:
                 student.start_date.isoformat() if student.start_date else "",
                 student.expected_end_date.isoformat() if student.expected_end_date else "",
                 active_funding.get(student.id, ""),
+                entry_routes.get(student.person_id, ""),
             ])
         stamp = _now().strftime("%Y%m%d")
         return f"students_statutory_{stamp}.csv", len(rows), buf.getvalue()

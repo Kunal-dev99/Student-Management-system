@@ -31,6 +31,8 @@ class SchedulerService:
 
     async def run_all(self) -> dict:
         return {
+            # Returns come first: a student who returned today should be chased normally again.
+            "studentsReturnedFromSuspension": await self._auto_return_suspensions(),
             "milestonesGenerated": await self._generate_due_milestones(),
             "fundingExpiringFlagged": await self._flag_funding_expiring(),
             "overdueTasksEscalated": await self._escalate_overdue_tasks(),
@@ -38,6 +40,20 @@ class SchedulerService:
             "viewsRefreshed": "n/a (dashboards computed on demand)",
             "ranAt": datetime.now(timezone.utc).isoformat(),
         }
+
+    async def _auto_return_suspensions(self) -> int:
+        from app.modules.student_record.lifecycle import LifecycleService
+
+        return await LifecycleService(self.session).auto_return_due()
+
+    async def _paused_student_ids(self) -> set:
+        """Students who are suspended or on leave — they must not be chased (Phase 6.5)."""
+        from app.modules.student_record.constants import PAUSED_STATUSES
+
+        rows = await self.session.execute(
+            select(Student.id).where(Student.status.in_(list(PAUSED_STATUSES)))
+        )
+        return {r[0] for r in rows.all()}
 
     async def _deliver_notifications(self) -> int:
         # Real delivery: in-app -> sent, plus best-effort email per the recipient's preferences.
@@ -72,8 +88,11 @@ class SchedulerService:
         )
         arrangements = (await self.session.execute(stmt)).scalars().all()
         engine = WorkflowEngine(self.session)
+        paused = await self._paused_student_ids()
         flagged = 0
         for fa in arrangements:
+            if fa.student_id in paused:
+                continue  # suspended/on-leave students are not chased about funding
             # Dedup: skip if an open task already exists for this arrangement.
             open_task = (await self.session.execute(
                 select(Task).where(
@@ -101,7 +120,13 @@ class SchedulerService:
             Task.status.in_([TaskStatus.open, TaskStatus.in_progress]),
         )
         tasks = (await self.session.execute(stmt)).scalars().all()
+        paused = {str(sid) for sid in await self._paused_student_ids()}
+        escalated = 0
         for t in tasks:
+            # Don't escalate work about a student whose journey is paused (Phase 6.5).
+            if paused and str((t.payload or {}).get("studentId") or "") in paused:
+                continue
             t.status = TaskStatus.blocked  # escalation: flag for attention
+            escalated += 1
         await self.session.commit()
-        return len(tasks)
+        return escalated

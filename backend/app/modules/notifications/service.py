@@ -72,14 +72,20 @@ class NotificationService:
 
     async def deliver_queued(self, limit: int = 200) -> dict:
         """Flush queued notifications: in-app becomes 'sent'; email sent when the user allows it."""
+        from app.modules.settings.service import setting_value
+
         rows = (await self.session.execute(
             select(Notification).where(Notification.status == NotificationStatus.queued).limit(limit)
         )).scalars().all()
+        # Phase 8 — the institution kill-switch beats personal preferences: off means in-app
+        # only, platform-wide, regardless of what individuals opted into.
+        institution_email = await setting_value(self.session, "email.enabled")
+        from_name = await setting_value(self.session, "email.from_name")
         emailed = 0
         for n in rows:
             n.status = NotificationStatus.sent  # in-app is now visible
             pref = await self._preference(n.recipient_user_id)
-            email_ok = (pref is None or pref.email_enabled)
+            email_ok = institution_email and (pref is None or pref.email_enabled)
             muted = bool(pref and n.template in (pref.muted_events or []))
             if email_ok and not muted:
                 user = (await self.session.execute(
@@ -88,7 +94,7 @@ class NotificationService:
                 if user and user.email:
                     subject, body = _render(n.template, n.payload)
                     try:
-                        await send_email(to=user.email, subject=subject, body=body)
+                        await send_email(to=user.email, subject=subject, body=body, from_name=from_name)
                         emailed += 1
                     except Exception:  # email is best-effort; in-app already delivered
                         logger.warning("email delivery failed for notification %s", n.id, exc_info=True)

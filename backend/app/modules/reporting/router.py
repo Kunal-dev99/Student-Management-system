@@ -23,6 +23,22 @@ async def pgr_enterprise_360(
     return await AnalyticsService(session).enterprise_360()
 
 
+@reports_router.get("/funding-integrity", summary="Students whose funding chain has problems")
+async def funding_integrity(
+    severity: str | None = None,
+    session: AsyncSession = Depends(get_read_session),
+    principal: Principal = Depends(require_permission("funding.read")),
+) -> dict:
+    """Phase 6.3 — cohort-wide funding lineage validation, row-scoped like every other read."""
+    from app.modules.funding.lineage import FundingLineageService
+    from app.modules.student_record.router import scoped_ids
+
+    allowed = await scoped_ids(principal, session)
+    return await FundingLineageService(session).cohort_integrity(
+        allowed_ids=allowed, severity=severity
+    )
+
+
 @reports_router.get("/analytics", summary="Risk, completion, and forecasting analytics")
 async def analytics(
     session: AsyncSession = Depends(get_read_session),

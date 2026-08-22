@@ -25,5 +25,9 @@ export function useCreateExport() {
   })
 }
 
-export const downloadExport = (job: ExportJob) =>
+/**
+ * Any completed job downloads the same way, so this takes the minimum it needs — a
+ * statutory profile run (Phase 6.6) returns a job stub, not a full ExportJob.
+ */
+export const downloadExport = (job: Pick<ExportJob, 'id' | 'filename'>) =>
   downloadFile(`/exports/${job.id}/download`, job.filename ?? 'export.csv')

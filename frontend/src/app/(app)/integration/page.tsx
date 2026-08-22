@@ -9,6 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Skeleton } from '@/components/ui/skeleton'
 import { useToast } from '@/components/ui/use-toast'
 import { useDispatch, useIntegration, useRunScheduledJobs } from '@/features/integration/api'
+import { ReconciliationPanel } from '@/features/integration/ReconciliationPanel'
 import { downloadExport, useCreateExport, useExports } from '@/features/exports/api'
 
 const STATUS: Record<string, 'success' | 'secondary' | 'destructive' | 'outline'> = {
@@ -27,6 +28,9 @@ export default function IntegrationPage() {
     <>
       <PageHeader title="Integration hub" description="Outbox dispatcher, adapters, and inbound webhooks." />
       <div className="px-6 pb-6 space-y-4">
+        {/* "What needs my attention" first — reconciliation before the controls. */}
+        <ReconciliationPanel />
+
         <PageSection icon={Send} title="Outbox dispatcher" accent="primary">
           <div className="flex items-center gap-3">
             <span className="text-sm">Pending events</span>

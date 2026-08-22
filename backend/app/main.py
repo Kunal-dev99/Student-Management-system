@@ -25,10 +25,11 @@ def create_app() -> FastAPI:
         docs_url=f"{settings.api_v1_prefix}/docs",
     )
 
-    # Order matters: RequestContextMiddleware is added first so it runs *inside* AuditMiddleware,
-    # setting request.state.request_id before the audit row is written on the way out (arch §17).
-    app.add_middleware(RequestContextMiddleware)
+    # Both are pure ASGI middleware (not BaseHTTPMiddleware) — see core/middleware for why.
+    # Order matters: RequestContextMiddleware is added last so it runs *outermost*, stamping
+    # request_id into the scope before AuditMiddleware reads it on the way out (arch §17).
     app.add_middleware(AuditMiddleware)
+    app.add_middleware(RequestContextMiddleware)
     register_error_handlers(app)
 
     # Liveness: process is up. No dependencies checked (arch §18).

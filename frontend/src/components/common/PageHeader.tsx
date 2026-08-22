@@ -32,6 +32,7 @@ const ROUTE_LABELS: Record<string, string> = {
   configurations: 'Configurations',
   users: 'Users',
   settings: 'Settings',
+  'pattern-lab': 'Pattern Lab',
   profile: 'Profile',
   standard: 'Standard',
   fp: 'FP',

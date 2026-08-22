@@ -98,6 +98,8 @@ export const api = {
     request<T>(path, { method: 'POST', body: body ? JSON.stringify(body) : undefined }),
   patch: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: 'PATCH', body: body ? JSON.stringify(body) : undefined }),
+  put: <T>(path: string, body?: unknown) =>
+    request<T>(path, { method: 'PUT', body: body ? JSON.stringify(body) : undefined }),
   del: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
 }
 
@@ -127,6 +129,48 @@ export async function downloadFile(path: string, filename: string): Promise<void
   a.click()
   a.remove()
   URL.revokeObjectURL(url)
+}
+
+// Upload a file via multipart/form-data. Does NOT set Content-Type (the browser adds the
+// multipart boundary). Retries once through the refresh handler on a 401, like `request`.
+export async function uploadFile<T>(path: string, form: FormData): Promise<T> {
+  const doFetch = (token: string | null) => {
+    const headers = new Headers({ Accept: 'application/json' })
+    if (token) headers.set('Authorization', `Bearer ${token}`)
+    return fetch(`${API_BASE}${path}`, { method: 'POST', body: form, headers })
+  }
+  let res = await doFetch(accessToken)
+  if (res.status === 401 && refreshHandler) {
+    const newToken = await refreshHandler()
+    if (newToken) res = await doFetch(newToken)
+  }
+  const payload = await res.json().catch(() => null)
+  if (!res.ok) {
+    const body: ApiErrorBody = payload?.error ?? {
+      code: 'error', message: res.statusText || 'Upload failed',
+      requestId: res.headers.get('X-Request-ID') ?? 'unknown', details: [],
+    }
+    if (res.status === 401 && onAuthFailure) onAuthFailure()
+    throw new ApiError(res.status, body)
+  }
+  return payload as T
+}
+
+// Best-effort server-side revocation of a refresh token (logout). Never throws.
+export async function rawLogout(refreshToken: string): Promise<void> {
+  try {
+    await raw('/auth/logout', { method: 'POST', body: JSON.stringify({ refreshToken }) }, null)
+  } catch {
+    /* logout is best-effort; the client drops its tokens regardless */
+  }
+}
+
+// Password reset (unauthenticated). Both always resolve; the API never reveals account state.
+export async function rawPasswordResetRequest(email: string): Promise<void> {
+  await raw('/auth/password-reset/request', { method: 'POST', body: JSON.stringify({ email }) }, null)
+}
+export async function rawPasswordResetConfirm(token: string, newPassword: string): Promise<Response> {
+  return raw('/auth/password-reset/confirm', { method: 'POST', body: JSON.stringify({ token, newPassword }) }, null)
 }
 
 // Health lives outside /api/v1 (arch §18). Used by the connectivity banner.

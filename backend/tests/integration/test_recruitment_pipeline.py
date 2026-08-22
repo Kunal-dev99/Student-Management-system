@@ -134,8 +134,10 @@ async def test_applicant_converts_to_student_same_person_id(ctx):
 @pytest.mark.asyncio
 async def test_cannot_accept_unissued_offer(ctx):
     client, h, person_id = ctx
+    # A student-led application must carry its research intent (route integrity, Phase 6.0).
     r = await client.post("/api/v1/applications", headers=h,
-                          json={"personId": person_id, "route": "student_led"})
+                          json={"personId": person_id, "route": "student_led",
+                                "proposalDocumentRef": "proposal.pdf"})
     app_id = r.json()["id"]
     r = await client.post(f"/api/v1/applications/{app_id}/offer", headers=h, json={})
     offer_id = r.json()["id"]

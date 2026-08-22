@@ -2,8 +2,9 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { Megaphone, Plus } from 'lucide-react'
+import { AlertTriangle, GitBranch, Megaphone, Plus } from 'lucide-react'
 import { PageHeader } from '@/components/common/PageHeader'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -22,6 +23,7 @@ import {
   useTransitionOpportunity, type OpportunityStatus,
 } from '@/features/recruitment/api'
 import { OpportunityPill, StagePill } from '@/features/recruitment/StatusPills'
+import { useAwards, useDemands, usePositionLineage } from '@/features/research/api'
 
 // Allowed opportunity transitions (mirrors the backend FSM, arch §8.4).
 const OPP_NEXT: Record<OpportunityStatus, OpportunityStatus[]> = {
@@ -64,10 +66,14 @@ const STAGE_ORDER = [
 function NewOpportunityDialog() {
   const { toast } = useToast()
   const create = useCreateOpportunity()
+  const demands = useDemands()
+  const awards = useAwards()
   const [open, setOpen] = useState(false)
   const [title, setTitle] = useState('')
   const [stipend, setStipend] = useState('')
   const [eligibility, setEligibility] = useState('')
+  const [demandId, setDemandId] = useState('')
+  const [awardId, setAwardId] = useState('')
 
   const submit = async () => {
     try {
@@ -76,9 +82,11 @@ function NewOpportunityDialog() {
         stipendAmount: stipend ? Number(stipend) : undefined,
         currency: stipend ? 'GBP' : undefined,
         eligibility: eligibility || undefined,
+        researchDemandId: demandId || undefined,
+        researchAwardId: awardId || undefined,
       })
       toast({ title: 'Opportunity created' })
-      setOpen(false); setTitle(''); setStipend(''); setEligibility('')
+      setOpen(false); setTitle(''); setStipend(''); setEligibility(''); setDemandId(''); setAwardId('')
     } catch (e) {
       toast({ title: 'Could not create', description: (e as Error).message, variant: 'destructive' })
     }
@@ -104,12 +112,128 @@ function NewOpportunityDialog() {
             <Label htmlFor="e">Eligibility (optional)</Label>
             <Input id="e" value={eligibility} onChange={(e) => setEligibility(e.target.value)} placeholder="2:1 or higher…" />
           </div>
+          {/* Provenance (Phase 6.1) — link the position back to the need and the money. */}
+          <div className="space-y-1.5">
+            <Label>Research demand (optional)</Label>
+            <Select value={demandId} onValueChange={setDemandId}>
+              <SelectTrigger><SelectValue placeholder="Not linked to a demand" /></SelectTrigger>
+              <SelectContent>
+                {demands.data?.map((d) => (
+                  <SelectItem key={d.id} value={d.id}>{d.title} ({d.status})</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Research award (optional)</Label>
+            <Select value={awardId} onValueChange={setAwardId}>
+              <SelectTrigger><SelectValue placeholder="Not linked to an award" /></SelectTrigger>
+              <SelectContent>
+                {awards.data?.map((a) => (
+                  <SelectItem key={a.id} value={a.id}>{a.awardRef} — {a.title}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
         <DialogFooter>
           <Button onClick={submit} disabled={!title || create.isPending}>
             {create.isPending ? 'Creating…' : 'Create'}
           </Button>
         </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/** One hop in the provenance chain. A missing hop is shown, not hidden. */
+function LineageHop({ label, value, detail }: { label: string; value: string | null; detail?: string }) {
+  return (
+    <div className="flex items-baseline gap-3 py-1.5 border-b border-border last:border-0">
+      <span className="text-label w-28 shrink-0">{label}</span>
+      {value ? (
+        <span className="text-sm">
+          {value}
+          {detail && <span className="text-muted-foreground"> — {detail}</span>}
+        </span>
+      ) : (
+        <span className="text-sm text-muted-foreground italic">not linked</span>
+      )}
+    </div>
+  )
+}
+
+function LineageDialog({ opportunityId, title }: { opportunityId: string; title: string }) {
+  const [open, setOpen] = useState(false)
+  // Only fetch while the dialog is open; the query is disabled otherwise.
+  const lineage = usePositionLineage(open ? opportunityId : null)
+  const l = lineage.data
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button size="sm" variant="ghost"><GitBranch className="h-4 w-4 mr-1" /> Lineage</Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader><DialogTitle>Provenance — {title}</DialogTitle></DialogHeader>
+        {lineage.isLoading && <Skeleton className="h-40 w-full" />}
+        {lineage.isError && (
+          <p className="text-sm text-destructive">{(lineage.error as Error).message}</p>
+        )}
+        {l && (
+          <div className="space-y-4">
+            <div>
+              <LineageHop label="Award" value={l.award ? l.award.awardRef : null} detail={l.award?.title} />
+              <LineageHop label="Funder" value={l.funder?.name ?? null} />
+              <LineageHop label="Demand" value={l.demand?.title ?? null}
+                detail={l.demand ? `${l.demand.requestedPlaces} place(s), ${l.demand.status}` : undefined} />
+              <LineageHop label="Position" value={l.position.title}
+                detail={`${l.position.positionsFilled}/${l.position.positionsAvailable} filled, ${l.position.positionsRemaining} remaining`} />
+            </div>
+
+            <div>
+              <p className="text-label mb-1.5">
+                Students produced <span className="num">({l.studentsProduced})</span>
+              </p>
+              {l.applications.length === 0 ? (
+                <p className="text-helper">No applications have been made against this position.</p>
+              ) : (
+                <ul className="space-y-1">
+                  {l.applications.map((a) => (
+                    <li key={a.applicationId} className="text-sm flex items-center gap-2">
+                      <Badge variant="secondary">{a.stage.replace(/_/g, ' ')}</Badge>
+                      {a.student ? (
+                        <Link
+                          href={a.student.link}
+                          // Close first: a mounted Radix dialog would otherwise sit over the new page.
+                          onClick={() => setOpen(false)}
+                          className="font-medium text-primary hover:underline"
+                        >
+                          {a.student.personName}
+                          <span className="font-mono text-xs text-muted-foreground"> {a.student.studentRef}</span>
+                        </Link>
+                      ) : (
+                        <span className="text-muted-foreground">
+                          application {a.applicationId.slice(0, 8)}… — no student record yet
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            {l.gaps.length > 0 && (
+              <div className="rounded-md border border-[hsl(var(--warning)/0.3)] bg-[hsl(var(--warning)/0.1)] p-3 space-y-1">
+                {l.gaps.map((g) => (
+                  <p key={g} className="text-sm text-[hsl(var(--warning))] flex items-start gap-2">
+                    <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" /> {g}
+                  </p>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   )
@@ -125,12 +249,13 @@ function OpportunitiesTab() {
           <TableHeader>
             <TableRow>
               <TableHead>Title</TableHead><TableHead>Stipend</TableHead>
-              <TableHead>Positions</TableHead><TableHead>Status</TableHead>
+              <TableHead>Places</TableHead><TableHead>Status</TableHead>
+              <TableHead className="text-right">Provenance</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {isLoading && (
-              <TableRow><TableCell colSpan={4}><Skeleton className="h-5 w-full" /></TableCell></TableRow>
+              <TableRow><TableCell colSpan={5}><Skeleton className="h-5 w-full" /></TableCell></TableRow>
             )}
             {data?.data.map((o) => (
               <TableRow key={o.id}>
@@ -138,12 +263,20 @@ function OpportunitiesTab() {
                 <TableCell className="num text-muted-foreground">
                   {o.stipendAmount ? `${o.currency ?? ''} ${Number(o.stipendAmount).toLocaleString()}` : '—'}
                 </TableCell>
-                <TableCell className="num">{o.positionsAvailable}</TableCell>
+                <TableCell>
+                  <div className="flex items-center gap-2">
+                    <span className="num">{o.positionsFilled ?? 0} / {o.positionsAvailable}</span>
+                    {(o.positionsFilled ?? 0) >= o.positionsAvailable && <Badge variant="warning">full</Badge>}
+                  </div>
+                </TableCell>
                 <TableCell><OpportunityStatusControl id={o.id} status={o.status} /></TableCell>
+                <TableCell className="text-right">
+                  <LineageDialog opportunityId={o.id} title={o.title} />
+                </TableCell>
               </TableRow>
             ))}
             {data && data.data.length === 0 && (
-              <TableRow><TableCell colSpan={4} className="text-muted-foreground text-center py-8">No opportunities yet.</TableCell></TableRow>
+              <TableRow><TableCell colSpan={5} className="text-muted-foreground text-center py-8">No opportunities yet.</TableCell></TableRow>
             )}
           </TableBody>
         </Table>

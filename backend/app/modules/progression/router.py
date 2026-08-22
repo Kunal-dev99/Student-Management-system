@@ -11,10 +11,15 @@ from app.core.principal import Principal
 from app.db.session import get_session
 from app.modules.progression.repository import ProgressionRepository
 from app.modules.progression.schemas import (
+    AppealDecisionRequest,
+    AppealOut,
+    AppealRequest,
     DecideRequest,
     MilestoneDefinitionCreate,
     MilestoneDefinitionOut,
     MilestoneOut,
+    PanelMemberOut,
+    PanelMemberRequest,
     SubmitRequest,
 )
 from app.modules.progression.service import ProgressionService
@@ -83,6 +88,82 @@ async def decide_milestone(
     principal: Principal = Depends(require_permission("progression.decide")),
 ) -> MilestoneOut:
     svc = _svc(session)
-    m, _next = await svc.decide(milestone_id, body.outcome, body.rationale, principal.user_id)
+    m, _next = await svc.decide(
+        milestone_id, body.outcome, body.rationale, principal.user_id,
+        conditions=body.conditions, outcome_letter=body.outcome_letter,
+        require_panel=body.require_panel,
+    )
     defn = await ProgressionRepository(session).get_definition(m.milestone_definition_id)
     return MilestoneOut.model_validate(svc._milestone_dict(m, defn))
+
+
+# --- Phase 4B.6 — review panel, conditions sign-off, appeals ---
+
+@milestone_router.get("/{milestone_id}/review", summary="Full review detail (panel, conditions, appeal window)")
+async def review_detail(
+    milestone_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("progression.read")),
+) -> dict:
+    return await _svc(session).review_detail(milestone_id)
+
+
+@milestone_router.get("/{milestone_id}/panel", response_model=list[PanelMemberOut], summary="Review panel members")
+async def list_panel(
+    milestone_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("progression.read")),
+) -> list[PanelMemberOut]:
+    return [PanelMemberOut.model_validate(p) for p in await _svc(session).panel_for_milestone(milestone_id)]
+
+
+@milestone_router.post("/{milestone_id}/panel", response_model=list[PanelMemberOut], status_code=201, summary="Add a panel member")
+async def add_panel_member(
+    milestone_id: uuid.UUID,
+    body: PanelMemberRequest,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("progression.decide")),
+) -> list[PanelMemberOut]:
+    rows = await _svc(session).add_panel_member(milestone_id, body.person_id, body.role, body.is_independent)
+    return [PanelMemberOut.model_validate(p) for p in rows]
+
+
+@milestone_router.post("/{milestone_id}/conditions/sign-off", summary="Sign off that conditions were met")
+async def sign_off_conditions(
+    milestone_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("progression.decide")),
+) -> dict:
+    return await _svc(session).sign_off_conditions(milestone_id)
+
+
+@milestone_router.get("/{milestone_id}/appeals", response_model=list[AppealOut], summary="Appeals against this decision")
+async def list_appeals(
+    milestone_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("progression.read")),
+) -> list[AppealOut]:
+    return [AppealOut.model_validate(a) for a in await _svc(session).appeals_for_milestone(milestone_id)]
+
+
+@milestone_router.post("/{milestone_id}/appeals", response_model=AppealOut, status_code=201, summary="Submit an appeal")
+async def submit_appeal(
+    milestone_id: uuid.UUID,
+    body: AppealRequest,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("progression.read")),
+) -> AppealOut:
+    # A student appeals their own decision, so this is guarded by progression.read.
+    return AppealOut.model_validate(await _svc(session).submit_appeal(milestone_id, body.grounds))
+
+
+@milestone_router.post("/appeals/{appeal_id}/decide", response_model=AppealOut, summary="Decide an appeal")
+async def decide_appeal(
+    appeal_id: uuid.UUID,
+    body: AppealDecisionRequest,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_permission("progression.decide")),
+) -> AppealOut:
+    return AppealOut.model_validate(
+        await _svc(session).decide_appeal(appeal_id, body.status, body.decision_note, principal.user_id)
+    )

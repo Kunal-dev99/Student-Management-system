@@ -7,7 +7,12 @@ from datetime import date, datetime
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
-from app.modules.progression.constants import MilestoneStatus, ProgressionOutcome
+from app.modules.progression.constants import (
+    AppealStatus,
+    MilestoneStatus,
+    PanelRole,
+    ProgressionOutcome,
+)
 
 
 class _Camel(BaseModel):
@@ -59,3 +64,43 @@ class SubmitRequest(_Camel):
 class DecideRequest(_Camel):
     outcome: ProgressionOutcome
     rationale: str | None = None
+    # Phase 4B.6 — conditional outcomes must carry written conditions; the panel may attach
+    # an outcome letter. `requirePanel` overrides the programme's milestone-definition config
+    # (review_panel.required); omit it to use that configuration.
+    conditions: str | None = None
+    outcome_letter: str | None = None
+    require_panel: bool | None = None
+
+
+class PanelMemberRequest(_Camel):
+    person_id: uuid.UUID
+    role: PanelRole
+    is_independent: bool = False
+
+
+class PanelMemberOut(_Camel):
+    id: str
+    person_id: str
+    person_name: str
+    role: PanelRole
+    is_independent: bool
+
+
+class AppealRequest(_Camel):
+    grounds: str
+
+
+class AppealDecisionRequest(_Camel):
+    status: AppealStatus
+    decision_note: str | None = None
+
+
+class AppealOut(_Camel):
+    id: str
+    review_id: str
+    student_id: str
+    grounds: str
+    status: AppealStatus
+    submitted_at: str | None = None
+    decided_at: str | None = None
+    decision_note: str | None = None

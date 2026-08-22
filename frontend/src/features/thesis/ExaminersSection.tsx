@@ -3,6 +3,8 @@
 import { useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -13,6 +15,8 @@ import {
   useApproveNomination, useExaminers, useNominateExaminer, type ExaminerType,
 } from './api'
 
+const EXAMINER_TYPES: ExaminerType[] = ['internal', 'external', 'independent_chair']
+
 export function ExaminersSection({ studentId, thesisId }: { studentId: string; thesisId: string }) {
   const { toast } = useToast()
   const examiners = useExaminers(thesisId)
@@ -21,6 +25,9 @@ export function ExaminersSection({ studentId, thesisId }: { studentId: string; t
   const approve = useApproveNomination(thesisId)
   const [personId, setPersonId] = useState('')
   const [type, setType] = useState<ExaminerType>('internal')
+  const [affiliation, setAffiliation] = useState('')
+  const [coi, setCoi] = useState(false)
+  const [coiNote, setCoiNote] = useState('')
 
   const err = (e: unknown) => toast({ title: 'Action failed', description: (e as Error).message, variant: 'destructive' })
 
@@ -30,13 +37,20 @@ export function ExaminersSection({ studentId, thesisId }: { studentId: string; t
       {examiners.isLoading ? <Skeleton className="h-12 w-full" /> : (
         <div className="space-y-2 mb-3">
           {examiners.data && examiners.data.length > 0 ? examiners.data.map((n) => (
-            <div key={n.id} className="flex items-center justify-between border-b border-border/60 last:border-0 pb-2 last:pb-0">
-              <div className="flex items-center gap-2">
-                <span className="text-sm">{n.examinerName}</span>
-                <Badge variant="secondary">{n.examinerType}</Badge>
-                {n.approved
-                  ? <Badge variant="success">approved</Badge>
-                  : <Badge variant="warning">pending</Badge>}
+            <div key={n.id} className="flex items-start justify-between border-b border-border/60 last:border-0 pb-2 last:pb-0">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-sm">{n.examinerName}</span>
+                  <Badge variant="secondary">{n.examinerType.replace(/_/g, ' ')}</Badge>
+                  {n.approved
+                    ? <Badge variant="success">approved</Badge>
+                    : <Badge variant="warning">pending</Badge>}
+                  {n.conflictOfInterest && <Badge variant="destructive">Conflict declared</Badge>}
+                </div>
+                <p className="text-helper mt-0.5">
+                  {n.affiliation || 'No affiliation recorded'}
+                  {n.conflictOfInterest && n.conflictNote ? ` — ${n.conflictNote}` : ''}
+                </p>
               </div>
               {!n.approved && (
                 <Button size="sm" variant="ghost" disabled={approve.isPending}
@@ -58,14 +72,35 @@ export function ExaminersSection({ studentId, thesisId }: { studentId: string; t
           </Select>
         </div>
         <Select value={type} onValueChange={(v) => setType(v as ExaminerType)}>
-          <SelectTrigger className="w-32 h-8"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="w-44 h-8"><SelectValue /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="internal">internal</SelectItem>
-            <SelectItem value="external">external</SelectItem>
+            {EXAMINER_TYPES.map((t) => <SelectItem key={t} value={t}>{t.replace(/_/g, ' ')}</SelectItem>)}
           </SelectContent>
         </Select>
+        <Input className="w-52 h-8" placeholder="Affiliation (institution)" value={affiliation}
+          onChange={(e) => setAffiliation(e.target.value)} />
+        <label className="flex items-center gap-2 text-sm h-8">
+          <Checkbox checked={coi} onCheckedChange={(v) => setCoi(v === true)} />
+          Conflict of interest
+        </label>
+        {coi && (
+          <Input className="w-56 h-8" placeholder="Nature of the conflict" value={coiNote}
+            onChange={(e) => setCoiNote(e.target.value)} />
+        )}
         <Button size="sm" disabled={!personId || nominate.isPending}
-          onClick={async () => { try { await nominate.mutateAsync({ examinerPersonId: personId, examinerType: type }); toast({ title: 'Examiner nominated' }); setPersonId('') } catch (e) { err(e) } }}>
+          onClick={async () => {
+            try {
+              await nominate.mutateAsync({
+                examinerPersonId: personId,
+                examinerType: type,
+                affiliation: affiliation || undefined,
+                conflictOfInterest: coi,
+                conflictNote: coi ? (coiNote || undefined) : undefined,
+              })
+              toast({ title: 'Examiner nominated' })
+              setPersonId(''); setAffiliation(''); setCoi(false); setCoiNote('')
+            } catch (e) { err(e) }
+          }}>
           Nominate
         </Button>
       </div>

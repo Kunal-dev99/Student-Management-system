@@ -31,6 +31,9 @@ class OpportunityCreate(_Camel):
     start_date: date | None = None
     expected_duration_months: int | None = None
     positions_available: int = 1
+    # Phase 6.1 — provenance: the demand this position answers and the award funding it.
+    research_demand_id: uuid.UUID | None = None
+    research_award_id: uuid.UUID | None = None
 
 
 class OpportunityUpdate(_Camel):
@@ -52,6 +55,9 @@ class OpportunityOut(_Camel):
     start_date: date | None = None
     expected_duration_months: int | None = None
     positions_available: int
+    positions_filled: int = 0
+    research_demand_id: uuid.UUID | None = None
+    research_award_id: uuid.UUID | None = None
     status: OpportunityStatus
     created_at: datetime
 

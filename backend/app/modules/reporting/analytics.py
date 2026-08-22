@@ -56,10 +56,17 @@ class AnalyticsService:
             ))).scalars().all()
         }
         completions = {c.student_id: c for c in (await s.execute(select(Completion))).scalars().all()}
-        return rows, projects, areas, programmes, sources, funding, employees, overdue, completions
+        # Phase 6.2 — how each student entered: opportunity-led (a funded position) or student-led
+        # (their own proposal). Keyed by person, since one person carries one identity thread.
+        from app.modules.recruitment.models import Application
+
+        routes: dict = {}
+        for a in (await s.execute(select(Application))).scalars().unique().all():
+            routes.setdefault(a.person_id, a.route.value if hasattr(a.route, "value") else a.route)
+        return rows, projects, areas, programmes, sources, funding, employees, overdue, completions, routes
 
     async def enterprise_360(self) -> dict:
-        rows, projects, areas, programmes, sources, funding, employees, _overdue, _c = await self._load()
+        rows, projects, areas, programmes, sources, funding, employees, _overdue, _c, routes = await self._load()
         population = []
         for student, person in rows:
             proj = projects.get(student.id)
@@ -68,7 +75,8 @@ class AnalyticsService:
                 "studentRef": student.student_ref,
                 "personName": f"{person.given_name} {person.family_name}",
                 "student": {"status": student.status.value, "studyMode": student.study_mode.value,
-                            "startDate": student.start_date.isoformat() if student.start_date else None},
+                            "startDate": student.start_date.isoformat() if student.start_date else None,
+                            "entryRoute": routes.get(student.person_id)},
                 "research": {"topic": proj.research_topic if proj else None,
                              "group": proj.research_group if proj else None,
                              "area": areas.get(student.research_area_id)},
@@ -91,7 +99,7 @@ class AnalyticsService:
                 "population": population}
 
     async def analytics(self) -> dict:
-        rows, _p, _a, _pr, _s, funding, _e, overdue, completions = await self._load()
+        rows, _p, _a, _pr, _s, funding, _e, overdue, completions, _routes = await self._load()
         at_risk = []
         active = 0
         for student, person in rows:

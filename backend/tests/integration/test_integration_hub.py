@@ -85,7 +85,9 @@ async def test_signed_webhook_idempotent(client):
     sig = _sign(body)
 
     r = await client.post("/api/v1/integration/webhooks/finance", content=body, headers={"X-Signature": sig, "Content-Type": "application/json"})
-    assert r.status_code == 200 and r.json()["status"] == "processed"
+    # Phase 6: an inbound message we have no handler for is still recorded, but reported as
+    # `logged_only` rather than `processed` — recorded is not the same as applied.
+    assert r.status_code == 200 and r.json()["status"] == "logged_only"
 
     # Same source id again -> duplicate, not processed twice.
     r = await client.post("/api/v1/integration/webhooks/finance", content=body, headers={"X-Signature": sig, "Content-Type": "application/json"})

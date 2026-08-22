@@ -48,6 +48,8 @@ class StudentService:
         start_date: date | None,
         study_mode: StudyMode,
         research_topic: str | None,
+        research_award_id: uuid.UUID | None = None,
+        research_opportunity_id: uuid.UUID | None = None,
     ) -> Student:
         """Create a student, REUSING the applicant's person_id (arch §8.6 key rule)."""
         if await self.repo.get_by_person(person_id) is not None:
@@ -66,8 +68,17 @@ class StudentService:
             study_mode=study_mode,
             status=StudentStatus.registered,
         )
-        if research_topic:
-            student.project = ResearchProject(research_topic=research_topic)
+        # Phase 6.3 — create the research project whenever there is anything to record against it,
+        # carrying the award and originating position so the funding lineage works without anyone
+        # having to link it by hand later.
+        if research_topic or research_award_id or research_opportunity_id:
+            student.project = ResearchProject(
+                research_topic=research_topic,
+                research_area_id=research_area_id,
+                research_award_id=research_award_id,
+                research_opportunity_id=research_opportunity_id,
+                start_date=student.start_date,
+            )
         await self.repo.add(student)
         return student
 
