@@ -2,12 +2,15 @@
 
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, User, Activity } from 'lucide-react'
+import { ArrowLeft, User, Activity, PhoneCall, ShieldCheck } from 'lucide-react'
 import { PageHeader } from '@/components/common/PageHeader'
+import { ErrorState } from '@/components/common/ErrorState'
 import { PageSection } from '@/components/common/PageSection'
 import { Skeleton } from '@/components/ui/skeleton'
 import { usePerson, usePersonTimeline } from '@/features/persons/api'
 import { IdentitiesSection } from '@/features/persons/IdentitiesSection'
+import { ContactsSection } from '@/features/persons/ContactsSection'
+import { GdprSection } from '@/features/persons/GdprSection'
 
 function Field({ label, value }: { label: string; value: string | null | undefined }) {
   return (
@@ -39,7 +42,7 @@ export default function PersonDetailPage() {
           {person.isLoading ? (
             <Skeleton className="h-20 w-full" />
           ) : person.isError ? (
-            <p className="text-[hsl(var(--destructive))]">{(person.error as Error)?.message}</p>
+            <ErrorState error={person.error} />
           ) : (
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
               <Field label="Given name" value={p?.givenName} />
@@ -53,6 +56,18 @@ export default function PersonDetailPage() {
         </PageSection>
 
         <IdentitiesSection personId={id} />
+
+        <PageSection icon={PhoneCall} title="Contacts" accent="accent"
+          description="Extra channels beyond the primary email. Do-not-contact is honoured by the notifier.">
+          <ContactsSection personId={id} />
+        </PageSection>
+
+        {p && (
+          <PageSection icon={ShieldCheck} title="GDPR" accent="primary"
+            description="Subject-access export and right-to-erasure. Both live behind the person.gdpr permission.">
+            <GdprSection person={p} />
+          </PageSection>
+        )}
 
         <PageSection icon={Activity} title="Lifecycle timeline" accent="primary">
           {timeline.isLoading ? (

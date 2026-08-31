@@ -53,6 +53,8 @@ class PersonOut(_CamelModel):
     created_at: datetime
     updated_at: datetime
     relationships: list[RelationshipOut] = Field(default_factory=list)
+    # F2 — set when the person has been GDPR-erased
+    pseudonymised_at: datetime | None = None
 
 
 class TimelineEntry(_CamelModel):

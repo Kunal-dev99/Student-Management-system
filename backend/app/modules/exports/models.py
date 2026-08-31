@@ -19,6 +19,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    Uuid,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -55,6 +56,15 @@ class ReportProfile(UUIDMixin, TimestampMixin, Base):
     version: Mapped[int] = mapped_column(Integer, default=1)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    # F1 — sign-off. A profile becomes read-only once the responsible owner (Registry / HESA SME)
+    # has attested that the mappings are complete for the return. Unsigning is a deliberate,
+    # audited action; you cannot edit a signed-off profile until it is unsigned.
+    signed_off_by: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    signed_off_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    signed_off_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     __table_args__ = (Index("uq_report_profile_version", "code", "academic_year", "version", unique=True),)
 

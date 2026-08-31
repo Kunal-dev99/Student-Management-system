@@ -161,3 +161,150 @@ async def person_timeline(
 ) -> TimelineOut:
     entries = await _service(session).timeline(person_id)
     return TimelineOut(person_id=person_id, entries=entries)
+
+
+# --- F2 — contacts + GDPR (merge, export, erase) --------------------------------------
+
+from datetime import datetime as _dt  # local alias to avoid clashing with 'date' at top
+from fastapi import Response
+from pydantic import BaseModel, ConfigDict
+from pydantic.alias_generators import to_camel
+from sqlalchemy import select as _select
+
+from app.modules.person.constants import PersonContactChannel
+from app.modules.person.gdpr import PersonGdprService
+from app.modules.person.models import PersonContact
+
+
+class _F2Camel(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, from_attributes=True)
+
+
+class ContactCreate(_F2Camel):
+    channel: PersonContactChannel
+    value: str
+    label: str | None = None
+    do_not_contact: bool = False
+
+
+class ContactUpdate(_F2Camel):
+    value: str | None = None
+    label: str | None = None
+    do_not_contact: bool | None = None
+    verified: bool | None = None
+
+
+class ContactOut(_F2Camel):
+    id: uuid.UUID
+    channel: PersonContactChannel
+    value: str
+    label: str | None
+    do_not_contact: bool
+    verified_at: _dt | None
+
+
+class MergeRequest(_F2Camel):
+    surviving_person_id: uuid.UUID
+    losing_person_id: uuid.UUID
+    reason: str | None = None
+
+
+@router.get("/{person_id}/contacts", response_model=list[ContactOut], summary="Person's other contact channels")
+async def list_contacts(
+    person_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("person.read")),
+) -> list[ContactOut]:
+    rows = (await session.execute(
+        _select(PersonContact).where(PersonContact.person_id == person_id)
+        .order_by(PersonContact.created_at)
+    )).scalars().all()
+    return [ContactOut.model_validate(r) for r in rows]
+
+
+@router.post("/{person_id}/contacts", response_model=ContactOut, status_code=201, summary="Add a contact channel")
+async def add_contact(
+    person_id: uuid.UUID,
+    body: ContactCreate,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("person.write")),
+) -> ContactOut:
+    row = PersonContact(
+        person_id=person_id, channel=body.channel, value=body.value,
+        label=body.label, do_not_contact=body.do_not_contact,
+    )
+    session.add(row)
+    await session.commit()
+    await session.refresh(row)
+    return ContactOut.model_validate(row)
+
+
+@router.patch("/{person_id}/contacts/{contact_id}", response_model=ContactOut, summary="Update a contact")
+async def update_contact(
+    person_id: uuid.UUID, contact_id: uuid.UUID,
+    body: ContactUpdate,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("person.write")),
+) -> ContactOut:
+    row = (await session.execute(
+        _select(PersonContact).where(PersonContact.id == contact_id, PersonContact.person_id == person_id)
+    )).scalar_one_or_none()
+    if row is None:
+        from app.core.errors import NotFoundError as _NF
+        raise _NF("Contact not found")
+    if body.value is not None: row.value = body.value
+    if body.label is not None: row.label = body.label
+    if body.do_not_contact is not None: row.do_not_contact = body.do_not_contact
+    if body.verified is True and row.verified_at is None:
+        row.verified_at = _dt.now(tz=None).astimezone()
+    if body.verified is False:
+        row.verified_at = None
+    await session.commit()
+    await session.refresh(row)
+    return ContactOut.model_validate(row)
+
+
+@router.delete("/{person_id}/contacts/{contact_id}", status_code=204,
+               response_class=Response, summary="Remove a contact")
+async def delete_contact(
+    person_id: uuid.UUID, contact_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("person.write")),
+):
+    row = (await session.execute(
+        _select(PersonContact).where(PersonContact.id == contact_id, PersonContact.person_id == person_id)
+    )).scalar_one_or_none()
+    if row is not None:
+        await session.delete(row)
+        await session.commit()
+    return Response(status_code=204)
+
+
+@router.post("/merge", summary="Merge two duplicate persons — losing row is deleted, FKs are rewritten")
+async def merge_persons(
+    body: MergeRequest,
+    session: AsyncSession = Depends(get_session),
+    principal=Depends(require_permission("person.gdpr")),
+) -> dict:
+    return await PersonGdprService(session).merge(
+        surviving_id=body.surviving_person_id, losing_id=body.losing_person_id,
+        merged_by_user_id=principal.user_id, reason=body.reason,
+    )
+
+
+@router.get("/{person_id}/export", summary="GDPR subject-access: every row referencing this person")
+async def gdpr_export(
+    person_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("person.gdpr")),
+) -> dict:
+    return await PersonGdprService(session).export_all(person_id)
+
+
+@router.post("/{person_id}/erase", summary="GDPR erasure: pseudonymise this person forever")
+async def gdpr_erase(
+    person_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("person.gdpr")),
+) -> dict:
+    return await PersonGdprService(session).erase(person_id)

@@ -1,0 +1,352 @@
+ICR MODULE — WHAT HAS BEEN BUILT
+Institute of Cancer Research PGR model, layered additively over the platform.
+Last updated: 2026-08-31
+
+================================================================================
+1. SHAPE
+================================================================================
+
+The ICR module is deliberately ADDITIVE. It layers the Institute of Cancer
+Research's PGR model — two pathways (non-clinical 4-year PhD and clinical
+2-3-year MD(Res)), a strict Transfer Viva gate, and a partner-hospital ecosystem
+— on top of the platform's existing engines. The base views own no tables and
+change no core behaviour; the five "gap" features do own their own tables, but
+each hangs off student.id with ON DELETE CASCADE, so nothing in the ICR module
+can orphan or corrupt the core lifecycle.
+
+Migration head:  icr_g25_tables  (previous: icr_g1_reg_flip)
+
+================================================================================
+2. WHAT THE BASE MODULE SHIPS  (was already in the repo, now proven + tested)
+================================================================================
+
+Backend module — app/modules/icr/
+  constants.py    Pathway metadata (ICR-PHD, ICR-MDRES), transfer-viva /
+                  data-barrier milestone names, ICR funder list.
+  service.py      Read-only queries over student / milestone /
+                  funding_arrangement / person.
+  router.py       Four endpoints under /api/v1/icr:
+                    GET /icr/overview        cohort + pathways + funders +
+                                             transfer-viva pipeline buckets
+                    GET /icr/transfer-viva   MPhil→PhD upgrade tracker
+                                             (non-clinical only, overdue first)
+                    GET /icr/pathways        every ICR student with registration,
+                                             months in / limit, checkpoints,
+                                             data-barrier status
+                    GET /icr/funding         funder pillars — students +
+                                             committed stipend per funder
+
+Frontend — src/app/(app)/icr/
+  page.tsx              overview
+  transfer-viva/        upgrade tracker
+  pathways/             dual-track cohort
+  funding/              funder pillars
+  model/                reference page with the ICR model narrative
+  students/[id]/        (NEW) per-student ICR record — hosts gap 2-5 cards
+
+Sidebar and routeAccess.ts already carry the ICR group (Overview, Transfer
+viva, Pathways, [Funding for admins]).
+
+Seeds — backend/scripts/
+  seed_icr.py           idempotent: adds ICR department, both programmes with
+                        milestone definitions, ICR funders
+  seed_icr_cohort.py    demonstration cohort — 10 non-clinical + 4 clinical
+                        students, staged around the transfer viva
+
+Tests — 8 base tests in tests/integration/test_icr.py:
+  test_overview_counts_the_icr_cohort_only
+  test_overview_transfer_viva_buckets
+  test_overview_funders_rollup_only_icr_students
+  test_transfer_viva_lists_non_clinical_only_and_sorts_overdue_first
+  test_pathways_carries_registration_derived_from_transfer_viva
+  test_pathways_row_includes_limit_and_data_barrier
+  test_funding_rolls_up_stipends_per_funder
+  test_endpoints_refuse_without_permission
+
+================================================================================
+3. GAP 1 — MPhil→PhD REGISTRATION FLIP ON TRANSFER-VIVA DECISION
+================================================================================
+
+Before:  Transfer viva was a decided milestone; the platform never persisted
+         the resulting registration change. ICR read-views derived the string
+         each time from milestone state.
+
+Now:     student.registration_status is a persisted string that flips
+         automatically when a transfer viva is decided.
+
+Data model
+  student.registration_status                      String(80) nullable
+  milestone_definition.registration_effect         JSON nullable
+    example: {"onDecideContinue": "PhD (upgraded)",
+              "onDecideFail":     "Withdrawn (transfer viva failed)"}
+
+Service change
+  progression.service.decide() reads registration_effect on the milestone's
+  definition. On a continuing outcome it flips student.registration_status
+  to onDecideContinue; on any other outcome it uses onDecideFail. Every
+  non-ICR milestone (no registration_effect set) is unaffected.
+
+Configuration
+  scripts/seed_icr.py now writes the registration_effect JSON onto the ICR
+  Transfer Viva definition. Existing rows backfilled with a one-shot UPDATE
+  after the migration.
+
+ICR service
+  icr.service._registration() prefers the persisted value; falls back to the
+  milestone-derived string for backwards compatibility.
+
+Migration: icr_g1_reg_flip
+Tests: 3 (continuing → PhD, fail → Withdrawn, no effect → no flip)
+
+================================================================================
+4. GAP 2 — CLINICAL PLACEMENT (SpR ROTATION ALONGSIDE STUDENTSHIP)
+================================================================================
+
+Before:  The ICR MD(Res) model requires a Specialist Registrar rotation to
+         run concurrently with the studentship. The platform had no record of
+         which trust, specialty, grade, supervisor or session split.
+
+Now:     First-class ClinicalPlacement rows hang off the student, with dates,
+         trust, specialty, grade and NHS-side supervisor.
+
+Data model
+  icr_clinical_placement (student_id CASCADE, trust_name, specialty, grade,
+    supervisor_name, valid_from, valid_to, sessions_per_week, notes)
+
+Also
+  New PersonRelationshipType enum value 'clinical_trainee' so the concurrent
+  identity is representable at the person level too.
+
+Service — icr.gaps_service.ClinicalPlacementService
+  list_for(student_id)          most-recent-first
+  open(...)                     creates an active placement
+  end(placement_id, valid_to)   sets valid_to; refused if already ended
+
+Endpoints under /api/v1/icr
+  GET  /students/{id}/placements
+  POST /students/{id}/placements
+  POST /placements/{id}/end
+
+Tests: 1 (open → list → end → double-end refused with 409)
+
+================================================================================
+5. GAP 3 — INDEPENDENT TUTOR AS A FIRST-CLASS ROLE
+================================================================================
+
+Before:  ICR requires each student to have an Independent Tutor from outside
+         the student's lab, with a private notes channel the supervisor cannot
+         see. Neither existed.
+
+Now:     IndependentTutor is a first-class assignment with a department-
+         independence gate enforced at the platform edge, plus a
+         IndependentTutorNote channel for private communication.
+
+Rule enforced
+  If the tutor's department == the student's department, assignment is refused
+  with a WorkflowError. "Outside-the-lab" is not a checklist — it's a hard
+  gate in IndependentTutorService.assign().
+
+Data model
+  icr_independent_tutor        (student_id CASCADE, tutor_person_id,
+                                tutor_department_id, assigned_at, ended_at)
+  icr_independent_tutor_note   (tutor_id CASCADE, body, authored_by_user_id,
+                                authored_at)
+
+Service — icr.gaps_service.IndependentTutorService
+  current_for(student_id)      the open assignment, if any
+  assign(...)                  refuses same-department; auto-closes previous
+                               tutor (one active at a time)
+  end(tutor_id)                sets ended_at
+  add_note(tutor_id, body)
+  notes(tutor_id)              most-recent-first
+
+Endpoints under /api/v1/icr
+  GET  /students/{id}/independent-tutor
+  POST /students/{id}/independent-tutor
+  POST /independent-tutor/{tid}/end
+  GET  /independent-tutor/{tid}/notes
+  POST /independent-tutor/{tid}/notes
+
+Tests: 2 (department-match refused; assign → note → list → end round-trip)
+
+================================================================================
+6. GAP 4 — BENCH FEES AS A TRACKED ALLOCATION WITH DRAW-DOWNS
+================================================================================
+
+Before:  Bench fees (per-student experimental budgets — sequencing runs, mass-
+         spec time, reagents) were funded outside the stipend but with no
+         ledger. Overspend was invisible until year-end.
+
+Now:     A BenchFeeAllocation carries the total budget, currency, dates and
+         cost centre. BenchFeeDrawdown rows record individual spends against
+         it. Overdraws are refused at the platform edge with the exact
+         balance in the error.
+
+Rule enforced
+  drawdown() sums existing draw-downs on the allocation and refuses if
+  drawn + amount > total, naming both numbers so the caller can act.
+
+Data model
+  icr_bench_fee_allocation  (student_id CASCADE, funding_source_id nullable,
+                             total_amount, currency, valid_from, valid_to,
+                             cost_centre, notes)
+  icr_bench_fee_drawdown    (allocation_id CASCADE, amount, category,
+                             description, drawn_at, invoice_ref)
+
+Service — icr.gaps_service.BenchFeeService
+  allocations_for(student_id)  each row carries drawnAmount + remainingAmount
+                               (SQL SUM)
+  allocate(...)                refuses total_amount <= 0
+  drawdown(...)                refuses amount <= 0 or amount > remaining
+  drawdowns_for(allocation_id) most-recent-first
+
+Endpoints under /api/v1/icr
+  GET  /students/{id}/bench-fees          allocations with rolled-up totals
+  POST /students/{id}/bench-fees          allocate a budget
+  GET  /bench-fees/{aid}/drawdowns        list draw-downs
+  POST /bench-fees/{aid}/drawdowns        record a draw-down (may refuse)
+
+Tests: 1 (allocate → draw £4k → draw £5k → third draw £2k REFUSED with
+"exceed" message → totals verified as £9k drawn / £1k remaining)
+
+================================================================================
+7. GAP 5 — PARTNER-AFFILIATION RECORD WITH COMPLIANCE FLAGS
+================================================================================
+
+Before:  Every ICR student holds paperwork with partner institutions — Royal
+         Marsden honorary contract, Imperial co-registration, NHS research
+         passports, DBS checks, GMC number for clinical students. None of it
+         had a home on the platform, and expiries went uncaught.
+
+Now:     PartnerAffiliation carries the relationship with dates and a JSON
+         compliance blob. A helper derives per-key expiry flags: OK,
+         EXPIRING (within 60 days), or EXPIRED (with days-overdue). Any
+         compliance key ending 'ExpiresOn' or 'RenewalOn' is auto-flagged;
+         non-date keys (e.g. gmcNumber) are stored but never flagged.
+
+Data model
+  icr_partner_affiliation  (student_id CASCADE, partner_name, affiliation_kind,
+                            partner_ref, valid_from, valid_to, compliance JSON,
+                            active)
+
+  Allowed affiliation_kind values (enforced in service):
+    honorary_contract, co_registration, clinical_placement, other
+
+Service — icr.gaps_service.PartnerAffiliationService
+  list_for(student_id)
+  add(...)                     refuses unknown kind with the allowed list
+  end(id, valid_to)            sets valid_to + active = false
+  compliance_expiry_flags(row) [{key, date, status, daysUntil|daysOverdue}]
+
+Endpoints under /api/v1/icr
+  GET  /students/{id}/partner-affiliations
+  POST /students/{id}/partner-affiliations
+  POST /partner-affiliations/{aid}/end
+
+Tests: 2 (compliance flags: expired / expiring / non-date not-flagged; unknown
+kind refused)
+
+================================================================================
+8. FRONTEND SURFACES
+================================================================================
+
+Existing pages (base module — already there, now shot for the record):
+  /icr                Cohort overview + pathway split + transfer-viva
+                      buckets + near-limit + funders
+  /icr/transfer-viva  Upgrade tracker — non-clinical only, overdue first
+  /icr/pathways       Dual tracks side-by-side; every row is now
+                      click-through to /icr/students/[id]
+  /icr/funding        Funder pillars
+  /icr/model          The narrative page describing the ICR model
+
+New page for the gaps:
+  /icr/students/[id]  Hosts the ICR student panel with all four gap cards.
+                      Linked from every row on /icr/pathways; has a link out
+                      to the core /students/[id] record.
+
+Panel components (features/icr/):
+  IcrStudentPanel.tsx     Mounts the four gap sections.
+  gaps_api.ts             14 typed hooks + full interfaces:
+                            usePlacements, useOpenPlacement, useEndPlacement,
+                            useCurrentTutor, useAssignTutor, useEndTutor,
+                            useTutorNotes, useAddTutorNote,
+                            useBenchFees, useAllocateBenchFee,
+                            useDrawdowns, useAddDrawdown,
+                            useAffiliations, useAddAffiliation,
+                            useEndAffiliation.
+
+What each card shows
+  Clinical placement (gap 2)  Table of placements with trust, specialty +
+                              grade badge, sessions/wk, dates, "current"
+                              badge + End action; "+ Open placement" dialog.
+  Independent tutor (gap 3)   Current tutor row with Assigned badge and End
+                              action; private-notes list + add-note textarea;
+                              "+ Assign tutor" dialog when none. Errors from
+                              the department-independence gate surface in a
+                              red toast.
+  Bench fees (gap 4)          Card per allocation with the total, cost
+                              centre, valid-from, a progress bar, and the
+                              draw-down table; drawn/remaining tallies at the
+                              top-right; "+ Record draw-down" dialog with a
+                              live "Remaining: £X" reminder; "+ Allocate
+                              bench fee" dialog.
+  Partner affiliations (gap 5) Card per affiliation with kind + partner +
+                              partner ref + dates; badge row derived from
+                              compliance flags — red ShieldOff for expired
+                              ("6d overdue"), amber ShieldAlert for expiring
+                              ("50d"), green ShieldCheck for ok; non-date
+                              compliance (gmcNumber, etc.) shown as plain
+                              key/value beneath.
+
+================================================================================
+9. NUMBERS
+================================================================================
+
+  17 integration tests in tests/integration/test_icr.py, all passing.
+  78 tests across ICR + progression + thesis + person GDPR + statutory +
+     settings + F5 + F6 pass in one regression run.
+  2 new migrations:  icr_g1_reg_flip, icr_g25_tables
+  6 new module tables (all icr_*)
+  1 new enum value (person_relationship_type.clinical_trainee)
+  4 base endpoints + 14 gap endpoints, all under /api/v1/icr
+  5 frontend pages + 1 new per-student panel
+  14 seed cohort students (10 non-clinical PhD + 4 clinical MD(Res)) staged
+     across the ICR pathways
+
+================================================================================
+10. WHAT IS INTENTIONALLY NOT DONE
+================================================================================
+
+  * The independent-tutor "not visible to the supervisor" invariant is
+    enforced by the API guard (only the tutor and admin roles reach the
+    notes endpoint). The supervisor's UI does not render the notes card at
+    all — so the invariant holds because the surface never asks. Adding a
+    parallel supervisor-visible notes stream is out of scope; if you want
+    one, add a second notes table with the supervisor visibility model.
+
+  * The "clinical training overlay" (gap 2) is currently a first-class
+    clinical placement on the student, plus the concurrent identity type
+    on the person. It does NOT yet auto-open a person_relationship on
+    creation — that is a one-line service call away when institutional
+    policy is signed off.
+
+  * Bench-fee draw-downs are recorded on the ICR ledger; they do not
+    yet emit an outbox event to Finance. When Finance is wired for real
+    (see PGR_Platform_Critical_Gaps.pdf), add a WorkflowEngine.emit call
+    inside BenchFeeService.drawdown().
+
+  * The compliance-flag warning window is 60 days by default. It is a
+    parameter on compliance_expiry_flags(). Expose it in Settings alongside
+    the other institutional tunables when a Registry owner has signed off
+    the value.
+
+  * The ICR model page (/icr/model) still carries five "ICR module to build"
+    (Gap) call-outs from the original planning document. These can be
+    softened to "shipped" now that gaps 1-5 are complete.
+
+  * No ICR-specific test for the concurrent-identity semantics (open a
+    student identity, then open a clinical_trainee identity on the same
+    person). The identity engine has this pattern proven for
+    student ↔ employee; the ICR clinical_trainee value just reuses it.
+
+================================================================================

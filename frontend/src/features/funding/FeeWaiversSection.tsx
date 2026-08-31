@@ -9,12 +9,15 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import { useToast } from '@/components/ui/use-toast'
+import { useCan } from '@/shared/auth/Can'
 import { useApproveWaiver, useCreateWaiver, useFeeWaivers, type WaiverKind } from './api'
 
 const KINDS: WaiverKind[] = ['full_fee', 'partial_fee', 'bench_fee']
 
 export function FeeWaiversSection({ studentId }: { studentId: string }) {
   const { toast } = useToast()
+  // Waiver create/approve are funding.change server-side; readers see the list only.
+  const canChange = useCan('funding.change')
   const waivers = useFeeWaivers(studentId)
   const create = useCreateWaiver(studentId)
   const approve = useApproveWaiver(studentId)
@@ -45,7 +48,7 @@ export function FeeWaiversSection({ studentId }: { studentId: string }) {
                 {w.approved ? <Badge variant="success">approved</Badge> : <Badge variant="warning">pending</Badge>}
                 {w.note && <span className="text-helper">{w.note}</span>}
               </div>
-              {!w.approved && (
+              {!w.approved && canChange && (
                 <Button size="sm" variant="ghost" disabled={approve.isPending}
                   onClick={async () => { try { await approve.mutateAsync(w.id); toast({ title: 'Fee waiver approved' }) } catch (e) { err(e) } }}>
                   Approve
@@ -55,7 +58,7 @@ export function FeeWaiversSection({ studentId }: { studentId: string }) {
           )) : <p className="text-helper">No fee waivers recorded.</p>}
         </div>
       )}
-      <div className="flex flex-wrap items-end gap-2">
+      {canChange && <div className="flex flex-wrap items-end gap-2">
         <Select value={kind} onValueChange={(v) => setKind(v as WaiverKind)}>
           <SelectTrigger className="w-40 h-8"><SelectValue /></SelectTrigger>
           <SelectContent>
@@ -86,7 +89,7 @@ export function FeeWaiversSection({ studentId }: { studentId: string }) {
           }}>
           Add waiver
         </Button>
-      </div>
+      </div>}
     </div>
   )
 }

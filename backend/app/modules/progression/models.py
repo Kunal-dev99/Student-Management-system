@@ -32,6 +32,11 @@ class MilestoneDefinition(UUIDMixin, TimestampMixin, Base):
     assessment_criteria: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     possible_outcomes: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # subset of progression_outcome
 
+    # ICR gap 1 — automatic student.registration_status flip on decide.
+    # Shape: {"onDecideContinue": "PhD (upgraded)", "onDecideFail": "Withdrawn"}
+    # If unset, no flip happens (default behaviour for every non-ICR milestone).
+    registration_effect: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
 
 class Milestone(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "milestone"

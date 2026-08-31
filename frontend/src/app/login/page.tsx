@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ApiError } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthContext'
+import { homeRoute } from '@/shared/auth/homeRoute'
 
 export default function LoginPage() {
   const router = useRouter()
@@ -18,9 +19,10 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
-  // Already signed in -> go to the app.
+  // Already signed in -> go to the role's home screen. This also fires right
+  // after a successful login, once the principal (and its roles) has loaded.
   useEffect(() => {
-    if (!loading && principal?.authenticated) router.replace('/dashboard')
+    if (!loading && principal?.authenticated) router.replace(homeRoute(principal.roles))
   }, [loading, principal, router])
 
   const onSubmit = async (e: React.FormEvent) => {
@@ -29,7 +31,6 @@ export default function LoginPage() {
     setSubmitting(true)
     try {
       await login(email, password)
-      router.replace('/dashboard')
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Login failed')
     } finally {

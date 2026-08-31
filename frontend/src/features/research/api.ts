@@ -77,8 +77,12 @@ export const DEMAND_NEXT: Record<DemandStatus, DemandStatus[]> = {
 
 // --- awards ---
 
-export const useAwards = () =>
-  useQuery({ queryKey: ['research-awards'], queryFn: () => api.get<ResearchAward[]>('/research-awards') })
+export const useAwards = (opts?: { enabled?: boolean }) =>
+  useQuery({
+    queryKey: ['research-awards'],
+    queryFn: () => api.get<ResearchAward[]>('/research-awards'),
+    enabled: opts?.enabled ?? true,
+  })
 
 export interface AwardInput {
   awardRef: string

@@ -13,7 +13,7 @@ if not exist "node_modules" (
 )
 
 if not exist ".next\BUILD_ID" (
-    echo No production build found - building now (one-time, ~1 min)...
+    echo No production build found - building now ^(one-time, ~1 min^)...
     call npm run build
     if errorlevel 1 ( echo Build failed. & pause & exit /b 1 )
 )

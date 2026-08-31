@@ -25,7 +25,7 @@
  * information.
  */
 
-import { Fragment, useMemo, useState, type ReactNode } from 'react'
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react'
 import Link from 'next/link'
 import {
   Activity,
@@ -33,6 +33,7 @@ import {
   Boxes,
   CheckCircle2,
   ChevronDown,
+  ChevronRight,
   Cpu,
   Database,
   FileText,
@@ -121,6 +122,126 @@ const ALGO_LABELS: Record<string, string> = {
 }
 const algoLabel = (algo: string) => ALGO_LABELS[algo] ?? algo.replace(/_/g, ' ')
 const fmtMetric = (v: number | null | undefined) => (v == null ? '—' : v.toFixed(3))
+
+/** Translate an AUC into words a non-technical reader can act on.
+ *  1.0 = perfect separation, 0.5 = a coin toss. */
+const aucPlain = (v: number | null | undefined): string | null => {
+  if (v == null) return null
+  if (v >= 0.8) return 'strong'
+  if (v >= 0.7) return 'fair'
+  if (v >= 0.6) return 'weak'
+  if (v >= 0.55) return 'very weak'
+  return 'no better than guessing'
+}
+
+/** Rotating status lines while a long job runs, so the wait feels alive and the
+ *  user can see WHAT is happening in their own terms. Purely cosmetic — the
+ *  real work is one API call. */
+function Working({ messages }: { messages: string[] }) {
+  const [i, setI] = useState(0)
+  useEffect(() => {
+    const t = setInterval(() => setI((n) => (n + 1) % messages.length), 2000)
+    return () => clearInterval(t)
+  }, [messages.length])
+  return (
+    <div className="flex items-center gap-2.5 rounded-md border border-[hsl(var(--info)/0.3)] bg-[hsl(var(--info)/0.06)] px-3 py-2.5 my-2" role="status" aria-live="polite">
+      <span className="h-3.5 w-3.5 shrink-0 rounded-full border-2 border-[hsl(var(--info))] border-t-transparent animate-spin" />
+      <span className="text-sm text-foreground/85">{messages[i]}</span>
+    </div>
+  )
+}
+
+/** Progressive disclosure: heavy technical blocks live behind this collapsed
+ *  toggle so the default view stays readable for a non-technical admin. */
+function TechDetails({ label = 'Technical detail', children }: { label?: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="mt-3">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
+        aria-expanded={open}
+      >
+        {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+        {label}
+      </button>
+      {open && <div className="mt-2">{children}</div>}
+    </div>
+  )
+}
+
+const BUILD_MSGS = [
+  'Reading every student history…',
+  'Deciding who counts — and noting who had to be left out, and why…',
+  'Locking away answer-sheet facts the model must never see…',
+  'Writing the quality report…',
+]
+const DISCOVER_MSGS = [
+  'Splitting students into comparison groups…',
+  'Testing pattern after pattern…',
+  'Being strict — applying the multiple-comparisons penalty…',
+  'Attaching evidence and cautions to each finding…',
+]
+const TRAIN_MSGS = [
+  'Teaching four different model families the same history…',
+  'Quizzing each one on students it has never seen…',
+  'Making every candidate beat blind guessing before it counts…',
+  'Comparing the candidates…',
+  'Writing the model card — strengths, limits and all…',
+]
+const SCORE_MSGS = [
+  'Lining up the current cohort…',
+  'Scoring each student against the learned pattern…',
+  'Attaching the reasons behind every score…',
+]
+
+/** The whole Pattern Lab pipeline in one glance — which stage lives in which
+ *  tab, so nobody wonders "what do I do next?". Chips are clickable. */
+function JourneyBar({ tab, onGo }: { tab: string; onGo: (t: string) => void }) {
+  const steps = [
+    { n: 1, label: 'Ask & analyse', tab: 'discover', hint: 'pick a question, snapshot, discover, train' },
+    { n: 2, label: 'Approve', tab: 'models', hint: 'a person promotes a candidate' },
+    { n: 3, label: 'Score students', tab: 'predictions', hint: 'advisory scores with reasons' },
+    { n: 4, label: 'Keep it honest', tab: 'monitoring', hint: 'compare predictions with reality' },
+  ]
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-1.5">
+      <span className="text-xs text-muted-foreground mr-1">The journey:</span>
+      {steps.map((st, i) => (
+        <Fragment key={st.tab}>
+          {i > 0 && <span className="text-muted-foreground/50 text-xs">→</span>}
+          <button
+            type="button"
+            onClick={() => onGo(st.tab)}
+            title={st.hint}
+            className={
+              'rounded-full border px-2.5 py-0.5 text-xs transition-colors ' +
+              (tab === st.tab
+                ? 'border-primary bg-primary text-primary-foreground font-medium'
+                : 'border-border text-muted-foreground hover:border-primary/50 hover:text-foreground')
+            }
+          >
+            {st.n}. {st.label}
+          </button>
+        </Fragment>
+      ))}
+    </div>
+  )
+}
+
+/** One friendly paragraph at the top of each tab, written for a registry
+ *  administrator, not a data scientist. */
+function PlainIntro({ children }: { children: ReactNode }) {
+  return (
+    <div className="mb-4 rounded-md border border-[hsl(var(--info)/0.3)] bg-[hsl(var(--info)/0.06)] px-4 py-3">
+      <p className="text-sm text-foreground/85 leading-relaxed">
+        <span className="font-semibold text-[hsl(var(--info))]">In plain terms: </span>
+        {children}
+      </p>
+    </div>
+  )
+}
 const fmtBytes = (b: number) =>
   b >= 1024 * 1024 ? `${(b / (1024 * 1024)).toFixed(1)} MB`
   : b >= 1024 ? `${(b / 1024).toFixed(1)} KB`
@@ -209,6 +330,10 @@ function LeakageCallout({ features }: { features: { key: string; label: string; 
       <div className="flex items-center gap-2">
         <ShieldAlert className="h-4 w-4 text-warning shrink-0" />
         <p className="text-sm font-medium">Excluded to prevent leakage</p>
+        <p className="text-xs text-muted-foreground">
+          These facts arrive only after the outcome is known — letting the model see them would be
+          letting it cheat by reading the answer sheet.
+        </p>
       </div>
       <p className="text-xs text-muted-foreground mt-1">
         These features would only be knowable after the prediction point, so using them would
@@ -907,8 +1032,9 @@ function OverviewTab({ onNewAnalysis }: { onNewAnalysis: () => void }) {
                 </div>
                 {m.aucMean != null && (
                   <p className="text-helper mt-1">
-                    AUC <span className="num font-medium">{m.aucMean.toFixed(3)}</span>
-                    {!m.beatsBaseline && ' — did not beat baseline'}
+                    Accuracy <span className="num font-medium">{m.aucMean.toFixed(3)}</span>
+                    {' — '}{aucPlain(m.aucMean)}
+                    {!m.beatsBaseline && ' · did not beat simply guessing'}
                   </p>
                 )}
               </div>
@@ -934,7 +1060,8 @@ function OverviewTab({ onNewAnalysis }: { onNewAnalysis: () => void }) {
           </p>
         ) : (
           <div className="space-y-2">
-            {data.recentFindings.map((f) => (
+            {/* The same pattern can be rediscovered on every run — show each once. */}
+            {data.recentFindings.filter((f, i, a) => a.findIndex((x) => x.statement === f.statement) === i).map((f) => (
               <div key={f.id} className="card-elevated p-3 flex items-start gap-3">
                 <div className="h-7 w-7 shrink-0 rounded-md bg-accent/10 text-accent flex items-center justify-center">
                   <Sparkles className="h-3.5 w-3.5" />
@@ -971,28 +1098,17 @@ function OverviewTab({ onNewAnalysis }: { onNewAnalysis: () => void }) {
                     ? <Badge variant="success">ready</Badge>
                     : <Badge variant="warning"><Lock className="h-3 w-3 mr-1" /> locked</Badge>}
                 </div>
-                <div className="mt-2 grid grid-cols-3 gap-2 text-center">
-                  <div>
-                    <p className="text-lg font-semibold num">{s.eligible}</p>
-                    <p className="text-[11px] uppercase tracking-wider text-muted-foreground">eligible</p>
-                  </div>
-                  <div>
-                    <p className="text-lg font-semibold num">{s.positives}</p>
-                    <p className="text-[11px] uppercase tracking-wider text-muted-foreground">positives</p>
-                  </div>
-                  <div>
-                    <p className="text-lg font-semibold num">{s.negatives}</p>
-                    <p className="text-[11px] uppercase tracking-wider text-muted-foreground">negatives</p>
-                  </div>
-                </div>
-                <p className="text-helper mt-2 text-xs">
-                  {latest
-                    ? `Latest dataset ${latest.name} v${latest.version} — ${latest.recordsFound} records found.`
-                    : 'No dataset built yet.'}
+                <p className="text-sm text-muted-foreground mt-2">
+                  {s.sufficient
+                    ? <>Of <span className="num font-medium text-foreground">{s.eligible}</span> students with a known outcome, <span className="num font-medium text-foreground">{s.positives}</span> experienced it — enough history to analyse honestly.</>
+                    : 'Not enough reliable history yet.'}
                 </p>
                 {!s.sufficient && s.reason && (
                   <p className="mt-1.5 text-xs text-warning">{s.reason}</p>
                 )}
+                <p className="text-helper mt-1.5 text-xs">
+                  {latest ? `Last analysed ${latest.createdAt ? new Date(latest.createdAt).toLocaleDateString() : 'recently'}.` : 'Not analysed yet.'}
+                </p>
               </div>
             )
           })}
@@ -1261,7 +1377,7 @@ function TrainStep({
     <PageSection
       icon={Cpu}
       title="Train a model"
-      description="A bounded candidate search: four model families, small grids, stratified cross-validation — and a dummy baseline every candidate must beat to matter."
+      description="Tries four different approaches on the snapshot and keeps only candidates that beat blind guessing. Takes about half a minute."
       accent="primary"
       headerRight={<StepChip n={4} />}
       actions={
@@ -1278,6 +1394,7 @@ function TrainStep({
         )
       }
     >
+      {train.isPending && <Working messages={TRAIN_MSGS} />}
       {!dataset ? (
         <p className="text-helper">Build a dataset first — training runs on a versioned snapshot.</p>
       ) : (
@@ -1434,7 +1551,7 @@ function DiscoverTab({ canAnalyse, canTrain }: { canAnalyse: boolean; canTrain: 
       <PageSection
         icon={Database}
         title="Build the dataset"
-        description="A versioned snapshot with a full quality report: who was excluded and why, and which features were kept out to prevent leakage."
+        description="Takes a dated snapshot of the history so the analysis is repeatable and auditable — the full quality report is under Technical detail."
         accent="primary"
         headerRight={<StepChip n={2} />}
         actions={
@@ -1450,6 +1567,7 @@ function DiscoverTab({ canAnalyse, canTrain }: { canAnalyse: boolean; canTrain: 
           )
         }
       >
+        {build.isPending && <Working messages={BUILD_MSGS} />}
         {!selectedTarget ? (
           <p className="text-helper">Select a question above to begin.</p>
         ) : !dataset ? (
@@ -1479,7 +1597,9 @@ function DiscoverTab({ canAnalyse, canTrain }: { canAnalyse: boolean; canTrain: 
                 </span>
               )}
             </div>
-            <QualityReport dataset={dataset} />
+            <TechDetails label="Technical detail — who was excluded, and what the model is not allowed to see">
+              <QualityReport dataset={dataset} />
+            </TechDetails>
           </div>
         )}
       </PageSection>
@@ -1488,7 +1608,7 @@ function DiscoverTab({ canAnalyse, canTrain }: { canAnalyse: boolean; canTrain: 
       <PageSection
         icon={FlaskConical}
         title="Run discovery"
-        description="Two-group comparisons with Bonferroni correction. Every finding names its evidence, its confounders and its caution."
+        description="Compares groups of students and reports only differences too big to be luck — each finding carries its evidence."
         accent="accent"
         headerRight={<StepChip n={3} />}
         actions={
@@ -1505,6 +1625,7 @@ function DiscoverTab({ canAnalyse, canTrain }: { canAnalyse: boolean; canTrain: 
           )
         }
       >
+        {discover.isPending && <Working messages={DISCOVER_MSGS} />}
         {!dataset ? (
           <p className="text-helper">Build a dataset first — discovery runs on a versioned snapshot.</p>
         ) : (
@@ -1932,6 +2053,7 @@ function BatchSection({
       }
     >
       <div className="space-y-4">
+        {scoring && <Working messages={SCORE_MSGS} />}
         <p className="text-xs text-muted-foreground">
           {batch.scoredAt && <>Scored {new Date(batch.scoredAt).toLocaleString()} · </>}
           <span className="num text-foreground/80">{batch.scored}</span> student
@@ -2191,18 +2313,19 @@ function ActualsSection({
       )}
       <div className="mt-3 grid grid-cols-2 gap-3 max-w-md">
         <StatTile
-          label="AUC on matured"
+          label="Accuracy in reality"
           value={fmtMetric(a.aucOnMatured)}
-          hint="what actually happened"
+          hint={aucPlain(a.aucOnMatured) ? `what actually happened — ${aucPlain(a.aucOnMatured)}` : 'what actually happened'}
         />
         <StatTile
-          label="Trained AUC"
+          label="Accuracy when trained"
           value={fmtMetric(entry.trainedAuc)}
-          hint="the training estimate"
+          hint={aucPlain(entry.trainedAuc) ? `the promise at training — ${aucPlain(entry.trainedAuc)}` : 'the promise at training'}
         />
       </div>
       {withData.length > 0 && (
-        <div className="mt-4">
+        <TechDetails label="Technical detail — calibration against reality">
+        <div className="mt-1">
           <p className="text-label mb-1.5">Calibration in the wild</p>
           <p className="text-xs text-muted-foreground mb-2.5">
             If the model is honest, higher predicted bands should realise the outcome more often.
@@ -2223,6 +2346,7 @@ function ActualsSection({
             ))}
           </div>
         </div>
+        </TechDetails>
       )}
     </div>
   )
@@ -2233,6 +2357,10 @@ function DriftSection({ drift }: { drift: DriftRow[] }) {
   return (
     <div>
       <p className="text-label mb-1.5">Population drift</p>
+      <p className="text-xs text-muted-foreground mb-2">
+        Has the mix of students changed since the model learned? Big shifts mean the model is
+        describing a world that no longer exists.
+      </p>
       <p className="text-xs text-muted-foreground mb-2">
         PSI compares today&apos;s cohort with the training snapshot: &lt;0.1 stable, 0.1–0.25
         moderate, ≥0.25 major. Drift means today&apos;s cohort looks different from the one
@@ -2355,7 +2483,9 @@ function MonitoringCard({ entry, canTrain }: { entry: MonitoringEntry; canTrain:
           <ActualsSection entry={{ ...entry, actuals: entry.actuals }} />
         )}
 
-        <DriftSection drift={entry.drift} />
+        <TechDetails label="Technical detail — has the student population shifted since training?">
+          <DriftSection drift={entry.drift} />
+        </TechDetails>
 
         <div>
           <p className="text-label mb-1.5">Prediction trend</p>
@@ -2521,19 +2651,48 @@ export default function PatternLabPage() {
             <TabsTrigger value="predictions"><TrendingUp className="h-4 w-4 mr-1.5" /> Predictions</TabsTrigger>
             <TabsTrigger value="monitoring"><Activity className="h-4 w-4 mr-1.5" /> Monitoring</TabsTrigger>
           </TabsList>
+          <JourneyBar tab={tab} onGo={setTab} />
           <TabsContent value="overview" className="mt-4">
+            <PlainIntro>
+              Pattern Lab studies your own students&apos; history and highlights patterns — for
+              example, which current students resemble past students who ran into funding trouble.
+              Everything here is <b>advisory</b>: it never changes a record, and a person always
+              decides what to do about it.
+            </PlainIntro>
             <OverviewTab onNewAnalysis={() => setTab('discover')} />
           </TabsContent>
           <TabsContent value="discover" className="mt-4">
+            <PlainIntro>
+              An analysis starts here. Pick one of the pre-approved questions, take a snapshot of
+              the history, and run it. If there isn&apos;t enough reliable history to answer a
+              question honestly, that question is <b>locked</b> and tells you exactly what&apos;s
+              missing — the platform would rather refuse than guess.
+            </PlainIntro>
             <DiscoverTab canAnalyse={canAnalyse} canTrain={canTrain} />
           </TabsContent>
           <TabsContent value="models" className="mt-4">
+            <PlainIntro>
+              A &ldquo;model&rdquo; is a rule-of-thumb learned from your history. New models start
+              as <b>candidates</b>; a person decides whether one is good enough to use — and
+              whoever built it is not allowed to approve it. The accuracy score runs from 0.5
+              (a coin toss) to 1.0 (perfect).
+            </PlainIntro>
             <ModelsTab onGoDiscover={() => setTab('discover')} />
           </TabsContent>
           <TabsContent value="predictions" className="mt-4">
+            <PlainIntro>
+              Each approved model gives every current student a score — &ldquo;this student looks
+              74% similar to past students who lost funding&rdquo;. A score is a prompt for a human
+              conversation, never an automatic decision, and each one lists the factors behind it.
+            </PlainIntro>
             <PredictionsTab canTrain={canTrain} />
           </TabsContent>
           <TabsContent value="monitoring" className="mt-4">
+            <PlainIntro>
+              This tab checks whether the models are still telling the truth: old predictions are
+              compared with what actually happened. A model doing badly is flagged for
+              <b> review</b> right here — the platform grades its own work and says so honestly.
+            </PlainIntro>
             <MonitoringTab canTrain={canTrain} />
           </TabsContent>
         </Tabs>

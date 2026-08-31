@@ -10,6 +10,8 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
+from sqlalchemy import select
+
 from app.core.errors import ConflictError, NotFoundError, WorkflowError
 from app.modules.admissions.constants import OfferStatus
 from app.modules.admissions.models import Offer
@@ -71,6 +73,20 @@ class AdmissionsService:
         offer = await self._get_offer(offer_id)
         if offer.status != OfferStatus.draft:
             raise WorkflowError(f"Only a draft offer can be issued (currently {offer.status.value})")
+
+        # F3 — visa gate. If the applicant is visa-required, the check must have been completed
+        # before Admissions issues the offer. This prevents UKVI compliance drift.
+        from app.modules.recruitment.models import Application
+
+        application = (await self.session.execute(
+            select(Application).where(Application.id == offer.application_id)
+        )).scalar_one_or_none()
+        if application is not None and application.visa_required and application.visa_check_completed_at is None:
+            raise WorkflowError(
+                "This applicant is flagged as visa-required — complete the visa check before issuing "
+                "the offer."
+            )
+
         offer.status = OfferStatus.issued
         offer.issued_at = _now()
         await self.session.commit()
@@ -122,6 +138,16 @@ class AdmissionsService:
         offer = await self._get_offer(offer_id)
         if offer.status != OfferStatus.issued:
             raise WorkflowError(f"Only an issued offer can be accepted (currently {offer.status.value})")
+
+        # F3 — cannot accept while any first-class OfferCondition remains unsatisfied.
+        from app.modules.recruitment.f3_service import OfferConditionService
+
+        pending = await OfferConditionService(self.session).any_unsatisfied(offer.id)
+        if pending:
+            raise WorkflowError(
+                f"{len(pending)} offer condition(s) unsatisfied — mark them satisfied or waived "
+                f"before accepting. First: {pending[0].description[:80]}"
+            )
 
         rec_repo = RecruitmentRepository(self.session)
         rec_svc = RecruitmentService(rec_repo)

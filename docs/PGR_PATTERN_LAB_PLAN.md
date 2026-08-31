@@ -1,7 +1,7 @@
 # PGR Pattern Lab — Implementation Plan
 
 **Source:** `PGR_Pattern_Lab_Implementation_Plan.docx` (product & implementation plan)
-**Status:** APPROVED — PL-1 + PL-2 BUILT (2026-08-22); PL-3+ pending review
+**Status:** ✅ **COMPLETE — all six phases built, tested and browser-verified (2026-08-22)**
 **Prepared:** 2026-08-22, against migration head `800191647194`, 224 passing tests
 
 > **Build record (PL-1 + PL-2):** module `app/modules/pattern_lab/` (targets, features,
@@ -55,6 +55,22 @@
 > left untouched (it feeds exports + the assistant); the cohort lens is the Predictions tab
 > and the per-student panel. Live run: 266 students scored in 700 ms, mean 13.4%, 13
 > students in the 60–80 % band, every one explained. 244 tests (+1 conditional skip).
+>
+> **Build record (PL-6):** `monitoring.py` — performance vs actuals (matured predictions
+> compared against real outcomes: calibration-in-the-wild per band + AUC on the matured
+> subset via a rank statistic — monitoring needs no ML dependency), population drift per
+> feature (PSI against the frozen training matrix; the stored dataset artifact pays off),
+> prediction trend per batch, and a health verdict (`ok`/`watch`/`review`) that **names its
+> reasons** and computes a recommended review date (`pattern_lab.review_interval_days`
+> setting, default 90). **Manual-first retraining**: `POST /models/{id}/retrain` builds a
+> fresh dataset + re-runs the candidate search; the result enters at CANDIDATE and walks
+> the same governance — nothing auto-promotes; scheduled/triggered retraining deliberately
+> deferred until a manual cycle has been observed. **First live run caught a real issue**:
+> the production funding model flagged `review` — matured AUC 0.48 vs trained 0.70 plus
+> major PSI drift in four features — the training-serving skew between point-in-time
+> training features and scored-today features, surfaced by the monitor exactly as designed.
+> The browser-verified retrain round-trip produced v2 candidates with production v1
+> untouched. 248 tests (+1 conditional skip).
 
 ---
 

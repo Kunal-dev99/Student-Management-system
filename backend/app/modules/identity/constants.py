@@ -17,6 +17,12 @@ PERMISSIONS: dict[str, str] = {
     "progression.read": "Read progression milestones",
     "progression.decide": "Decide progression outcomes",
     "reporting.read": "Read dashboards and reports",
+    # F1 — statutory sign-off. Distinct from admin.configure: signing off attests that a
+    # regulatory return is complete, and belongs to Registry / HESA owners, not any admin.
+    "reports.signoff": "Sign off (or unsign) a statutory report profile",
+    # F2 — GDPR person operations (merge, subject-access export, erasure). Sensitive enough
+    # to sit outside admin.configure and person.write.
+    "person.gdpr": "Merge duplicate persons; export or erase a person under GDPR",
     "admin.configure": "Configure programmes, workflows, and rules",
     # Phase 4A
     "audit.read": "Read the audit trail",
@@ -45,7 +51,7 @@ ROLES: dict[str, list[str]] = {
     "PGR Administrator": [
         "person.read", "person.write", "student.read", "student.write",
         "recruitment.read", "recruitment.write", "funding.read",
-        "progression.read", "reporting.read",
+        "progression.read", "reporting.read", "reports.signoff",
         "audit.read", "document.read", "document.write",
         "assistant.use", "student.lifecycle.approve",
         "ml.read", "ml.analyse", "ml.train",

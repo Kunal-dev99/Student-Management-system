@@ -7,6 +7,7 @@ type Variant = 'default' | 'secondary' | 'success' | 'info' | 'warning' | 'destr
 
 const OPP: Record<OpportunityStatus, Variant> = {
   draft: 'secondary', approved: 'info', open: 'success', recruiting: 'info',
+  paused: 'warning',
   filled: 'warning', closed: 'outline',
 }
 const STAGE: Record<CandidateStage, Variant> = {

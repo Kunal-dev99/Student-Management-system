@@ -73,7 +73,22 @@ async def list_students(
 ) -> dict:
     allowed = await scoped_ids(principal, session)
     rows, total = await _svc(session).list_students(limit=page.limit, offset=page.offset, allowed_ids=allowed)
-    data = [StudentOut.model_validate(s).model_dump(by_alias=True) for s in rows]
+    # One batch lookup for the page's person names — the register is read by
+    # humans, and humans find students by name, not by reference.
+    from sqlalchemy import select
+
+    from app.modules.person.models import Person
+
+    person_ids = {s.person_id for s in rows}
+    names: dict = {}
+    if person_ids:
+        people = (await session.execute(select(Person).where(Person.id.in_(person_ids)))).scalars()
+        names = {p.id: f"{p.given_name} {p.family_name}" for p in people}
+    data = [
+        {**StudentOut.model_validate(s).model_dump(by_alias=True),
+         "personName": names.get(s.person_id)}
+        for s in rows
+    ]
     return list_envelope(data, limit=page.limit, total=total)
 
 

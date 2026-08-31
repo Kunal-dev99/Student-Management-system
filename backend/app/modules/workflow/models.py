@@ -58,6 +58,14 @@ class Task(UUIDMixin, TimestampMixin, Base):
     aggregate_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
+    # F5 — SLA clock. sla_target_seconds is the promised turnaround. sla_started_at defaults to
+    # task creation; the worker computes elapsed and flips sla_breached when target is exceeded.
+    # working_days_only is respected by the elapsed-time computation on the report side.
+    sla_target_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    sla_working_days_only: Mapped[bool] = mapped_column(Boolean, default=False)
+    sla_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    sla_breached: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+
     __table_args__ = (Index("ix_task_role_status", "assignee_role", "status"),)
 
 

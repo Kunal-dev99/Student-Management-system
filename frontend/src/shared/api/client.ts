@@ -37,13 +37,19 @@ export class ApiError extends Error {
   requestId: string
   status: number
   details: unknown[]
+  /** Raw permission code from a 403 "Missing permission: <code>" body, if any. */
+  permission: string | null
   constructor(status: number, body: ApiErrorBody) {
-    super(body.message)
+    // Translate raw permission refusals once, centrally, so no screen or toast
+    // ever shows the user a bare permission code.
+    const missing = status === 403 ? /^Missing permission: (\S+)$/.exec(body.message ?? '') : null
+    super(missing ? "You don't have access to this. Ask an administrator if you need it." : body.message)
     this.name = 'ApiError'
     this.status = status
     this.code = body.code
     this.requestId = body.requestId
     this.details = body.details ?? []
+    this.permission = missing ? missing[1] : null
   }
 }
 

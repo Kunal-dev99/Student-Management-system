@@ -10,6 +10,7 @@ import {
 } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useToast } from '@/components/ui/use-toast'
+import { useCan } from '@/shared/auth/Can'
 import {
   useApprovePayment, useGenerateSchedule, useMarkPaymentPaid, usePayments, useSetPaymentStatus,
   type PaymentFrequency, type PaymentStatus,
@@ -23,6 +24,8 @@ const PAYMENT_VARIANT: Record<PaymentStatus, 'secondary' | 'info' | 'success' | 
 
 export function PaymentsSection({ studentId, arrangementId }: { studentId: string; arrangementId: string }) {
   const { toast } = useToast()
+  // All payment mutations are funding.change server-side; readers see the schedule only.
+  const canChange = useCan('funding.change')
   const payments = usePayments(arrangementId)
   const generate = useGenerateSchedule(studentId, arrangementId)
   const approve = useApprovePayment(studentId, arrangementId)
@@ -39,7 +42,7 @@ export function PaymentsSection({ studentId, arrangementId }: { studentId: strin
 
   return (
     <div className="mt-2 bg-surface-2 rounded-md p-3 space-y-3">
-      <div className="flex flex-wrap items-end gap-2">
+      {canChange ? <div className="flex flex-wrap items-end gap-2">
         <span className="text-sm font-medium mr-1">Payment schedule</span>
         <Select value={frequency} onValueChange={(v) => setFrequency(v as PaymentFrequency)}>
           <SelectTrigger className="w-36 h-8"><SelectValue /></SelectTrigger>
@@ -64,7 +67,7 @@ export function PaymentsSection({ studentId, arrangementId }: { studentId: strin
           }}>
           Generate schedule
         </Button>
-      </div>
+      </div> : <span className="text-sm font-medium">Payment schedule</span>}
 
       {payments.isLoading ? <Skeleton className="h-16 w-full" /> : (
         payments.data && payments.data.length > 0 ? (
@@ -91,13 +94,13 @@ export function PaymentsSection({ studentId, arrangementId }: { studentId: strin
                   <TableCell className="text-sm font-mono">{p.financeReference ?? '—'}</TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-1 flex-wrap">
-                      {p.status === 'scheduled' && (
+                      {canChange && p.status === 'scheduled' && (
                         <Button size="sm" variant="ghost" disabled={approve.isPending}
                           onClick={async () => { try { await approve.mutateAsync(p.id); toast({ title: 'Instalment approved' }) } catch (e) { err(e) } }}>
                           Approve
                         </Button>
                       )}
-                      {(p.status === 'scheduled' || p.status === 'approved') && (
+                      {canChange && (p.status === 'scheduled' || p.status === 'approved') && (
                         payingId === p.id ? (
                           <>
                             <Input className="w-36 h-8" placeholder="Finance reference" value={financeRef}
@@ -117,7 +120,7 @@ export function PaymentsSection({ studentId, arrangementId }: { studentId: strin
                           </Button>
                         )
                       )}
-                      {(p.status === 'scheduled' || p.status === 'approved') && payingId !== p.id && (
+                      {canChange && (p.status === 'scheduled' || p.status === 'approved') && payingId !== p.id && (
                         <Button size="sm" variant="ghost" disabled={setStatus.isPending}
                           onClick={async () => { try { await setStatus.mutateAsync({ paymentId: p.id, status: 'held' }); toast({ title: 'Instalment held' }) } catch (e) { err(e) } }}>
                           Hold

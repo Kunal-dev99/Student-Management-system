@@ -25,7 +25,11 @@ from app.modules.person.models import Person, PersonRelationship
 from app.modules.student_record.constants import StudentStatus, StudyMode
 from app.modules.student_record.models import Student
 
-PERMS = ["student.read", "student.write", "person.read", "funding.read"]
+PERMS = [
+    "student.read", "student.write", "person.read", "funding.read",
+    # F4 — classification workflow uses progression.decide (exam board) and reports.signoff (Registry)
+    "progression.decide", "reports.signoff",
+]
 
 
 @pytest_asyncio.fixture
@@ -46,7 +50,11 @@ async def ctx(engine):
         role = Role(name="PGR Administrator")
         s.add(role); await s.flush(); await s.refresh(role, ["permissions"]); role.permissions = perms
         user = User(email="u@t.com", password_hash=hash_password("pw"), is_active=True)
-        s.add(user); await s.flush(); await s.refresh(user, ["roles"]); user.roles = [role]
+        # F4 — a second user so approver-separation on classification.confirm can be tested.
+        user2 = User(email="u2@t.com", password_hash=hash_password("pw"), is_active=True)
+        s.add_all([user, user2]); await s.flush()
+        await s.refresh(user, ["roles"]); user.roles = [role]
+        await s.refresh(user2, ["roles"]); user2.roles = [role]
 
         person = Person(given_name="Sam", family_name="R")
         person.relationships = [PersonRelationship(
@@ -72,6 +80,9 @@ async def ctx(engine):
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         r = await client.post("/api/v1/auth/login", json={"email": "u@t.com", "password": "pw"})
         h = {"Authorization": f"Bearer {r.json()['accessToken']}"}
+        r2 = await client.post("/api/v1/auth/login", json={"email": "u2@t.com", "password": "pw"})
+        h2 = {"Authorization": f"Bearer {r2.json()['accessToken']}"}
+        ids["h2"] = h2  # F4 — second user for approver separation
         yield client, h, ids
     app.dependency_overrides.clear()
 
@@ -115,6 +126,16 @@ async def test_graduation_closes_the_loop(ctx):
 
     r = await client.post(f"/api/v1/students/{sid}/completion/confirm", headers=h)
     assert r.status_code == 200 and r.json()["status"] == "award_confirmed"
+
+    # F4 — classification must reach 'published' before graduation.
+    h2 = ids["h2"]
+    r = await client.post(f"/api/v1/students/{sid}/classification/propose", headers=h,
+                          json={"classification": "PhD"})
+    assert r.status_code == 200, r.text
+    r = await client.post(f"/api/v1/students/{sid}/classification/confirm", headers=h2)
+    assert r.status_code == 200 and r.json()["classificationState"] == "confirmed"
+    r = await client.post(f"/api/v1/students/{sid}/classification/publish", headers=h)
+    assert r.status_code == 200 and r.json()["classificationState"] == "published"
 
     r = await client.post(f"/api/v1/students/{sid}/graduation", headers=h)
     assert r.status_code == 200

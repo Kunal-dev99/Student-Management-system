@@ -234,6 +234,21 @@ class ProgressionService:
             review.re_review_due = date.today() + timedelta(days=RE_REVIEW_DAYS)
         m.status = MilestoneStatus.decided
 
+        # ICR gap 1 — automatic registration_status flip. The milestone definition may carry a
+        # ``registration_effect`` block (e.g. Transfer Viva on the ICR-PHD programme has
+        # {"onDecideContinue": "PhD (upgraded)", "onDecideFail": "Withdrawn"}). If it does,
+        # the student's registration_status flips to match the outcome bucket. Nothing happens
+        # for milestone definitions without the effect — every non-ICR milestone is unaffected.
+        defn_for_effect = await self.repo.get_definition(m.milestone_definition_id)
+        effect = (defn_for_effect.registration_effect if defn_for_effect else None) or {}
+        if effect:
+            student_for_flip = await StudentRepository(self.session).get(m.student_id)
+            if student_for_flip is not None:
+                if outcome in CONTINUING_OUTCOMES and effect.get("onDecideContinue"):
+                    student_for_flip.registration_status = effect["onDecideContinue"]
+                elif outcome not in CONTINUING_OUTCOMES and effect.get("onDecideFail"):
+                    student_for_flip.registration_status = effect["onDecideFail"]
+
         # Notify the student's user of the decision (arch §9 — notification engine).
         from app.modules.identity.repository import IdentityRepository
         from app.modules.workflow.engine import WorkflowEngine

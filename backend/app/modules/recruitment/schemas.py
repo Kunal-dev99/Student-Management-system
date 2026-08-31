@@ -11,6 +11,7 @@ from pydantic.alias_generators import to_camel
 from app.modules.recruitment.constants import (
     ApplicationRoute,
     CandidateStage,
+    OpportunityFunding,
     OpportunityStatus,
 )
 
@@ -34,6 +35,8 @@ class OpportunityCreate(_Camel):
     # Phase 6.1 — provenance: the demand this position answers and the award funding it.
     research_demand_id: uuid.UUID | None = None
     research_award_id: uuid.UUID | None = None
+    # W1.1 — explicit funding shape; defaults on the DB side so this may be omitted.
+    opportunity_type: OpportunityFunding | None = None
 
 
 class OpportunityUpdate(_Camel):
@@ -41,6 +44,7 @@ class OpportunityUpdate(_Camel):
     eligibility: str | None = None
     stipend_amount: Decimal | None = None
     positions_available: int | None = None
+    opportunity_type: OpportunityFunding | None = None
 
 
 class OpportunityOut(_Camel):
@@ -59,6 +63,7 @@ class OpportunityOut(_Camel):
     research_demand_id: uuid.UUID | None = None
     research_award_id: uuid.UUID | None = None
     status: OpportunityStatus
+    opportunity_type: OpportunityFunding = OpportunityFunding.funded
     created_at: datetime
 
 
@@ -101,6 +106,10 @@ class ApplicationOut(_Camel):
     current_stage: CandidateStage
     submitted_at: datetime | None = None
     created_at: datetime
+    # F3 — fee status + visa gate fields
+    fee_status: str | None = "unknown"
+    visa_required: bool = False
+    visa_check_completed_at: datetime | None = None
     history: list[StageHistoryOut] = Field(default_factory=list)
     assessments: list[AssessmentOut] = Field(default_factory=list)
 

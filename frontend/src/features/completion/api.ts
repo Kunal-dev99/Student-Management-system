@@ -40,3 +40,59 @@ export function useGraduate(studentId: string) {
     onSuccess: () => inv(qc, studentId),
   })
 }
+
+
+// -------- F4 — classification workflow + certificate --------
+
+export type ClassificationState = 'none' | 'draft' | 'proposed' | 'confirmed' | 'published'
+
+export interface Classification {
+  studentId: string
+  classification: string | null
+  classificationState: ClassificationState
+  classificationTitle?: string
+  proposedByUserId: string | null
+  confirmedByUserId: string | null
+  publishedAt: string | null
+  certificateDocumentId: string | null
+  options: string[]
+}
+
+export const useClassification = (studentId: string) =>
+  useQuery({
+    queryKey: ['classification', studentId],
+    queryFn: () => api.get<Classification>(`/students/${studentId}/classification`),
+    enabled: !!studentId,
+  })
+
+export function useProposeClassification(studentId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (classification: string) =>
+      api.post<Classification>(`/students/${studentId}/classification/propose`, { classification }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['classification', studentId] }),
+  })
+}
+
+export function useConfirmClassification(studentId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => api.post<Classification>(`/students/${studentId}/classification/confirm`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['classification', studentId] }),
+  })
+}
+
+export function usePublishClassification(studentId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => api.post<Classification>(`/students/${studentId}/classification/publish`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['classification', studentId] })
+      qc.invalidateQueries({ queryKey: ['completion', studentId] })
+    },
+  })
+}
+
+export function certificateUrl(studentId: string): string {
+  return `/api/v1/students/${studentId}/certificate`
+}

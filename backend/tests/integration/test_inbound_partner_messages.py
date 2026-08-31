@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import uuid
 from datetime import date
 
 import pytest
@@ -205,3 +206,157 @@ async def test_reconciliation_counts_outbound_backlog(ctx):
     assert "pending" in body["outbound"]
     assert "deadLettered" in body["outbound"]
     assert body["windowDays"] == 30
+
+
+
+# ============================================================================
+# W3 - Finance inbound handler (payment.confirmed / payment.rejected)
+# ============================================================================
+
+async def _seed_payment(sm, *, status=None, finance_ref: str | None = None):
+    """Seed a stipend arrangement + one payment in the given state; return payment id."""
+    from datetime import date as _d
+    from decimal import Decimal
+    from app.modules.funding.constants import FundingStatus, FundingType, PaymentStatus
+    from app.modules.funding.models import FundingArrangement, StipendPayment
+    from app.modules.student_record.models import Programme, Student
+    from app.modules.person.models import Person
+    async with sm() as s:
+        prog = Programme(name="PhD CS", code="PHD-CS-W3"); s.add(prog); await s.flush()
+        person = Person(given_name="Fin", family_name="Test", email="fin@t.com")
+        s.add(person); await s.flush()
+        stu = Student(person_id=person.id, student_ref="FIN-W3-1",
+                      programme_id=prog.id, start_date=_d(2026, 1, 1))
+        s.add(stu); await s.flush()
+        arr = FundingArrangement(
+            student_id=stu.id, funding_type=FundingType.research_council,
+            stipend_amount=Decimal("18000"), currency="GBP",
+            valid_from=_d(2026, 1, 1), status=FundingStatus.active,
+        )
+        s.add(arr); await s.flush()
+        pay = StipendPayment(
+            student_id=stu.id, arrangement_id=arr.id, sequence=1,
+            due_date=_d(2026, 8, 1), amount=Decimal("1500"), currency="GBP",
+            status=(status or PaymentStatus.approved),
+            finance_reference=finance_ref,
+        )
+        s.add(pay); await s.commit()
+        return str(pay.id)
+
+
+@pytest.mark.asyncio
+async def test_w3_finance_payment_confirmed_marks_paid(ctx):
+    """A payment.confirmed inbound message flips the row to PAID with the finance ref."""
+    from sqlalchemy import select as _sel
+    from app.modules.funding.constants import PaymentStatus
+    from app.modules.funding.models import StipendPayment
+    c, h, sm = ctx
+    pid = await _seed_payment(sm)
+
+    body = {
+        "sourceId": "FIN-CONF-1",
+        "eventType": "payment.confirmed",
+        "payload": {"paymentId": pid, "paidOn": "2026-08-15", "financeReference": "FIN-REF-42"},
+    }
+    raw, headers = _signed(body)
+    r = await c.post("/api/v1/integration/webhooks/finance", content=raw, headers=headers)
+    assert r.status_code == 200, r.text
+    body_out = r.json()
+    assert body_out["status"] == "processed", body_out
+    assert body_out["applied"]["action"] == "marked_paid"
+
+    async with sm() as s:
+        row = (await s.execute(_sel(StipendPayment).where(StipendPayment.id == uuid.UUID(pid)))).scalar_one()
+        assert row.status == PaymentStatus.paid
+        assert row.finance_reference == "FIN-REF-42"
+        assert row.paid_on.isoformat() == "2026-08-15"
+
+
+@pytest.mark.asyncio
+async def test_w3_finance_payment_confirmed_is_idempotent(ctx):
+    c, h, sm = ctx
+    pid = await _seed_payment(sm)
+    body = {"sourceId": "FIN-CONF-2", "eventType": "payment.confirmed",
+            "payload": {"paymentId": pid, "paidOn": "2026-08-15", "financeReference": "R1"}}
+    raw, headers = _signed(body)
+    r = await c.post("/api/v1/integration/webhooks/finance", content=raw, headers=headers)
+    assert r.json()["status"] == "processed"
+    # Second delivery with a NEW sourceId (partner resent) — the row is already paid, so the
+    # handler returns "already_paid" without exploding.
+    body2 = {"sourceId": "FIN-CONF-2-REPEAT", "eventType": "payment.confirmed",
+             "payload": {"paymentId": pid, "paidOn": "2026-08-15"}}
+    raw2, headers2 = _signed(body2)
+    r2 = await c.post("/api/v1/integration/webhooks/finance", content=raw2, headers=headers2)
+    assert r2.json()["status"] == "processed"
+    assert r2.json()["applied"]["action"] == "already_paid"
+
+
+@pytest.mark.asyncio
+async def test_w3_finance_payment_rejected_holds_row_with_reason(ctx):
+    from sqlalchemy import select as _sel
+    from app.modules.funding.constants import PaymentStatus
+    from app.modules.funding.models import StipendPayment
+    c, h, sm = ctx
+    pid = await _seed_payment(sm)
+
+    body = {"sourceId": "FIN-REJ-1", "eventType": "payment.rejected",
+            "payload": {"paymentId": pid, "reason": "invalid cost centre"}}
+    raw, headers = _signed(body)
+    r = await c.post("/api/v1/integration/webhooks/finance", content=raw, headers=headers)
+    assert r.status_code == 200 and r.json()["status"] == "processed"
+    assert r.json()["applied"]["action"] == "held"
+
+    async with sm() as s:
+        row = (await s.execute(_sel(StipendPayment).where(StipendPayment.id == uuid.UUID(pid)))).scalar_one()
+        assert row.status == PaymentStatus.held
+        assert row.note and "Finance rejected" in row.note and "invalid cost centre" in row.note
+
+
+@pytest.mark.asyncio
+async def test_w3_finance_lookup_by_reference_when_no_uuid(ctx):
+    """Finance may only carry its own reference; we should still find the row."""
+    from app.modules.funding.constants import PaymentStatus
+    c, h, sm = ctx
+    pid = await _seed_payment(sm, finance_ref="FIN-KNOWN-99")
+
+    body = {"sourceId": "FIN-LOOKUP-1", "eventType": "payment.confirmed",
+            "payload": {"financeReference": "FIN-KNOWN-99", "paidOn": "2026-09-01"}}
+    raw, headers = _signed(body)
+    r = await c.post("/api/v1/integration/webhooks/finance", content=raw, headers=headers)
+    assert r.json()["status"] == "processed"
+    assert r.json()["applied"]["paymentId"] == pid
+
+
+@pytest.mark.asyncio
+async def test_w3_finance_bad_payload_logs_with_error(ctx):
+    """A payload without paymentId or financeReference lands as logged_with_error, not dropped."""
+    c, h, sm = ctx
+    body = {"sourceId": "FIN-BAD-1", "eventType": "payment.confirmed", "payload": {}}
+    raw, headers = _signed(body)
+    r = await c.post("/api/v1/integration/webhooks/finance", content=raw, headers=headers)
+    assert r.json()["status"] == "logged_with_error"
+    assert "paymentId or financeReference" in r.json()["error"]
+
+    logs = (await c.get("/api/v1/integration/logs", headers=h)).json()["logs"]
+    entry = next(l for l in logs if l["sourceId"] == "FIN-BAD-1")
+    assert entry["status"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_w3_finance_reject_after_paid_is_refused(ctx):
+    """A payment.rejected after settlement is nonsense — the handler refuses so the incident
+    is triaged rather than silently rewriting a paid row."""
+    c, h, sm = ctx
+    pid = await _seed_payment(sm)
+    # First confirm
+    body = {"sourceId": "FIN-P1", "eventType": "payment.confirmed",
+            "payload": {"paymentId": pid, "paidOn": "2026-08-15"}}
+    raw, headers = _signed(body)
+    await c.post("/api/v1/integration/webhooks/finance", content=raw, headers=headers)
+    # Then try to reject it
+    body2 = {"sourceId": "FIN-P1-REJ", "eventType": "payment.rejected",
+             "payload": {"paymentId": pid, "reason": "should not apply"}}
+    raw2, headers2 = _signed(body2)
+    r = await c.post("/api/v1/integration/webhooks/finance", content=raw2, headers=headers2)
+    assert r.json()["status"] == "logged_with_error"
+    assert "already paid" in r.json()["error"].lower()

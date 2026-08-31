@@ -105,7 +105,8 @@ async def test_defaults_come_from_the_registry_not_the_database(ctx):
     assert flat["supervision.max_supervisees"]["value"] == 8
     assert flat["supervision.max_supervisees"]["overridden"] is False
     assert flat["email.enabled"]["value"] is True
-    assert flat["assistant.llm_enabled"]["value"] is False
+    # CB-C removed assistant.llm_enabled — the assistant no longer has an LLM fallback.
+    assert "assistant.llm_enabled" not in flat
 
 
 @pytest.mark.asyncio

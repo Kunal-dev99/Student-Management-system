@@ -46,7 +46,9 @@ class RecruitmentService:
         return opp
 
     async def create_opportunity(self, data: OpportunityCreate) -> ResearchOpportunity:
-        opp = ResearchOpportunity(**data.model_dump())
+        # W1.1 — drop opportunity_type when the caller left it None so the DB default (funded)
+        # kicks in; otherwise the Enum NOT NULL column rejects the explicit NULL.
+        opp = ResearchOpportunity(**data.model_dump(exclude_none=True))
         self.repo.add(opp)
         await self.repo.session.commit()
         await self.repo.session.refresh(opp)

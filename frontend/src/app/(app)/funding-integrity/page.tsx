@@ -9,12 +9,14 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { ArrowUpRight, ShieldAlert } from 'lucide-react'
 import { PageHeader } from '@/components/common/PageHeader'
+import { ErrorState } from '@/components/common/ErrorState'
 import { PageSection } from '@/components/common/PageSection'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ApiError } from '@/shared/api/client'
 import { FindingList } from '@/features/funding/FundingLineagePanel'
+import { FinanceLensPanel } from '@/features/funding/FinanceLensPanel'
 import { useFundingIntegrity } from '@/features/funding/api'
 
 function Tile({ label, value, tone }: { label: string; value: number; tone?: 'error' | 'warning' }) {
@@ -34,6 +36,7 @@ function Tile({ label, value, tone }: { label: string; value: number; tone?: 'er
 
 export default function FundingIntegrityPage() {
   const [errorsOnly, setErrorsOnly] = useState(false)
+  const [lens, setLens] = useState<'students' | 'finance'>('students')
   const { data, isLoading, isError, error } = useFundingIntegrity(errorsOnly ? 'error' : undefined)
 
   return (
@@ -43,10 +46,22 @@ export default function FundingIntegrityPage() {
         description="Every active student's funding chain, checked end to end: project → award → funder → arrangement → stipend."
       />
       <div className="px-6 pb-6 space-y-4">
-        {isLoading ? (
+        <div className="flex items-center gap-2">
+          <span className="text-label">Lens</span>
+          <Button size="sm" variant={lens === 'students' ? 'default' : 'outline'} onClick={() => setLens('students')}>
+            Students
+          </Button>
+          <Button size="sm" variant={lens === 'finance' ? 'default' : 'outline'} onClick={() => setLens('finance')}>
+            Finance
+          </Button>
+        </div>
+
+        {lens === 'finance' ? (
+          <FinanceLensPanel />
+        ) : isLoading ? (
           <Skeleton className="h-24 w-full" />
         ) : isError ? (
-          <p className="text-sm text-[hsl(var(--destructive))]">{(error as ApiError)?.message}</p>
+          <ErrorState error={error} />
         ) : data ? (
           <>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">

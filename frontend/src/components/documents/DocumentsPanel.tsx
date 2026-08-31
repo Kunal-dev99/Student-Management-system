@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
+import { useAuth } from '@/shared/auth/AuthContext'
 import { useToast } from '@/components/ui/use-toast'
 import {
   useDocuments, useUploadDocument, useDeleteDocument, downloadDocument,
@@ -32,6 +33,9 @@ interface DocumentsPanelProps {
 
 export function DocumentsPanel({ ownerType, ownerId, docType, title = 'Documents' }: DocumentsPanelProps) {
   const { toast } = useToast()
+  const { hasPermission } = useAuth()
+  // Upload and delete are document.write on the server; readers get a list + download only.
+  const canWrite = hasPermission('document.write')
   const { data, isLoading } = useDocuments(ownerType, ownerId)
   const upload = useUploadDocument()
   const remove = useDeleteDocument()
@@ -78,16 +82,18 @@ export function DocumentsPanel({ ownerType, ownerId, docType, title = 'Documents
                 <Button size="sm" variant="ghost" onClick={() => downloadDocument(doc)} aria-label="Download">
                   <Download className="h-4 w-4" />
                 </Button>
-                <Button size="sm" variant="ghost" disabled={remove.isPending} onClick={() => doDelete(doc)} aria-label="Delete">
-                  <Trash2 className="h-4 w-4" />
-                </Button>
+                {canWrite && (
+                  <Button size="sm" variant="ghost" disabled={remove.isPending} onClick={() => doDelete(doc)} aria-label="Delete">
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                )}
               </div>
             </div>
           )) : <p className="text-helper">No documents uploaded yet.</p>}
         </div>
       )}
 
-      <div className="flex flex-wrap items-end gap-2 pt-2 border-t border-border">
+      {canWrite && <div className="flex flex-wrap items-end gap-2 pt-2 border-t border-border">
         <Input
           ref={fileRef}
           type="file"
@@ -106,7 +112,7 @@ export function DocumentsPanel({ ownerType, ownerId, docType, title = 'Documents
           <Upload className="h-4 w-4 mr-1.5" />
           {upload.isPending ? 'Uploading…' : 'Upload'}
         </Button>
-      </div>
+      </div>}
     </PageSection>
   )
 }

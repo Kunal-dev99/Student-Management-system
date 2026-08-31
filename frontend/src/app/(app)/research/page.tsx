@@ -20,6 +20,7 @@ import {
 import { useToast } from '@/components/ui/use-toast'
 import { ApiError } from '@/shared/api/client'
 import { useFundingSources } from '@/features/funding/api'
+import { Can, useCan } from '@/shared/auth/Can'
 import {
   DEMAND_NEXT, useAwards, useCreateAward, useCreateDemand, useDemands, useTransitionDemand,
   type DemandStatus,
@@ -38,11 +39,13 @@ const DEMAND_VARIANT: Record<DemandStatus, 'secondary' | 'info' | 'warning' | 's
 function DemandStatusControl({ id, status }: { id: string; status: DemandStatus }) {
   const { toast } = useToast()
   const transition = useTransitionDemand()
+  // Demand transitions are recruitment.write server-side.
+  const canWrite = useCan('recruitment.write')
   const next = DEMAND_NEXT[status]
   return (
     <div className="flex items-center gap-2">
       <Badge variant={DEMAND_VARIANT[status]}>{status}</Badge>
-      {next.length > 0 && (
+      {canWrite && next.length > 0 && (
         <Select
           value=""
           onValueChange={async (v) => {
@@ -155,7 +158,7 @@ function DemandTab() {
           Demand is the recorded <em>need</em> for a researcher. It becomes a recruitable position
           only once it is approved and positioned.
         </p>
-        <RaiseDemandDialog />
+        <Can perm="recruitment.write"><RaiseDemandDialog /></Can>
       </div>
       <div className="card-elevated overflow-hidden">
         <Table>
@@ -198,7 +201,7 @@ function DemandTab() {
 function RecordAwardDialog() {
   const { toast } = useToast()
   const create = useCreateAward()
-  const funders = useFundingSources()
+  const funders = useFundingSources({ enabled: useCan('funding.read') })
   const [open, setOpen] = useState(false)
   const [awardRef, setAwardRef] = useState('')
   const [title, setTitle] = useState('')
@@ -288,7 +291,7 @@ function RecordAwardDialog() {
 
 function AwardsTab() {
   const awards = useAwards()
-  const funders = useFundingSources()
+  const funders = useFundingSources({ enabled: useCan('funding.read') })
   const funderName = (id: string | null) =>
     (id && funders.data?.find((f) => f.id === id)?.name) || '—'
 
@@ -299,7 +302,8 @@ function AwardsTab() {
           The PGR platform holds award <em>references</em>, never the authority. This is not grants
           management.
         </p>
-        <RecordAwardDialog />
+        {/* Creating awards is admin.configure — PGR admins record demands, not awards. */}
+        <Can perm="admin.configure"><RecordAwardDialog /></Can>
       </div>
       <div className="card-elevated overflow-hidden">
         <Table>

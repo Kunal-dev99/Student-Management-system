@@ -30,3 +30,18 @@ class Award(UUIDMixin, TimestampMixin, Base):
     title: Mapped[str] = mapped_column(String(200))
     award_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
     conferred_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # F4 — classification workflow: chair proposes → exam board confirms → Registry publishes.
+    # A completion cannot graduate until classification_state = 'published'.
+    classification: Mapped[str | None] = mapped_column(String(60), nullable=True)   # PhD / MPhil / PhD-with-corrections
+    classification_state: Mapped[str] = mapped_column(String(20), default="draft")  # draft | proposed | confirmed | published
+    proposed_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    confirmed_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    certificate_document_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("document.id", ondelete="SET NULL"), nullable=True
+    )

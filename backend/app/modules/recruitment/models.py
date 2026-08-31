@@ -12,6 +12,7 @@ from app.db.base import Base, TimestampMixin, UUIDMixin
 from app.modules.recruitment.constants import (
     ApplicationRoute,
     CandidateStage,
+    OpportunityFunding,
     OpportunityStatus,
 )
 
@@ -41,6 +42,12 @@ class ResearchOpportunity(UUIDMixin, TimestampMixin, Base):
     status: Mapped[OpportunityStatus] = mapped_column(
         Enum(OpportunityStatus, name="opportunity_status"), default=OpportunityStatus.draft
     )
+    # W1.1 — explicit funding shape (was previously inferred from stipend_amount).
+    # Migration backfills based on stipend_amount > 0.
+    opportunity_type: Mapped[OpportunityFunding] = mapped_column(
+        Enum(OpportunityFunding, name="opportunity_funding"),
+        default=OpportunityFunding.funded, index=True,
+    )
 
 
 class Application(UUIDMixin, TimestampMixin, Base):
@@ -57,6 +64,15 @@ class Application(UUIDMixin, TimestampMixin, Base):
         Enum(CandidateStage, name="candidate_stage"), default=CandidateStage.applicant
     )
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # F3 — fee status and visa gate. `visa_check_completed_at` is stamped when Admissions confirms
+    # the applicant's right-to-study; issuing a visa-required offer without it is refused.
+    fee_status: Mapped[str] = mapped_column(
+        Enum("home", "overseas", "channel_islands", "unknown", name="fee_status"),
+        default="unknown",
+    )
+    visa_required: Mapped[bool] = mapped_column(default=False)
+    visa_check_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     history: Mapped[list["CandidateStageHistory"]] = relationship(
         back_populates="application", lazy="selectin", cascade="all, delete-orphan"

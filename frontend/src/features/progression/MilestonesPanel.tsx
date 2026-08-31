@@ -11,6 +11,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import { useToast } from '@/components/ui/use-toast'
+import { useCan } from '@/shared/auth/Can'
 import { MilestoneReviewSection } from './MilestoneReviewSection'
 import {
   CONDITIONAL_OUTCOMES, useDecideMilestone, useMilestones, useSubmitMilestone,
@@ -27,6 +28,8 @@ const OUTCOMES: ProgressionOutcome[] = [
 
 export function MilestonesPanel({ studentId }: { studentId: string }) {
   const { toast } = useToast()
+  // Panel decisions are progression.decide server-side; Submit is progression.read.
+  const canDecide = useCan('progression.decide')
   const { data, isLoading } = useMilestones(studentId)
   const submit = useSubmitMilestone(studentId)
   const decide = useDecideMilestone(studentId)
@@ -73,13 +76,13 @@ export function MilestonesPanel({ studentId }: { studentId: string }) {
                           Submit
                         </Button>
                       )}
-                      <Select value={chosen ?? ''} onValueChange={(v) => setOutcome((o) => ({ ...o, [m.id]: v as ProgressionOutcome }))}>
+                      {canDecide && <Select value={chosen ?? ''} onValueChange={(v) => setOutcome((o) => ({ ...o, [m.id]: v as ProgressionOutcome }))}>
                         <SelectTrigger className="w-56 h-8"><SelectValue placeholder="Panel outcome…" /></SelectTrigger>
                         <SelectContent>
                           {OUTCOMES.map((o) => <SelectItem key={o} value={o}>{o.replace(/_/g, ' ')}</SelectItem>)}
                         </SelectContent>
-                      </Select>
-                      <Button size="sm" disabled={!chosen || decide.isPending}
+                      </Select>}
+                      {canDecide && <Button size="sm" disabled={!chosen || decide.isPending}
                         onClick={async () => {
                           try {
                             await decide.mutateAsync({
@@ -92,9 +95,9 @@ export function MilestonesPanel({ studentId }: { studentId: string }) {
                             toast({ title: 'Decision recorded' })
                             setExpanded((s) => ({ ...s, [m.id]: true }))
                           } catch (e) { err(e) }
-                        }}>Decide</Button>
+                        }}>Decide</Button>}
                     </div>
-                    <div className="grid gap-2 md:grid-cols-3">
+                    {canDecide && <div className="grid gap-2 md:grid-cols-3">
                       <Textarea className="min-h-[56px]" placeholder="Rationale" value={rationale[m.id] ?? ''}
                         onChange={(e) => setRationale((s) => ({ ...s, [m.id]: e.target.value }))} />
                       <Textarea className="min-h-[56px]"
@@ -103,7 +106,7 @@ export function MilestonesPanel({ studentId }: { studentId: string }) {
                         onChange={(e) => setConditions((s) => ({ ...s, [m.id]: e.target.value }))} />
                       <Textarea className="min-h-[56px]" placeholder="Outcome letter" value={letter[m.id] ?? ''}
                         onChange={(e) => setLetter((s) => ({ ...s, [m.id]: e.target.value }))} />
-                    </div>
+                    </div>}
                     {needsConditions && (
                       <p className="text-helper">
                         “{chosen.replace(/_/g, ' ')}” requires written conditions and a complete panel.

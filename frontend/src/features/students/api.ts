@@ -10,6 +10,8 @@ export type StudentStatus =
 export interface Student {
   id: string
   personId: string
+  /** Joined for the register view — humans find students by name, not ref. */
+  personName: string | null
   studentRef: string
   programmeId: string | null
   startDate: string | null

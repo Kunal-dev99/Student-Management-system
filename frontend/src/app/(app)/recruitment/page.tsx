@@ -18,6 +18,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import { useToast } from '@/components/ui/use-toast'
+import { Can, useCan } from '@/shared/auth/Can'
 import {
   useApplications, useCreateOpportunity, useOpportunities, usePipeline,
   useTransitionOpportunity, type OpportunityStatus,
@@ -26,11 +27,13 @@ import { OpportunityPill, StagePill } from '@/features/recruitment/StatusPills'
 import { useAwards, useDemands, usePositionLineage } from '@/features/research/api'
 
 // Allowed opportunity transitions (mirrors the backend FSM, arch §8.4).
+// W1.3 — 'paused' is bidirectional with open, and also reachable from recruiting.
 const OPP_NEXT: Record<OpportunityStatus, OpportunityStatus[]> = {
   draft: ['approved', 'closed'],
   approved: ['open', 'closed'],
-  open: ['recruiting', 'closed'],
-  recruiting: ['filled', 'closed'],
+  open: ['recruiting', 'paused', 'closed'],
+  recruiting: ['filled', 'paused', 'closed'],
+  paused: ['open', 'closed'],
   filled: ['closed'],
   closed: [],
 }
@@ -38,11 +41,13 @@ const OPP_NEXT: Record<OpportunityStatus, OpportunityStatus[]> = {
 function OpportunityStatusControl({ id, status }: { id: string; status: OpportunityStatus }) {
   const { toast } = useToast()
   const transition = useTransitionOpportunity()
+  // Opportunity transitions are recruitment.write server-side.
+  const canWrite = useCan('recruitment.write')
   const next = OPP_NEXT[status]
   return (
     <div className="flex items-center gap-2">
       <OpportunityPill status={status} />
-      {next.length > 0 && (
+      {canWrite && next.length > 0 && (
         <Select
           value=""
           onValueChange={async (v) => {
@@ -241,25 +246,55 @@ function LineageDialog({ opportunityId, title }: { opportunityId: string; title:
 
 function OpportunitiesTab() {
   const { data, isLoading } = useOpportunities()
+  // W1.8 — opportunity_type filter chip
+  const [typeFilter, setTypeFilter] = useState<'all' | 'funded' | 'partially_funded' | 'unfunded'>('all')
+  const filtered = (data?.data ?? []).filter(
+    (o) => typeFilter === 'all' || o.opportunityType === typeFilter,
+  )
   return (
     <div className="space-y-3">
-      <div className="flex justify-end"><NewOpportunityDialog /></div>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="text-label mr-1">Funding:</span>
+        {(['all', 'funded', 'partially_funded', 'unfunded'] as const).map((f) => (
+          <button
+            key={f}
+            onClick={() => setTypeFilter(f)}
+            className={`px-2.5 py-1 rounded-full text-xs border transition ${
+              typeFilter === f
+                ? 'bg-primary text-primary-foreground border-primary'
+                : 'bg-transparent text-muted-foreground border-border hover:text-foreground'
+            }`}
+          >
+            {f === 'all' ? 'All' : f.replace(/_/g, ' ')}
+          </button>
+        ))}
+        <span className="text-helper ml-2">Showing {filtered.length} of {data?.data.length ?? 0}</span>
+        <div className="ml-auto"><Can perm="recruitment.write"><NewOpportunityDialog /></Can></div>
+      </div>
       <div className="card-elevated overflow-hidden">
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Title</TableHead><TableHead>Stipend</TableHead>
+              <TableHead>Title</TableHead>
+              <TableHead>Funding</TableHead>
+              <TableHead>Stipend</TableHead>
               <TableHead>Places</TableHead><TableHead>Status</TableHead>
               <TableHead className="text-right">Provenance</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {isLoading && (
-              <TableRow><TableCell colSpan={5}><Skeleton className="h-5 w-full" /></TableCell></TableRow>
+              <TableRow><TableCell colSpan={6}><Skeleton className="h-5 w-full" /></TableCell></TableRow>
             )}
-            {data?.data.map((o) => (
+            {filtered.map((o) => (
               <TableRow key={o.id}>
                 <TableCell className="font-medium">{o.title}</TableCell>
+                <TableCell>
+                  <Badge variant={o.opportunityType === 'funded' ? 'success'
+                                : o.opportunityType === 'partially_funded' ? 'warning' : 'secondary'}>
+                    {o.opportunityType.replace(/_/g, ' ')}
+                  </Badge>
+                </TableCell>
                 <TableCell className="num text-muted-foreground">
                   {o.stipendAmount ? `${o.currency ?? ''} ${Number(o.stipendAmount).toLocaleString()}` : '—'}
                 </TableCell>
@@ -275,8 +310,10 @@ function OpportunitiesTab() {
                 </TableCell>
               </TableRow>
             ))}
-            {data && data.data.length === 0 && (
-              <TableRow><TableCell colSpan={5} className="text-muted-foreground text-center py-8">No opportunities yet.</TableCell></TableRow>
+            {data && filtered.length === 0 && (
+              <TableRow><TableCell colSpan={6} className="text-muted-foreground text-center py-8">
+                {data.data.length === 0 ? 'No opportunities yet.' : 'No opportunities match this funding filter.'}
+              </TableCell></TableRow>
             )}
           </TableBody>
         </Table>
@@ -289,6 +326,12 @@ function ApplicationsTab() {
   const pipeline = usePipeline()
   const { data, isLoading } = useApplications()
   const counts = pipeline.data?.counts ?? {}
+  // F3 — route filter chip. Server does not filter by route yet; client-side is enough at
+  // this scale (a few hundred applications per year).
+  const [routeFilter, setRouteFilter] = useState<'all' | 'opportunity_led' | 'student_led'>('all')
+  const filteredRows = (data?.data ?? []).filter(
+    (a) => routeFilter === 'all' || a.route === routeFilter,
+  )
 
   return (
     <div className="space-y-4">
@@ -304,6 +347,26 @@ function ApplicationsTab() {
         )}
       </div>
 
+      <div className="flex flex-wrap gap-1.5 items-center">
+        <span className="text-label mr-1">Route:</span>
+        {(['all', 'opportunity_led', 'student_led'] as const).map((r) => (
+          <button
+            key={r}
+            onClick={() => setRouteFilter(r)}
+            className={`px-2.5 py-1 rounded-full text-xs border transition ${
+              routeFilter === r
+                ? 'bg-primary text-primary-foreground border-primary'
+                : 'bg-transparent text-muted-foreground border-border hover:text-foreground'
+            }`}
+          >
+            {r === 'all' ? 'All' : r === 'opportunity_led' ? 'Route A · opportunity' : 'Route B · student proposal'}
+          </button>
+        ))}
+        <span className="text-helper ml-2">
+          Showing {filteredRows.length} of {data?.data.length ?? 0}
+        </span>
+      </div>
+
       <div className="card-elevated overflow-hidden">
         <Table>
           <TableHeader>
@@ -316,20 +379,26 @@ function ApplicationsTab() {
             {isLoading && (
               <TableRow><TableCell colSpan={4}><Skeleton className="h-5 w-full" /></TableCell></TableRow>
             )}
-            {data?.data.map((a) => (
+            {filteredRows.map((a) => (
               <TableRow key={a.id}>
                 <TableCell className="font-medium">
                   <Link href={`/recruitment/applications/${a.id}`} className="hover:text-primary">
                     {a.id.slice(0, 8)}…
                   </Link>
                 </TableCell>
-                <TableCell className="text-muted-foreground">{a.route.replace(/_/g, ' ')}</TableCell>
+                <TableCell>
+                  <Badge variant={a.route === 'opportunity_led' ? 'secondary' : 'warning'}>
+                    {a.route === 'opportunity_led' ? 'Route A' : 'Route B'}
+                  </Badge>
+                </TableCell>
                 <TableCell><StagePill stage={a.currentStage} /></TableCell>
                 <TableCell className="text-muted-foreground num">{a.submittedAt?.slice(0, 10) ?? '—'}</TableCell>
               </TableRow>
             ))}
-            {data && data.data.length === 0 && (
-              <TableRow><TableCell colSpan={4} className="text-muted-foreground text-center py-8">No applications yet.</TableCell></TableRow>
+            {data && filteredRows.length === 0 && (
+              <TableRow><TableCell colSpan={4} className="text-muted-foreground text-center py-8">
+                No applications match this route filter.
+              </TableCell></TableRow>
             )}
           </TableBody>
         </Table>

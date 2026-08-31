@@ -12,6 +12,14 @@ export interface Journey {
   } | null
   milestones: { id: string; name: string; status: string; dueDate: string | null }[]
   funding: { id: string; fundingType: string; stipendAmount: string | null; currency: string | null; status: string }[]
+  supervision: {
+    team: { id: string; supervisorName: string; role: string; validFrom: string | null }[]
+    recentMeetings: {
+      id: string; supervisorName: string | null; metOn: string; format: string
+      durationMinutes: number | null; nextMeetingOn: string | null; studentConfirmed: boolean
+    }[]
+    meetingCount: number
+  } | null
   thesis: { status: string; title: string | null; submittedAt: string | null; outcome: string | null } | null
 }
 

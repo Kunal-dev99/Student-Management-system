@@ -11,6 +11,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import { useToast } from '@/components/ui/use-toast'
+import { useCan } from '@/shared/auth/Can'
 import { useAwards } from '@/features/research/api'
 import { FeeWaiversSection } from './FeeWaiversSection'
 import { PaymentsSection } from './PaymentsSection'
@@ -40,9 +41,14 @@ function Tile({ label, value }: { label: string; value: string }) {
 
 export function FundingPanel({ studentId }: { studentId: string }) {
   const { toast } = useToast()
+  // Creating/changing/ending arrangements is funding.change on the server;
+  // without it (students, PGR admins) this panel is a read-only history.
+  // Hiding is convenience — the API enforces.
+  const canChange = useCan('funding.change')
+  const canPickAwards = useCan('recruitment.read')
   const { data, isLoading } = useFunding(studentId)
   const sources = useFundingSources()
-  const awards = useAwards()
+  const awards = useAwards({ enabled: canPickAwards && canChange })
   const summary = usePaymentSummary(studentId)
   const create = useCreateFunding(studentId)
   const end = useEndFunding(studentId)
@@ -112,7 +118,7 @@ export function FundingPanel({ studentId }: { studentId: string }) {
                     onClick={() => setPayingArrangementId(payingArrangementId === a.id ? null : a.id)}>
                     {payingArrangementId === a.id ? 'Hide payments' : 'Payments'}
                   </Button>
-                  {a.validTo === null && (
+                  {a.validTo === null && canChange && (
                     <>
                       <Button size="sm" variant="ghost"
                         onClick={() => {
@@ -194,7 +200,7 @@ export function FundingPanel({ studentId }: { studentId: string }) {
         </div>
       )}
 
-      <div className="flex flex-wrap items-end gap-2 pt-2 border-t border-border">
+      {canChange && <div className="flex flex-wrap items-end gap-2 pt-2 border-t border-border">
         <Select value={type} onValueChange={(v) => setType(v as FundingType)}>
           <SelectTrigger className="w-48"><SelectValue /></SelectTrigger>
           <SelectContent>{TYPES.map((t) => <SelectItem key={t} value={t}>{t.replace(/_/g, ' ')}</SelectItem>)}</SelectContent>
@@ -236,7 +242,7 @@ export function FundingPanel({ studentId }: { studentId: string }) {
               setFunderReference(''); setContributionPct(''); setAwardId('')
             } catch (e) { err(e) }
           }}>Add arrangement</Button>
-      </div>
+      </div>}
 
       <FeeWaiversSection studentId={studentId} />
     </PageSection>

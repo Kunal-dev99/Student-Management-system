@@ -190,6 +190,20 @@ class IntegrationService:
         await self.session.commit()
         return True
 
+    async def replay_dead_letters_bulk(self, event_ids: list) -> dict:
+        """F5 — replay many dead-letters in a single audited action.
+
+        Returns per-id outcome so the reconciliation UI can show what succeeded.
+        """
+        results: dict[str, bool] = {}
+        for eid in event_ids:
+            results[str(eid)] = await self.replay_dead_letter(eid)
+        return {
+            "requested": len(event_ids),
+            "replayed": sum(1 for v in results.values() if v),
+            "results": results,
+        }
+
     async def apply_hr_employee_record(self, payload: dict) -> dict:
         """Map an inbound HR employee record onto an existing person (Phase 6.4).
 
@@ -297,6 +311,13 @@ class IntegrationService:
             return {"handler": "research_award", "awardRef": award.award_ref, "id": str(award.id)}
         if key in {("hr", "employee.appointed"), ("hr", "employee.updated")}:
             return {"handler": "hr_employee", **(await self.apply_hr_employee_record(payload))}
+        # W3.3 — Finance inbound: settlements + rejections come back the same way HR + Research
+        # arrive. ValueError from the handler is bubbled up to the outer try/except which turns
+        # it into a `logged_with_error` row so the reason is visible on the reconciliation UI.
+        if key in {("finance", "payment.confirmed"), ("finance", "payment.rejected")}:
+            from app.modules.integration.finance_handler import apply_finance_event
+
+            return await apply_finance_event(self.session, event_type, payload)
         return None
 
     async def recent_logs(self, limit: int = 50):

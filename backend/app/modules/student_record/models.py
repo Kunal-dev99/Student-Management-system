@@ -35,6 +35,12 @@ class ResearchArea(UUIDMixin, TimestampMixin, Base):
     department_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("department.id"), nullable=True
     )
+    # W1.5 — optional self-FK for hierarchical areas ("Oncology" > "Radiobiology").
+    # NULL parent = top-level. Circular references are the caller's problem — we don't ship a
+    # cycle check because in every real institution the area tree is set by hand at seed time.
+    parent_area_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("research_area.id", ondelete="SET NULL"), nullable=True, index=True,
+    )
 
 
 class Programme(UUIDMixin, TimestampMixin, Base):
@@ -65,6 +71,12 @@ class Student(UUIDMixin, TimestampMixin, Base):
     status: Mapped[StudentStatus] = mapped_column(
         Enum(StudentStatus, name="student_status"), default=StudentStatus.registered
     )
+
+    # ICR gap 1 — persisted registration string (e.g. "Provisional MPhil" → "PhD (upgraded)").
+    # Flipped automatically by progression.decide when the milestone definition carries a
+    # ``registration_effect`` metadata block. NULL means the platform derives the string on read
+    # (backwards-compatible default; the ICR service falls back to derivation).
+    registration_status: Mapped[str | None] = mapped_column(String(80), nullable=True)
 
     project: Mapped["ResearchProject | None"] = relationship(
         back_populates="student", lazy="selectin", uselist=False, cascade="all, delete-orphan"

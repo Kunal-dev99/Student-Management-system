@@ -54,6 +54,16 @@ function NoPermission({ what }: { what: string }) {
  * unchanged: personal notification preferences.
  * ------------------------------------------------------------------ */
 
+// F6 — helpers for the quiet-hours HH:mm ↔ minutes-since-midnight conversion
+function minutesToHHmm(m: number): string {
+  const h = Math.floor(m / 60), mm = m % 60
+  return `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`
+}
+function hhmmToMinutes(s: string): number {
+  const [h, m] = s.split(':').map((v) => parseInt(v, 10) || 0)
+  return h * 60 + m
+}
+
 const MUTABLE_EVENTS: { template: string; label: string }[] = [
   { template: 'milestone.decided', label: 'Milestone decided' },
   { template: 'task.assigned', label: 'Task assigned' },
@@ -71,12 +81,17 @@ function MyPreferencesTab() {
   const [emailEnabled, setEmailEnabled] = useState(true)
   const [digest, setDigest] = useState(false)
   const [muted, setMuted] = useState<string[]>([])
+  // F6 — quiet hours picker; empty string means "no quiet window"
+  const [quietStart, setQuietStart] = useState('')
+  const [quietEnd, setQuietEnd] = useState('')
 
   useEffect(() => {
     if (data) {
       setEmailEnabled(data.emailEnabled)
       setDigest(data.digest)
       setMuted(data.mutedEvents ?? [])
+      setQuietStart(data.quietStart == null ? '' : minutesToHHmm(data.quietStart))
+      setQuietEnd(data.quietEnd == null ? '' : minutesToHHmm(data.quietEnd))
     }
   }, [data])
 
@@ -85,7 +100,11 @@ function MyPreferencesTab() {
   }
 
   const save = async () => {
-    const body: NotificationPreferences = { emailEnabled, digest, mutedEvents: muted }
+    const body: NotificationPreferences = {
+      emailEnabled, digest, mutedEvents: muted,
+      quietStart: quietStart ? hhmmToMinutes(quietStart) : null,
+      quietEnd: quietEnd ? hhmmToMinutes(quietEnd) : null,
+    }
     try {
       await update.mutateAsync(body)
       toast({ title: 'Preferences saved' })
@@ -106,6 +125,44 @@ function MyPreferencesTab() {
             <div className="flex items-center gap-2">
               <Checkbox id="digest" checked={digest} onCheckedChange={(v) => setDigest(v === true)} />
               <Label htmlFor="digest" className="cursor-pointer">Daily digest (batch into one email)</Label>
+            </div>
+          </div>
+
+          {/* F6 — quiet hours picker */}
+          <div>
+            <p className="text-label mb-2">Quiet hours (F6)</p>
+            <p className="text-helper mb-2">
+              Non-urgent emails are suppressed inside this window. In-app notifications still arrive.
+              Leave blank to disable.
+            </p>
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-2">
+                <Label htmlFor="q-start">From</Label>
+                <input
+                  id="q-start"
+                  type="time"
+                  value={quietStart}
+                  onChange={(e) => setQuietStart(e.target.value)}
+                  className="border border-input rounded-md h-9 px-2 bg-background text-sm"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <Label htmlFor="q-end">To</Label>
+                <input
+                  id="q-end"
+                  type="time"
+                  value={quietEnd}
+                  onChange={(e) => setQuietEnd(e.target.value)}
+                  className="border border-input rounded-md h-9 px-2 bg-background text-sm"
+                />
+              </div>
+              {(quietStart || quietEnd) && (
+                <button
+                  type="button"
+                  className="text-xs text-muted-foreground hover:text-foreground underline"
+                  onClick={() => { setQuietStart(''); setQuietEnd('') }}
+                >clear</button>
+              )}
             </div>
           </div>
 
@@ -149,22 +206,30 @@ export default function SettingsPage() {
         description="Institution configuration, reference data, user administration and your personal preferences."
       />
       <div className="px-6 pb-6">
+        {/* Admin tabs are hidden entirely without admin.configure — advertising
+            empty tabs invites clicks that go nowhere. */}
         <Tabs defaultValue={admin ? 'lov' : 'preferences'}>
           <TabsList>
-            <TabsTrigger value="lov"><ListChecks className="h-4 w-4 mr-1.5" /> List of values</TabsTrigger>
-            <TabsTrigger value="policy"><SlidersHorizontal className="h-4 w-4 mr-1.5" /> Institution policy</TabsTrigger>
-            <TabsTrigger value="users"><Users className="h-4 w-4 mr-1.5" /> Users &amp; roles</TabsTrigger>
+            {admin && <TabsTrigger value="lov"><ListChecks className="h-4 w-4 mr-1.5" /> List of values</TabsTrigger>}
+            {admin && <TabsTrigger value="policy"><SlidersHorizontal className="h-4 w-4 mr-1.5" /> Institution policy</TabsTrigger>}
+            {admin && <TabsTrigger value="users"><Users className="h-4 w-4 mr-1.5" /> Users &amp; roles</TabsTrigger>}
             <TabsTrigger value="preferences"><Bell className="h-4 w-4 mr-1.5" /> My preferences</TabsTrigger>
           </TabsList>
-          <TabsContent value="lov" className="mt-4">
-            {admin ? <LovTab /> : <NoPermission what="Reference lists" />}
-          </TabsContent>
-          <TabsContent value="policy" className="mt-4">
-            {admin ? <InstitutionPolicyTab /> : <NoPermission what="Institution policy settings" />}
-          </TabsContent>
-          <TabsContent value="users" className="mt-4">
-            {admin ? <UsersRolesTab /> : <NoPermission what="User accounts and roles" />}
-          </TabsContent>
+          {admin && (
+            <TabsContent value="lov" className="mt-4">
+              <LovTab />
+            </TabsContent>
+          )}
+          {admin && (
+            <TabsContent value="policy" className="mt-4">
+              <InstitutionPolicyTab />
+            </TabsContent>
+          )}
+          {admin && (
+            <TabsContent value="users" className="mt-4">
+              <UsersRolesTab />
+            </TabsContent>
+          )}
           <TabsContent value="preferences" className="mt-4">
             <MyPreferencesTab />
           </TabsContent>

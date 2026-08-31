@@ -9,6 +9,15 @@ class FundingType(str, enum.Enum):
     university_scholarship = "university_scholarship"
     external = "external"
     self_funded = "self_funded"
+    # W1.4 — three additional canonical funding shapes from the CIO plan matrix.
+    # scholarship = charity / trust / external scholarship (distinct from a university one).
+    # employer    = employer-sponsored (part-time PhDs on their firm's day).
+    # mixed       = umbrella when a student holds multiple concurrent arrangements deliberately
+    #               (this is a metadata hint on ONE row; the funding-lineage view still walks the
+    #               actual concurrent arrangements to compute totals).
+    scholarship = "scholarship"
+    employer = "employer"
+    mixed = "mixed"
 
 
 class FundingStatus(str, enum.Enum):

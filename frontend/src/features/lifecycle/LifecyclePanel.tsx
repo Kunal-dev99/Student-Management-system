@@ -272,6 +272,7 @@ export function LifecyclePanel({ studentId, student }: { studentId: string; stud
   const reject = useRejectLifecycleEvent(studentId)
   // Hiding the buttons is convenience only — the API enforces the permission.
   const canDecide = hasPermission('student.lifecycle.approve')
+  const canRequest = hasPermission('student.write')
 
   const status = student?.status
   const original = student?.originalExpectedEndDate ?? null
@@ -293,10 +294,12 @@ export function LifecyclePanel({ studentId, student }: { studentId: string; stud
       accent={shifted ? 'warning' : 'primary'}
       description="Suspensions, extensions and mode changes — and what they did to the timeline."
       headerRight={
-        <div className="flex items-center gap-2">
-          {status && PAUSED.includes(status) && <ReturnDialog studentId={studentId} />}
-          <RequestDialog studentId={studentId} />
-        </div>
+        canRequest ? (
+          <div className="flex items-center gap-2">
+            {status && PAUSED.includes(status) && <ReturnDialog studentId={studentId} />}
+            <RequestDialog studentId={studentId} />
+          </div>
+        ) : undefined
       }
     >
       {/* Header strip — the original-vs-now contrast is the point of this feature. */}

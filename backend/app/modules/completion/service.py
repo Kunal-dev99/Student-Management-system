@@ -83,11 +83,18 @@ class CompletionService:
         if completion is None or completion.status != CompletionStatus.award_confirmed:
             raise WorkflowError("Completion must be award-confirmed before graduation")
 
-        # 1) Completion + award.
+        # 1) Completion + award. F4 — the Award must exist and be **published** before we can
+        # graduate. Registry publishes classifications; without that, we would be conferring an
+        # unclassified degree.
+        award = await self.repo.get_award_by_student(student_id)
+        if award is None or award.classification_state != "published":
+            raise WorkflowError(
+                "Award classification must be published before graduation. Use "
+                "propose → confirm → publish on /completions/{studentId}/classification first."
+            )
         completion.status = CompletionStatus.graduated
         completion.graduation_date = date.today()
-        award = Award(student_id=student_id, title="Doctor of Philosophy", award_type="PhD", conferred_at=_now())
-        self.repo.add(award)
+        award.conferred_at = _now()
 
         # 2) Close funding.
         await FundingService(FundingRepository(self.session)).end_active_for_student(student_id)

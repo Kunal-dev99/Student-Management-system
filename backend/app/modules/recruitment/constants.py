@@ -9,8 +9,21 @@ class OpportunityStatus(str, enum.Enum):
     approved = "approved"
     open = "open"
     recruiting = "recruiting"
+    # W1.3 — paused is a temporary hold that keeps the opportunity intact (positions, applications
+    # already in flight) but stops it accepting new assessments/offers. open <-> paused are the only
+    # transitions in and out.
+    paused = "paused"
     filled = "filled"
     closed = "closed"
+
+
+# W1.1 — an opportunity is either fully funded (stipend + fees), partially funded, or unfunded.
+# Before this the platform inferred the split from stipend_amount being set or null; making it
+# explicit lets the recruitment pipeline filter and lets the offer flow decide what to advertise.
+class OpportunityFunding(str, enum.Enum):
+    funded = "funded"
+    partially_funded = "partially_funded"
+    unfunded = "unfunded"
 
 
 class ApplicationRoute(str, enum.Enum):
@@ -36,8 +49,10 @@ class CandidateStage(str, enum.Enum):
 OPPORTUNITY_TRANSITIONS: dict[OpportunityStatus, set[OpportunityStatus]] = {
     OpportunityStatus.draft: {OpportunityStatus.approved, OpportunityStatus.closed},
     OpportunityStatus.approved: {OpportunityStatus.open, OpportunityStatus.closed},
-    OpportunityStatus.open: {OpportunityStatus.recruiting, OpportunityStatus.closed},
-    OpportunityStatus.recruiting: {OpportunityStatus.filled, OpportunityStatus.closed},
+    # W1.3 — paused is bidirectional with open only. From paused you resume (→open) or close.
+    OpportunityStatus.open: {OpportunityStatus.recruiting, OpportunityStatus.paused, OpportunityStatus.closed},
+    OpportunityStatus.paused: {OpportunityStatus.open, OpportunityStatus.closed},
+    OpportunityStatus.recruiting: {OpportunityStatus.filled, OpportunityStatus.paused, OpportunityStatus.closed},
     OpportunityStatus.filled: {OpportunityStatus.closed},
     OpportunityStatus.closed: set(),
 }

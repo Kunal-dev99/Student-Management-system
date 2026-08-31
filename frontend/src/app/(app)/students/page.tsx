@@ -17,17 +17,21 @@ export default function StudentsPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Student ref</TableHead><TableHead>Status</TableHead>
+                <TableHead>Name</TableHead><TableHead>Student ref</TableHead>
+                <TableHead>Status</TableHead>
                 <TableHead>Mode</TableHead><TableHead>Start</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {isLoading && <TableRow><TableCell colSpan={4}><Skeleton className="h-5 w-full" /></TableCell></TableRow>}
-              {isError && <TableRow><TableCell colSpan={4} className="text-[hsl(var(--destructive))]">{(error as Error)?.message}</TableCell></TableRow>}
+              {isLoading && <TableRow><TableCell colSpan={5}><Skeleton className="h-5 w-full" /></TableCell></TableRow>}
+              {isError && <TableRow><TableCell colSpan={5} className="text-[hsl(var(--destructive))]">{(error as Error)?.message}</TableCell></TableRow>}
               {data?.data.map((s) => (
                 <TableRow key={s.id}>
                   <TableCell className="font-medium">
-                    <Link href={`/students/${s.id}`} className="hover:text-primary font-mono text-sm">{s.studentRef}</Link>
+                    <Link href={`/students/${s.id}`} className="hover:text-primary">{s.personName ?? '—'}</Link>
+                  </TableCell>
+                  <TableCell>
+                    <Link href={`/students/${s.id}`} className="hover:text-primary font-mono text-sm text-muted-foreground">{s.studentRef}</Link>
                   </TableCell>
                   <TableCell><Badge variant="success">{s.status}</Badge></TableCell>
                   <TableCell className="text-muted-foreground">{s.studyMode.replace(/_/g, ' ')}</TableCell>
@@ -35,7 +39,7 @@ export default function StudentsPage() {
                 </TableRow>
               ))}
               {data && data.data.length === 0 && (
-                <TableRow><TableCell colSpan={4} className="text-muted-foreground text-center py-8">
+                <TableRow><TableCell colSpan={5} className="text-muted-foreground text-center py-8">
                   No students yet. Accept an offer in Recruitment to create one.
                 </TableCell></TableRow>
               )}

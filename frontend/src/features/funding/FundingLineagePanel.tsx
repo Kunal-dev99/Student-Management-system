@@ -13,6 +13,7 @@
 
 import { AlertTriangle, CheckCircle2, GitBranch, Info, XCircle } from 'lucide-react'
 import { PageSection } from '@/components/common/PageSection'
+import { ErrorState } from '@/components/common/ErrorState'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ApiError } from '@/shared/api/client'
@@ -172,7 +173,7 @@ export function FundingLineagePanel({ studentId }: { studentId: string }) {
       {isLoading ? (
         <Skeleton className="h-28 w-full" />
       ) : isError ? (
-        <p className="text-sm text-[hsl(var(--destructive))]">{(error as ApiError)?.message}</p>
+        <ErrorState error={error} />
       ) : data ? (
         <div className="space-y-4">
           {/* The chain itself. Every hop is shown, linked or not. */}

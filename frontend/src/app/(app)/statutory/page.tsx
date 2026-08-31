@@ -8,7 +8,7 @@
 
 import { useEffect, useState } from 'react'
 import {
-  CheckCircle2, CopyPlus, Download, FileSpreadsheet, ListChecks, Play, Plus,
+  CheckCircle2, CopyPlus, Download, FileSpreadsheet, ListChecks, Lock, Unlock, Play, Plus, ShieldAlert, ShieldCheck,
 } from 'lucide-react'
 import { PageHeader } from '@/components/common/PageHeader'
 import { PageSection } from '@/components/common/PageSection'
@@ -31,8 +31,8 @@ import { ApiError } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthContext'
 import { downloadExport } from '@/features/exports/api'
 import {
-  useAddField, useCloneProfile, useCreateProfile, useGenerateProfile, useProfile, useProfiles,
-  useTransforms, useValidateProfile,
+  useAddField, useCloneProfile, useCompileProfile, useCreateProfile, useGenerateProfile,
+  useProfile, useProfiles, useSignOffProfile, useTransforms, useUnsignProfile, useValidateProfile,
   type GenerateResult, type ReportProfile, type ValidationResult,
 } from '@/features/statutory/api'
 
@@ -306,12 +306,153 @@ function ValidationReportView({ result, rowCount }: { result: ValidationResult; 
   )
 }
 
+// ---------------------------------------------------------------- F1 — sign-off + gap panel
+
+function SignOffCard({ profileId, canSignOff }: { profileId: string; canSignOff: boolean }) {
+  const { toast } = useToast()
+  const compile = useCompileProfile(profileId)
+  const signOff = useSignOffProfile(profileId)
+  const unsign = useUnsignProfile(profileId)
+  const [notesOpen, setNotesOpen] = useState(false)
+  const [notes, setNotes] = useState('')
+
+  if (compile.isLoading) return <Skeleton className="h-24 w-full" />
+  if (compile.isError) return <p className="text-sm text-[hsl(var(--destructive))]">{(compile.error as ApiError)?.message}</p>
+  if (!compile.data) return null
+  const r = compile.data
+  const signed = r.profile.signedOff
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        {signed ? (
+          <Badge variant="success" className="inline-flex items-center gap-1">
+            <ShieldCheck className="h-3.5 w-3.5" /> Signed off
+          </Badge>
+        ) : r.signOffReady ? (
+          <Badge variant="warning" className="inline-flex items-center gap-1">
+            <ShieldAlert className="h-3.5 w-3.5" /> Ready to sign off
+          </Badge>
+        ) : (
+          <Badge variant="destructive" className="inline-flex items-center gap-1">
+            <ShieldAlert className="h-3.5 w-3.5" /> Not ready — {r.missing.length} mandatory field{r.missing.length === 1 ? '' : 's'} unmapped
+          </Badge>
+        )}
+        <span className="text-helper num">
+          {r.mappedFieldCount} / {r.specFieldCount} spec fields mapped
+        </span>
+        {signed && r.profile.signedOffAt && (
+          <span className="text-helper">
+            at {new Date(r.profile.signedOffAt).toLocaleString()}
+            {r.profile.signedOffNotes ? ` — ${r.profile.signedOffNotes}` : ''}
+          </span>
+        )}
+      </div>
+
+      {signed ? (
+        <div className="flex items-center gap-2 text-sm p-3 rounded-md bg-surface-2 border border-border">
+          <Lock className="h-4 w-4 text-muted-foreground" />
+          <span>This profile is locked. Edits to fields, deletes and further mappings are refused
+            until it is unsigned. Cloning to a new year is still allowed — that is how a return
+            carries forward.</span>
+          {canSignOff && (
+            <Button size="sm" variant="outline" className="ml-auto"
+              disabled={unsign.isPending}
+              onClick={async () => {
+                try {
+                  await unsign.mutateAsync()
+                  toast({ title: 'Profile unsigned', description: 'Edits are re-enabled.' })
+                } catch (e) { toast({ title: 'Could not unsign', description: (e as ApiError).message, variant: 'destructive' }) }
+              }}>
+              <Unlock className="h-4 w-4 mr-1" />
+              {unsign.isPending ? 'Unsigning…' : 'Unsign'}
+            </Button>
+          )}
+        </div>
+      ) : (
+        <>
+          {r.missing.length > 0 && (
+            <div className="card-elevated overflow-hidden">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Missing field</TableHead>
+                    <TableHead>Description</TableHead>
+                    <TableHead>Coding frame</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {r.missing.map((m) => (
+                    <TableRow key={m.field}>
+                      <TableCell className="font-mono text-xs font-medium">{m.field}</TableCell>
+                      <TableCell className="text-sm">{m.description}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {m.allowed && m.allowed.length > 0 ? m.allowed.join(', ') : 'free text'}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+          {canSignOff && (
+            <div className="flex items-center gap-2">
+              <Dialog open={notesOpen} onOpenChange={(o) => { setNotesOpen(o); if (!o) setNotes('') }}>
+                <DialogTrigger asChild>
+                  <Button size="sm" disabled={!r.signOffReady}>
+                    <ShieldCheck className="h-4 w-4 mr-1" /> Sign off
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader><DialogTitle>Sign off {r.profile.code} — {r.profile.academicYear}</DialogTitle></DialogHeader>
+                  <div className="space-y-3">
+                    <p className="text-sm text-muted-foreground">
+                      By signing off you attest — as the responsible owner (Registry / HESA SME) —
+                      that this profile is complete for the return. The profile will become
+                      immutable until you unsign it.
+                    </p>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="s-notes">Notes (optional)</Label>
+                      <Textarea id="s-notes" className="min-h-[64px]" value={notes}
+                        onChange={(e) => setNotes(e.target.value)}
+                        placeholder="e.g. Confirmed against HESA Student 2026/27 v1.2 with Registry on 2026-08-24" />
+                    </div>
+                  </div>
+                  <DialogFooter>
+                    <Button
+                      disabled={signOff.isPending}
+                      onClick={async () => {
+                        try {
+                          await signOff.mutateAsync(notes.trim() || undefined)
+                          toast({ title: 'Profile signed off' })
+                          setNotesOpen(false); setNotes('')
+                        } catch (e) { toast({ title: 'Could not sign off', description: (e as ApiError).message, variant: 'destructive' }) }
+                      }}>
+                      {signOff.isPending ? 'Signing…' : 'Sign off'}
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+              {!r.signOffReady && (
+                <span className="text-helper">
+                  Map the missing mandatory fields above, then sign-off will unlock.
+                </span>
+              )}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
 // ---------------------------------------------------------------- page
 
 export default function StatutoryPage() {
   const { toast } = useToast()
   const { hasPermission } = useAuth()
   const canConfigure = hasPermission('admin.configure')
+  const canSignOff = hasPermission('reports.signoff')
 
   const profiles = useProfiles()
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -360,6 +501,7 @@ export default function StatutoryPage() {
                   <TableHead>Academic year</TableHead>
                   <TableHead>Version</TableHead>
                   <TableHead>Fields</TableHead>
+                  <TableHead>Sign-off</TableHead>
                   <TableHead className="text-right">Status</TableHead>
                 </TableRow>
               </TableHeader>
@@ -375,6 +517,15 @@ export default function StatutoryPage() {
                     <TableCell className="num">{p.academicYear}</TableCell>
                     <TableCell className="num">v{p.version}</TableCell>
                     <TableCell className="num">{p.fieldCount ?? '—'}</TableCell>
+                    <TableCell>
+                      {p.signedOff ? (
+                        <Badge variant="success" className="inline-flex items-center gap-1">
+                          <Lock className="h-3 w-3" /> signed
+                        </Badge>
+                      ) : (
+                        <span className="text-helper">draft</span>
+                      )}
+                    </TableCell>
                     <TableCell className="text-right">
                       <Badge variant={p.isActive ? 'success' : 'secondary'}>
                         {p.isActive ? 'active' : 'inactive'}
@@ -394,13 +545,24 @@ export default function StatutoryPage() {
 
         {selectedId && (
           <PageSection
+            icon={ShieldCheck}
+            title="Sign-off &amp; mandatory-field readiness"
+            accent="primary"
+            description="A profile can be signed off only when every mandatory field in the return's published spec is mapped and the current cohort validates. Signed-off profiles are immutable until unsigned."
+          >
+            <SignOffCard profileId={selectedId} canSignOff={canSignOff} />
+          </PageSection>
+        )}
+
+        {selectedId && (
+          <PageSection
             icon={ListChecks}
             title={detail.data ? `${detail.data.code} — ${detail.data.academicYear}` : 'Field mappings'}
             accent="accent"
             description="Target field ← source expression + transform + validation."
             actions={
               <div className="flex flex-wrap items-center gap-2">
-                {canConfigure && <AddFieldDialog profileId={selectedId} />}
+                {canConfigure && !detail.data?.signedOff && <AddFieldDialog profileId={selectedId} />}
                 <Button
                   size="sm" variant="outline"
                   disabled={validate.isFetching}
@@ -437,7 +599,8 @@ export default function StatutoryPage() {
                   <Play className="h-4 w-4 mr-1" />
                   {generate.isPending ? 'Generating…' : 'Generate'}
                 </Button>
-                {detail.data && <CloneDialog profile={detail.data} />}
+                {/* Cloning creates a new profile — admin.configure, like New profile. */}
+                {canConfigure && detail.data && <CloneDialog profile={detail.data} />}
               </div>
             }
           >

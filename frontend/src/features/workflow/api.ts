@@ -16,7 +16,27 @@ export interface Task {
   aggregateId: string | null
   payload: Record<string, unknown> | null
   createdAt: string
+  // F5 — SLA clock fields (optional; null when no SLA is set)
+  slaTargetSeconds?: number | null
+  slaWorkingDaysOnly?: boolean
+  slaStartedAt?: string | null
+  slaBreached?: boolean
 }
+
+export interface SlaReport {
+  total: number
+  openWithSla: number
+  breached: number
+  withinTargetRate: number
+}
+
+export const useSlaReport = (opts?: { enabled?: boolean }) =>
+  useQuery({
+    queryKey: ['tasks', 'sla-report'],
+    queryFn: () => api.get<SlaReport>('/tasks/sla-report'),
+    refetchInterval: 60_000,
+    enabled: opts?.enabled ?? true,
+  })
 
 export interface Notification {
   id: string

@@ -3,7 +3,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type ListResponse } from '@/shared/api/client'
 
-export type OpportunityStatus = 'draft' | 'approved' | 'open' | 'recruiting' | 'filled' | 'closed'
+export type OpportunityStatus = 'draft' | 'approved' | 'open' | 'recruiting' | 'paused' | 'filled' | 'closed'
+// W1.1 — explicit funding shape
+export type OpportunityFunding = 'funded' | 'partially_funded' | 'unfunded'
 export type CandidateStage =
   | 'prospect' | 'applicant' | 'under_assessment' | 'shortlisted' | 'interview'
   | 'selected' | 'offer_made' | 'offer_accepted' | 'rejected' | 'withdrawn' | 'converted'
@@ -21,6 +23,8 @@ export interface Opportunity {
   researchDemandId: string | null
   researchAwardId: string | null
   status: OpportunityStatus
+  /** W1.1 — funded / partially_funded / unfunded (defaults to funded on the server). */
+  opportunityType: OpportunityFunding
   createdAt: string
 }
 
@@ -91,6 +95,7 @@ export function useCreateOpportunity() {
       eligibility?: string
       researchDemandId?: string
       researchAwardId?: string
+      opportunityType?: OpportunityFunding
     }) => api.post<Opportunity>('/opportunities', body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['opportunities'] })

@@ -81,7 +81,9 @@ async def test_dispatch_routes_and_is_idempotent(client):
 
 @pytest.mark.asyncio
 async def test_signed_webhook_idempotent(client):
-    body = json.dumps({"sourceId": "fin-123", "eventType": "payment.confirmed", "payload": {"amount": 19000}}).encode()
+    # Use an event type Finance has no handler for — this test is about idempotency of the
+    # inbound recorder, not the W3 payment handler (which owns payment.* on its own).
+    body = json.dumps({"sourceId": "fin-123", "eventType": "invoice.raised", "payload": {"amount": 19000}}).encode()
     sig = _sign(body)
 
     r = await client.post("/api/v1/integration/webhooks/finance", content=body, headers={"X-Signature": sig, "Content-Type": "application/json"})

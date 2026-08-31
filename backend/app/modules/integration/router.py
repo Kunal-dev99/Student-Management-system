@@ -7,6 +7,7 @@ import json
 import uuid
 
 from fastapi import APIRouter, Depends, Request
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -71,6 +72,19 @@ async def replay_dead_letter(
 ) -> dict:
     ok = await _svc(session).replay_dead_letter(event_id)
     return {"data": {"replayed": ok}}
+
+
+class _BulkReplayBody(BaseModel):
+    ids: list[uuid.UUID]
+
+
+@router.post("/dead-letters/replay", summary="F5 — replay many dead-letters in one action")
+async def replay_dead_letters_bulk(
+    body: _BulkReplayBody,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("admin.configure")),
+) -> dict:
+    return await _svc(session).replay_dead_letters_bulk(body.ids)
 
 
 @router.post("/webhooks/{system}", summary="Signed inbound webhook (idempotent by source id)")

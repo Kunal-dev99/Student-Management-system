@@ -44,8 +44,12 @@ export interface FundingInput {
   researchAwardId?: string
 }
 
-export const useFundingSources = () =>
-  useQuery({ queryKey: ['funding-sources'], queryFn: () => api.get<FundingSource[]>('/funding-sources') })
+export const useFundingSources = (opts?: { enabled?: boolean }) =>
+  useQuery({
+    queryKey: ['funding-sources'],
+    queryFn: () => api.get<FundingSource[]>('/funding-sources'),
+    enabled: opts?.enabled ?? true,
+  })
 
 export const useFunding = (studentId: string) =>
   useQuery({
@@ -327,4 +331,44 @@ export const useFundingIntegrity = (severity?: 'error') =>
       api.get<FundingIntegrityReport>(
         `/reports/funding-integrity${severity ? `?severity=${severity}` : ''}`,
       ),
+  })
+
+// --- W4 — Finance lens on the same page (cashflow, not compliance) ---
+
+export interface FinancePaymentRow {
+  paymentId: string
+  studentId: string
+  studentRef: string
+  personName: string
+  amount: string
+  currency: string | null
+  link: string
+  // Present on the relevant rows only:
+  dueDate?: string | null
+  paidOn?: string | null
+  note?: string | null
+  daysOverdue?: number
+}
+
+export interface FinanceLensReport {
+  window: { from: string; to: string }
+  paymentsInWindow: number
+  totals: { scheduled: string; approved: string; paid: string; held: string; cancelled: string }
+  byFundingType: { fundingType: string; paid: string; outstanding: string; count: number }[]
+  held: FinancePaymentRow[]
+  overdueApproved: FinancePaymentRow[]
+  paidWithoutFinanceReference: FinancePaymentRow[]
+  counts: { held: number; overdueApproved: number; paidWithoutFinanceReference: number }
+}
+
+export const useFundingCashflow = (opts?: { from?: string; to?: string }) =>
+  useQuery({
+    queryKey: ['funding-cashflow', opts?.from ?? '', opts?.to ?? ''],
+    queryFn: () => {
+      const qs = new URLSearchParams()
+      if (opts?.from) qs.set('windowFrom', opts.from)
+      if (opts?.to) qs.set('windowTo', opts.to)
+      const q = qs.toString()
+      return api.get<FinanceLensReport>(`/reports/funding-cashflow${q ? `?${q}` : ''}`)
+    },
   })

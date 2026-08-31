@@ -83,6 +83,22 @@ class CloneRequest(BaseModel):
     academic_year: str
 
 
+class FieldUpdate(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+    target_field: str | None = None
+    source_expression: str | None = None
+    position: int | None = None
+    transform: str | None = None
+    default_value: str | None = None
+    required: bool | None = None
+    allowed_values: list[str] | None = None
+
+
+class SignOffRequest(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+    notes: str | None = None
+
+
 profiles_router = APIRouter(prefix="/report-profiles", tags=["exports"])
 
 
@@ -175,3 +191,68 @@ async def generate_profile(
     from app.modules.exports.service import ExportService
 
     return await ExportService(session).run_statutory_profile(profile_id)
+
+
+# --- F1 — sign-off, immutability, and mandatory-field gap report ---
+
+@profiles_router.get("/{profile_id}/compile", summary="Missing mandatory fields vs. the published spec")
+async def compile_profile(
+    profile_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("reporting.read")),
+) -> dict:
+    return await _engine(session).compile(profile_id)
+
+
+@profiles_router.patch("/{profile_id}/fields/{mapping_id}", summary="Edit a mapping (refused if signed off)")
+async def update_field(
+    profile_id: uuid.UUID,
+    mapping_id: uuid.UUID,
+    body: FieldUpdate,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("admin.configure")),
+) -> dict:
+    eng = _engine(session)
+    m = await eng.update_field(
+        profile_id, mapping_id,
+        target_field=body.target_field, source_expression=body.source_expression,
+        position=body.position, transform=body.transform,
+        default_value=body.default_value, required=body.required,
+        allowed_values=body.allowed_values,
+    )
+    return eng.mapping_out(m)
+
+
+@profiles_router.delete("/{profile_id}/fields/{mapping_id}", status_code=204,
+                        response_class=Response,
+                        summary="Remove a mapping (refused if signed off)")
+async def delete_field(
+    profile_id: uuid.UUID,
+    mapping_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("admin.configure")),
+):
+    await _engine(session).delete_field(profile_id, mapping_id)
+    return Response(status_code=204)
+
+
+@profiles_router.post("/{profile_id}/sign-off", summary="Attest the profile is complete (Registry / HESA owner)")
+async def sign_off_profile(
+    profile_id: uuid.UUID,
+    body: SignOffRequest,
+    session: AsyncSession = Depends(get_session),
+    principal=Depends(require_permission("reports.signoff")),
+) -> dict:
+    eng = _engine(session)
+    profile = await eng.sign_off(profile_id, user_id=principal.user_id, notes=body.notes)
+    return eng.profile_out(profile)
+
+
+@profiles_router.post("/{profile_id}/unsign", summary="Unlock a signed-off profile for edits")
+async def unsign_profile(
+    profile_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("reports.signoff")),
+) -> dict:
+    eng = _engine(session)
+    return eng.profile_out(await eng.unsign(profile_id))

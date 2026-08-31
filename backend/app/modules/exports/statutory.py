@@ -49,6 +49,47 @@ TRANSFORMS = {
 }
 
 
+# --- F1 — HESA coding frames. Pure lookups, unknown inputs return None so validation catches it. ---
+
+def _map(table: dict[str, str]):
+    def _fn(v):
+        if v is None:
+            return None
+        key = str(v).strip().lower()
+        return table.get(key)
+    return _fn
+
+
+TRANSFORMS.update({
+    "hesa_sex": _map({
+        "female": "10", "f": "10", "woman": "10",
+        "male": "11",   "m": "11", "man": "11",
+        "other": "12",  "non-binary": "12", "nonbinary": "12",
+        "": "13",       "unknown": "13", "not specified": "13", "prefer not to say": "13",
+    }),
+    "hesa_mode": _map({
+        "full_time": "01", "full-time": "01", "fulltime": "01", "full time": "01", "ft": "01",
+        "part_time": "02", "part-time": "02", "parttime": "02", "part time": "02", "pt": "02",
+        "sandwich": "03",
+        "writing_up": "31", "writing-up": "31",
+    }),
+    "hesa_yn": _map({
+        "true": "Y", "yes": "Y", "y": "Y", "1": "Y",
+        "false": "N", "no": "N", "n": "N", "0": "N",
+    }),
+    "hesa_studylevel": _map({
+        "phd": "D00", "doctorate": "D00", "d00": "D00",
+        "mphil": "M11", "m11": "M11",
+        "masters": "H11", "h11": "H11",
+        "pgdip": "I11", "i11": "I11",
+    }),
+    "hesa_route": _map({
+        "opportunity": "OPPORTUNITY", "route_a": "OPPORTUNITY",
+        "proposal": "PROPOSAL", "route_b": "PROPOSAL",
+    }),
+})
+
+
 def resolve(record: dict, path: str):
     """Read a dotted path out of the flat student record. Unknown paths resolve to None."""
     node = record
@@ -85,6 +126,10 @@ class StatutoryEngine:
             "id": str(p.id), "code": p.code, "name": p.name,
             "academicYear": p.academic_year, "version": p.version,
             "description": p.description, "isActive": p.is_active,
+            "signedOff": p.signed_off_by is not None,
+            "signedOffAt": p.signed_off_at.isoformat() if p.signed_off_at else None,
+            "signedOffBy": str(p.signed_off_by) if p.signed_off_by else None,
+            "signedOffNotes": p.signed_off_notes,
         }
 
     @staticmethod
@@ -137,13 +182,23 @@ class StatutoryEngine:
         await self.session.refresh(profile)
         return profile
 
+    @staticmethod
+    def _refuse_if_signed_off(profile: ReportProfile, action: str) -> None:
+        """A signed-off profile is a historical fact; editing would rewrite what Registry attested to."""
+        if profile.signed_off_by is not None:
+            raise ConflictError(
+                f"Profile {profile.code} {profile.academic_year} v{profile.version} is signed off — "
+                f"unsign it before you can {action}."
+            )
+
     async def add_field(
         self, profile_id: uuid.UUID, *, target_field: str, source_expression: str,
         position: int | None = None, transform: str | None = None,
         default_value: str | None = None, required: bool = False,
         allowed_values: list[str] | None = None,
     ) -> ReportFieldMapping:
-        await self.get_profile(profile_id)
+        profile = await self.get_profile(profile_id)
+        self._refuse_if_signed_off(profile, "add a field")
         if transform and transform not in TRANSFORMS:
             raise WorkflowError(
                 f"Unknown transform '{transform}'. Available: {', '.join(sorted(TRANSFORMS))}"
@@ -294,3 +349,112 @@ class StatutoryEngine:
                 "valid": not issues,
             },
         }
+
+    # ---------------- F1 — sign-off, immutability, mandatory-spec gates ----------------
+
+    async def compile(self, profile_id: uuid.UUID) -> dict:
+        """Return the mandatory-field gap between the profile and the return's published spec.
+
+        A profile can only be signed off when this returns no ``missing`` entries. Each entry names
+        the exact spec field and the coding frame (if any) the profile would need to satisfy.
+        """
+        from app.modules.exports.specs import spec_for
+
+        profile = await self.get_profile(profile_id)
+        mappings = await self._mappings(profile_id)
+        mapped = {m.target_field for m in mappings}
+        spec = spec_for(profile.code)
+        missing = [
+            {"field": s["field"], "description": s.get("description", ""),
+             "allowed": s.get("allowed")}
+            for s in spec if s["field"] not in mapped
+        ]
+        return {
+            "profile": self.profile_out(profile),
+            "specCode": profile.code,
+            "specFieldCount": len(spec),
+            "mappedFieldCount": len(mapped),
+            "missing": missing,
+            "signOffReady": (not missing) and bool(mappings),
+        }
+
+    async def update_field(
+        self, profile_id: uuid.UUID, mapping_id: uuid.UUID, **changes,
+    ) -> ReportFieldMapping:
+        profile = await self.get_profile(profile_id)
+        self._refuse_if_signed_off(profile, "edit a mapping")
+        m = (await self.session.execute(
+            select(ReportFieldMapping).where(
+                ReportFieldMapping.id == mapping_id,
+                ReportFieldMapping.profile_id == profile_id,
+            )
+        )).scalar_one_or_none()
+        if m is None:
+            raise NotFoundError("Field mapping not found")
+        if changes.get("transform") and changes["transform"] not in TRANSFORMS:
+            raise WorkflowError(
+                f"Unknown transform '{changes['transform']}'. Available: {', '.join(sorted(TRANSFORMS))}"
+            )
+        for k, v in changes.items():
+            if v is not None:
+                setattr(m, k, v)
+        await self.session.commit()
+        await self.session.refresh(m)
+        return m
+
+    async def delete_field(self, profile_id: uuid.UUID, mapping_id: uuid.UUID) -> None:
+        profile = await self.get_profile(profile_id)
+        self._refuse_if_signed_off(profile, "remove a mapping")
+        m = (await self.session.execute(
+            select(ReportFieldMapping).where(
+                ReportFieldMapping.id == mapping_id,
+                ReportFieldMapping.profile_id == profile_id,
+            )
+        )).scalar_one_or_none()
+        if m is None:
+            raise NotFoundError("Field mapping not found")
+        await self.session.delete(m)
+        await self.session.commit()
+
+    async def sign_off(
+        self, profile_id: uuid.UUID, *, user_id: uuid.UUID, notes: str | None = None,
+    ) -> ReportProfile:
+        """Attest the profile is complete for the return. Blocks if the spec is not satisfied
+        or if the current cohort would produce validation errors."""
+        from datetime import datetime, timezone
+
+        profile = await self.get_profile(profile_id)
+        if profile.signed_off_by is not None:
+            raise ConflictError("Profile is already signed off")
+        report = await self.compile(profile_id)
+        if not report["signOffReady"]:
+            missing = ", ".join(m["field"] for m in report["missing"][:8])
+            more = "" if len(report["missing"]) <= 8 else f" (+{len(report['missing'])-8} more)"
+            raise WorkflowError(
+                f"Cannot sign off: {len(report['missing'])} mandatory field(s) unmapped: {missing}{more}"
+                if report["missing"]
+                else "Cannot sign off: profile has no field mappings"
+            )
+        gen = await self.generate(profile_id)
+        if not gen["validation"]["valid"]:
+            raise WorkflowError(
+                f"Cannot sign off: {gen['validation']['errors']} validation error(s) in the current "
+                "cohort. Fix them, or reduce cohort scope, then retry."
+            )
+        profile.signed_off_by = user_id
+        profile.signed_off_at = datetime.now(timezone.utc)
+        profile.signed_off_notes = notes
+        await self.session.commit()
+        await self.session.refresh(profile)
+        return profile
+
+    async def unsign(self, profile_id: uuid.UUID) -> ReportProfile:
+        profile = await self.get_profile(profile_id)
+        if profile.signed_off_by is None:
+            raise ConflictError("Profile is not signed off")
+        profile.signed_off_by = None
+        profile.signed_off_at = None
+        profile.signed_off_notes = None
+        await self.session.commit()
+        await self.session.refresh(profile)
+        return profile

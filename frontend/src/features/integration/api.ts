@@ -91,6 +91,23 @@ export const useReconciliation = (windowDays = 30) =>
     refetchInterval: 60_000,
   })
 
+/** F5 — bulk replay of dead-letters in one audited call. */
+export interface BulkReplayResult {
+  requested: number
+  replayed: number
+  results: Record<string, boolean>
+}
+
+export function useReplayDeadLettersBulk() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (ids: string[]) =>
+      api.post<BulkReplayResult>('/integration/dead-letters/replay', { ids }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['integration'] }),
+  })
+}
+
+
 /** Reset a dead-lettered outbox event so the next dispatch retries it. */
 export function useReplayDeadLetter() {
   const qc = useQueryClient()

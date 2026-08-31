@@ -29,6 +29,8 @@ export interface Person {
   createdAt: string
   updatedAt: string
   relationships: Relationship[]
+  /** F2 — set when the person has been GDPR-erased. */
+  pseudonymisedAt?: string | null
 }
 
 export interface TimelineEntry {
@@ -42,13 +44,14 @@ export interface Timeline {
   entries: TimelineEntry[]
 }
 
-export function usePersons(search: string) {
+export function usePersons(search: string, opts?: { enabled?: boolean }) {
   return useQuery({
     queryKey: ['persons', search],
     queryFn: () =>
       api.get<ListResponse<Person>>(
         `/persons?limit=50${search ? `&search=${encodeURIComponent(search)}` : ''}`,
       ),
+    enabled: opts?.enabled ?? true,
   })
 }
 
@@ -126,5 +129,91 @@ export function useCloseRelationship(personId: string) {
         `/persons/${personId}/relationships/${relationshipType}/close`,
       ),
     onSuccess: () => invalidateIdentity(qc, personId),
+  })
+}
+
+
+// -------- F2 — contacts + GDPR (merge / export / erase) --------
+
+export type ContactChannel = 'email' | 'phone' | 'mobile' | 'address' | 'emergency'
+
+export interface PersonContact {
+  id: string
+  channel: ContactChannel
+  value: string
+  label: string | null
+  doNotContact: boolean
+  verifiedAt: string | null
+}
+
+export const useContacts = (personId: string | null) =>
+  useQuery({
+    queryKey: ['person', personId, 'contacts'],
+    queryFn: () => api.get<PersonContact[]>(`/persons/${personId}/contacts`),
+    enabled: !!personId,
+  })
+
+export function useAddContact(personId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: { channel: ContactChannel; value: string; label?: string; doNotContact?: boolean }) =>
+      api.post<PersonContact>(`/persons/${personId}/contacts`, body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['person', personId, 'contacts'] }),
+  })
+}
+
+export function useUpdateContact(personId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: Partial<{ value: string; label: string; doNotContact: boolean; verified: boolean }> }) =>
+      api.patch<PersonContact>(`/persons/${personId}/contacts/${id}`, body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['person', personId, 'contacts'] }),
+  })
+}
+
+export function useDeleteContact(personId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => api.del<void>(`/persons/${personId}/contacts/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['person', personId, 'contacts'] }),
+  })
+}
+
+export interface MergeResult {
+  mergeId: string
+  survivingPersonId: string
+  losingPersonId: string
+  touched: Record<string, number>
+  totalRowsRewritten: number
+  mergedAt: string
+}
+
+export function useMergePersons() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: { survivingPersonId: string; losingPersonId: string; reason?: string }) =>
+      api.post<MergeResult>('/persons/merge', body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['persons'] }),
+  })
+}
+
+export interface GdprExport {
+  personId: string
+  generatedAt: string
+  person: Record<string, unknown>
+  related: Record<string, Record<string, unknown>[]>
+}
+
+export function useGdprExport(personId: string) {
+  return useMutation({
+    mutationFn: () => api.get<GdprExport>(`/persons/${personId}/export`),
+  })
+}
+
+export function useGdprErase(personId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => api.post<{ personId: string; erasedAt: string }>(`/persons/${personId}/erase`, {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['person', personId] }),
   })
 }

@@ -22,6 +22,11 @@ export interface ReportProfile {
   isActive: boolean
   /** Present on the list endpoint only. */
   fieldCount?: number
+  /** F1 — sign-off. When true, the profile is immutable until unsigned. */
+  signedOff: boolean
+  signedOffAt: string | null
+  signedOffBy: string | null
+  signedOffNotes: string | null
 }
 
 export interface FieldMapping {
@@ -150,5 +155,79 @@ export function useGenerateProfile() {
   return useMutation({
     mutationFn: (profileId: string) => api.post<GenerateResult>(`/report-profiles/${profileId}/generate`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['exports'] }),
+  })
+}
+
+
+// -------- F1 — sign-off, immutability, mandatory-field gap report --------
+
+export interface CompileMissing {
+  field: string
+  description: string
+  allowed: string[] | null
+}
+
+export interface CompileReport {
+  profile: ReportProfile
+  specCode: string
+  specFieldCount: number
+  mappedFieldCount: number
+  missing: CompileMissing[]
+  signOffReady: boolean
+}
+
+export const useCompileProfile = (profileId: string | null) =>
+  useQuery({
+    queryKey: ['report-profile', profileId, 'compile'],
+    queryFn: () => api.get<CompileReport>(`/report-profiles/${profileId}/compile`),
+    enabled: !!profileId,
+  })
+
+export function useUpdateField(profileId: string | null) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: Partial<FieldInput> }) =>
+      api.patch<FieldMapping>(`/report-profiles/${profileId}/fields/${id}`, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['report-profile', profileId] })
+      qc.invalidateQueries({ queryKey: ['report-profile', profileId, 'compile'] })
+    },
+  })
+}
+
+export function useDeleteField(profileId: string | null) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => api.del<void>(`/report-profiles/${profileId}/fields/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['report-profile', profileId] })
+      qc.invalidateQueries({ queryKey: ['report-profile', profileId, 'compile'] })
+      qc.invalidateQueries({ queryKey: ['report-profiles'] })
+    },
+  })
+}
+
+export function useSignOffProfile(profileId: string | null) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (notes: string | undefined) =>
+      api.post<ReportProfile>(`/report-profiles/${profileId}/sign-off`, { notes }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['report-profile', profileId] })
+      qc.invalidateQueries({ queryKey: ['report-profile', profileId, 'compile'] })
+      qc.invalidateQueries({ queryKey: ['report-profiles'] })
+    },
+  })
+}
+
+export function useUnsignProfile(profileId: string | null) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => api.post<ReportProfile>(`/report-profiles/${profileId}/unsign`, {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['report-profile', profileId] })
+      qc.invalidateQueries({ queryKey: ['report-profile', profileId, 'compile'] })
+      qc.invalidateQueries({ queryKey: ['report-profiles'] })
+    },
   })
 }

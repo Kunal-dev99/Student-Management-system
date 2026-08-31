@@ -156,3 +156,67 @@ async def test_opportunity_invalid_transition(ctx):
     r = await client.post(f"/api/v1/opportunities/{oid}/transition", headers=h, json={"toStatus": "filled"})
     assert r.status_code == 422
     assert r.json()["error"]["code"] == "workflow_error"
+
+
+
+# ============================================================================
+# W1 - Domain polish: opportunity_type default, paused status, area hierarchy
+# ============================================================================
+
+@pytest.mark.asyncio
+async def test_w1_opportunity_type_defaults_to_funded(ctx):
+    client, h, _ = ctx
+    r = await client.post("/api/v1/opportunities", headers=h, json={"title": "Post with stipend"})
+    assert r.status_code == 201, r.text
+    body = r.json()
+    # Default value from the enum column
+    assert body.get("opportunityType") == "funded"
+
+
+@pytest.mark.asyncio
+async def test_w1_opportunity_type_can_be_set_to_unfunded(ctx):
+    client, h, _ = ctx
+    r = await client.post("/api/v1/opportunities", headers=h, json={
+        "title": "Self-funded studentship placeholder",
+        "opportunityType": "unfunded",
+    })
+    assert r.status_code == 201, r.text
+    assert r.json()["opportunityType"] == "unfunded"
+
+
+@pytest.mark.asyncio
+async def test_w1_open_can_pause_and_resume(ctx):
+    """open <-> paused round-trip; refuse the illegal draft->paused shortcut."""
+    client, h, _ = ctx
+    r = await client.post("/api/v1/opportunities", headers=h, json={"title": "P"})
+    oid = r.json()["id"]
+    # Illegal: draft cannot go straight to paused
+    r = await client.post(f"/api/v1/opportunities/{oid}/transition", headers=h,
+                          json={"toStatus": "paused"})
+    assert r.status_code == 422
+    # Walk draft -> approved -> open -> paused -> open -> closed
+    for target in ("approved", "open", "paused"):
+        r = await client.post(f"/api/v1/opportunities/{oid}/transition", headers=h,
+                              json={"toStatus": target})
+        assert r.status_code == 200, (target, r.text)
+    r = await client.get(f"/api/v1/opportunities/{oid}", headers=h)
+    assert r.json()["status"] == "paused"
+    # Resume then close
+    for target in ("open", "closed"):
+        r = await client.post(f"/api/v1/opportunities/{oid}/transition", headers=h,
+                              json={"toStatus": target})
+        assert r.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_w1_paused_cannot_go_to_filled_directly(ctx):
+    """A paused opportunity must resume before it can fill."""
+    client, h, _ = ctx
+    r = await client.post("/api/v1/opportunities", headers=h, json={"title": "P2"})
+    oid = r.json()["id"]
+    for target in ("approved", "open", "paused"):
+        await client.post(f"/api/v1/opportunities/{oid}/transition", headers=h,
+                          json={"toStatus": target})
+    r = await client.post(f"/api/v1/opportunities/{oid}/transition", headers=h,
+                          json={"toStatus": "filled"})
+    assert r.status_code == 422

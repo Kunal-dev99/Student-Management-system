@@ -33,8 +33,11 @@ def _svc(session: AsyncSession) -> SupervisionService:
 async def list_supervisors(
     student_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
-    _=Depends(require_permission("student.read")),
+    principal: Principal = Depends(require_permission("student.read")),
 ) -> list[SupervisorOut]:
+    allowed = await scoped_ids(principal, session)
+    if allowed is not None and student_id not in allowed:
+        return []
     rows = await _svc(session).supervisors_for_student(student_id)
     return [SupervisorOut.model_validate(r) for r in rows]
 
@@ -120,6 +123,11 @@ async def meeting_compliance(
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(require_permission("student.read")),
 ) -> dict:
+    allowed = await scoped_ids(principal, session)
+    if allowed is not None and student_id not in allowed:
+        from app.core.errors import NotFoundError
+
+        raise NotFoundError("Student not found")
     return await _svc(session).meeting_compliance(student_id)
 
 

@@ -20,6 +20,8 @@ class PortalService:
         from app.modules.progression.repository import ProgressionRepository
         from app.modules.progression.service import ProgressionService
         from app.modules.student_record.repository import StudentRepository
+        from app.modules.supervision.repository import SupervisionRepository
+        from app.modules.supervision.service import SupervisionService
         from app.modules.thesis.repository import ThesisRepository
         from app.modules.thesis.service import ThesisService
 
@@ -43,6 +45,7 @@ class PortalService:
             "student": None,
             "milestones": [],
             "funding": [],
+            "supervision": None,
             "thesis": None,
         }
 
@@ -65,6 +68,15 @@ class PortalService:
             FundingRepository(self.session)
         ).list_arrangements(student.id)
         result["funding"] = [a for a in arrangements if a["validTo"] is None]
+        supervision_svc = SupervisionService(SupervisionRepository(self.session))
+        team = await supervision_svc.supervisors_for_student(student.id)
+        meetings = await supervision_svc.meetings_for_student(student.id)
+        result["supervision"] = {
+            # Current team only — ended relationships stay in the admin view.
+            "team": [s for s in team if s["validTo"] is None],
+            "recentMeetings": meetings[:5],
+            "meetingCount": len(meetings),
+        }
         thesis = await ThesisService(ThesisRepository(self.session)).get_for_student(student.id)
         if thesis is not None:
             result["thesis"] = {

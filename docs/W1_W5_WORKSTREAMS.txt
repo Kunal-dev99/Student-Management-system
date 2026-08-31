@@ -1,0 +1,292 @@
+W1-W5 WORKSTREAMS — WHAT HAS BEEN BUILT
+Everything shipped on top of F1-F6 and ICR, closing the four "missing" items
+from the CIO plan review.
+Last updated: 2026-08-31
+
+================================================================================
+0. SHAPE
+================================================================================
+
+W1-W5 are the CIO-plan gap-closure workstreams. The plan-vs-code audit found
+37 of 51 items already built; W1-W5 close everything that was genuinely
+missing (plus a domain polish pass on top).
+
+  W1  Domain polish              - opportunity type, paused status,
+                                   funding-type breadth, area hierarchy
+  W2  Supervisor profile +       - first-class supervisor properties,
+      assignment workflow          request-and-approve state machine
+  W3  Finance inbound handler    - payment.confirmed / payment.rejected
+                                   applied to StipendPayment, not just logged
+  W4  Finance lens               - cashflow, held, overdue, drifted rows on
+                                   the funding-integrity screen
+  W5  Workforce lens             - institution-wide supervisor capacity,
+                                   availability, and assignment backlog
+
+Every workstream ships backend (model where new + service + router + tests) and,
+where visible, a frontend surface. Everything is behind existing permissions;
+no bypasses.
+
+Migration head at the end of W2:  w2_supervisor_profile
+                                  (W3-W5 are code-only, no schema changes)
+
+Total new tests across W1-W5:     19  (test_w1_domain_polish.py: 3,
+                                       test_w2_supervisor_workflow.py: 7,
+                                       W3 cases in test_inbound_partner_messages.py: 6,
+                                       test_w4_finance_lens.py: 3,
+                                       test_w5_workforce_lens.py: 3)
+
+================================================================================
+1. W1 - DOMAIN POLISH
+================================================================================
+
+The gap: several first-class properties the CIO plan describes were flattened
+into strings or narrow enums. This workstream broadens the vocabulary so
+recruitment, funding, and research-area work read the way the domain actually
+speaks.
+
+What shipped:
+  - research_opportunity.opportunity_type enum (funded / self_funded / mixed
+    / employer_sponsored) so "funded PhD posting" is a first-class filter,
+    not a string tag.
+  - OpportunityStatus gained `paused` — a live posting whose applications
+    are frozen pending a decision, distinct from closed.
+  - FundingType broadened: research_council, university_scholarship,
+    external, self_funded, scholarship (new), employer (new), mixed (new).
+    Blended funding is now representable without abusing "external".
+  - research_area.parent_area_id — a self-reference so an institution can
+    model "AI > NLP > Dialogue Systems" and route matching / policy up
+    the hierarchy. The matcher walks it.
+  - Postgres backfill uses `(CASE ... END)::opportunity_funding` because
+    UPDATE with a bare literal fails the enum cast on PG.
+
+Frontend polish:
+  - Recruitment page: funding-type filter chips + a per-opportunity badge
+    surface the new opportunity_type without a page rebuild.
+
+Migration:                       w1_domain_polish
+Tests:                           tests/integration/test_w1_domain_polish.py (3)
+
+================================================================================
+2. W2 - SUPERVISOR PROFILE + ASSIGNMENT WORKFLOW
+================================================================================
+
+The gap: supervisor capacity was a single institution-wide setting. "Who is
+on sabbatical", "does this person take new students", and "how many
+supervisees can they carry" had no home. And assignment happened by inserting
+a SupervisorRelationship — no request, no review, no audit trail of the
+decision.
+
+What shipped:
+
+  SupervisorProfile (per person, unique)
+    - max_students (int, defaults to 8)
+    - availability enum: available / full / on_leave
+    - accepting_new (bool)
+    - sabbatical_from, sabbatical_to (date range; today-in-range = unavailable)
+    - bio (text)
+    - research_areas (M:N via SupervisorProfileArea)
+    - When a profile exists its max_students WINS over
+      supervision.max_supervisees (the institution default).
+
+  SupervisorAssignmentRequest (state machine)
+    - States: recommended -> requested -> academic_review
+              -> approved / rejected / withdrawn
+    - approve() re-checks availability + capacity AT the decision moment
+      (a supervisor who filled up between propose-and-approve is caught).
+    - Approver-separation enforced: requester cannot approve.
+    - Actor trail: requested_by, reviewed_by, decided_by user ids stamped
+      at each transition.
+    - match_score + match_reasons carried from the matcher so the reviewer
+      sees WHY this supervisor was picked.
+    - On approval, a real SupervisorRelationship is created with
+      valid_from = today, role matching the proposal.
+
+  Endpoints (9):
+    GET  /supervisors/{personId}/profile
+    PUT  /supervisors/{personId}/profile
+    GET  /supervisors/recommend?studentId=...    (matcher pass-through)
+    POST /supervisor-assignment-requests         (propose)
+    GET  /supervisor-assignment-requests         (list; ?state= filter)
+    GET  /students/{studentId}/supervisor-assignment-requests
+    POST /supervisor-assignment-requests/{id}/review     (send to academic review)
+    POST /supervisor-assignment-requests/{id}/approve
+    POST /supervisor-assignment-requests/{id}/reject
+    POST /supervisor-assignment-requests/{id}/withdraw
+
+Frontend:
+  - /supervision/{personId} — profile editor (max, availability, sabbatical,
+    accepting-new, bio).
+  - /supervision/requests — admin queue with state-filter chips.
+  - SupervisorRequestsCard mounted on the student detail page so a request
+    can be raised from the student's context.
+
+Migration:                       w2_supervisor_profile
+                                 (postgresql.ENUM(create_type=False) pattern
+                                 to avoid duplicate CREATE TYPE on Postgres)
+Tests:                           tests/integration/test_w2_supervisor_workflow.py (7)
+
+================================================================================
+3. W3 - FINANCE INBOUND HANDLER
+================================================================================
+
+The gap: the CIO plan explicitly cautioned "validate real partner mappings,
+not just adapters." Finance messages were logged as `logged_only` — the
+transport worked but nothing in the domain changed. W3 applies them.
+
+What shipped:
+
+  backend/app/modules/integration/finance_handler.py
+    apply_finance_event(session, event_type, payload) dispatches:
+
+    payment.confirmed
+      -> resolve StipendPayment (by paymentId UUID, else by financeReference)
+      -> if already paid -> return {action: already_paid}  (idempotent re-send)
+      -> if cancelled    -> ValueError (surfaces as logged_with_error)
+      -> else FundingService.mark_paid(paid_on, finance_reference)
+         which also emits a workflow event "funding.changed / stipend_paid"
+         so the outbox tells downstream systems the instalment landed.
+
+    payment.rejected
+      -> resolve payment
+      -> if paid         -> ValueError (a rejection after settlement needs
+                            a Finance reversal, not this event)
+      -> else set_payment_status(HELD, note="Finance rejected: <reason>")
+         so the funding-integrity screen picks it up for triage.
+
+  Payload shape (kept small — we are not Finance's system of record):
+    { "paymentId":        "<uuid>",         # preferred
+      "financeReference": "FIN-...",        # fallback lookup
+      "paidOn":           "2026-08-31",     # for payment.confirmed
+      "reason":           "..." }           # for payment.rejected
+
+  Wired via the dispatch table in integration/service.py `_apply_inbound`.
+  The outer `handle_inbound` still catches ValueError and writes
+  `logged_with_error` so bad payloads are surfaced on the reconciliation
+  screen instead of silently dropped.
+
+  Regression fix: test_signed_webhook_idempotent moved to `invoice.raised`
+  since Finance no longer treats payment.confirmed as "no handler".
+
+Tests:                           tests/integration/test_inbound_partner_messages.py (6 new W3)
+                                 - mark-paid, idempotent re-send, held-with-reason,
+                                   lookup-by-finance-ref, bad payload, reject-after-paid
+
+Code-only (no migration).
+
+================================================================================
+4. W4 - FINANCE LENS ON FUNDING-INTEGRITY
+================================================================================
+
+The gap: the existing funding-integrity screen answered "which students'
+funding chains are broken" (compliance). Finance staff need a cashflow cut of
+the same data. W4 adds it as a second lens on the same page.
+
+Backend:
+  backend/app/modules/funding/finance_lens.py
+    FinanceLensService.snapshot(allowed_ids, window_from, window_to)
+    - Bulk-loaded (one query per table, group in memory) so it scales past
+      a few thousand payments.
+    - Row-scoped by allowed_ids like every other funding read.
+    - Default window: first-of-current-month -> end of current quarter (~3mo).
+
+  Endpoint:
+    GET /api/v1/reports/funding-cashflow?windowFrom=YYYY-MM-DD&windowTo=YYYY-MM-DD
+    (permission: funding.read)
+
+  Returns:
+    window                          {from, to}
+    paymentsInWindow                int
+    totals                          scheduled/approved/paid/held/cancelled  ($ in window)
+    byFundingType[]                 fundingType, paid, outstanding, count
+    held[]                          Finance-rejected payments (ANY date, needs triage)
+    overdueApproved[]               approved & past due & unpaid
+    paidWithoutFinanceReference[]   paid on our side, no finance_reference (drift)
+    counts                          per-list counts
+
+Frontend:
+  - frontend/src/features/funding/api.ts — FinanceLensReport types +
+    useFundingCashflow() hook.
+  - frontend/src/features/funding/FinanceLensPanel.tsx — 5 tiles
+    (paid / approved / scheduled / held / count-in-window) + three lists
+    (held, overdue, drifted) + by-funding-type breakdown.
+  - frontend/src/app/(app)/funding-integrity/page.tsx — new "Lens" toggle:
+    Students (existing compliance view) | Finance (new W4 lens).
+
+Tests:                           tests/integration/test_w4_finance_lens.py (3)
+
+Code-only (no migration).
+
+================================================================================
+5. W5 - WORKFORCE LENS
+================================================================================
+
+The gap: the CIO plan called for an institution-wide supervisor workforce
+view. Before W5 the only way to answer "who's overloaded" was per-supervisor.
+
+Backend:
+  backend/app/modules/supervision/workforce_lens.py
+    WorkforceLensService.snapshot()
+    - Population = union of:
+        * everyone with a SupervisorProfile (W2 configured them),
+        * everyone with an active SupervisorRelationship (currently
+          supervising), and
+        * everyone named as the target of a pending assignment request.
+      Somebody who has never supervised AND has no profile stays out on
+      purpose — the lens is "workforce we manage", not "every person".
+    - Bulk-loaded (a handful of queries regardless of headcount).
+    - Institution setting supervision.max_supervisees is the cap fallback
+      for anyone without a profile.
+
+  Per-supervisor row:
+    personId, personName, email
+    hasProfile, maxStudents, caseload, primary, co, headroom, overCapacity
+    availability, acceptingNew, onSabbatical, sabbaticalFrom/To
+    pendingRequests
+    link to /supervision/{personId}
+
+  Institution totals:
+    supervisors, overCapacity, onSabbatical, notAcceptingNew, unavailable,
+    pendingRequests, totalActiveSupervisees, totalCapacity, utilisationPct,
+    defaultCap
+
+  Endpoint:
+    GET /api/v1/reports/supervisor-workforce
+    (permission: student.read)
+
+Frontend:
+  - frontend/src/features/supervision/w2_api.ts — WorkforceReport types +
+    useSupervisorWorkforce() hook.
+  - frontend/src/app/(app)/supervision/workforce/page.tsx — 8 tiles + a
+    supervisor table sorted worst-breach-first. Status badges: over cap,
+    sabbatical, not accepting, on leave, N pending, no profile.
+  - Route added to routeAccess (student.read, admin roles only).
+  - AppShell nav: "Workforce" entry under Supervision.
+
+Tests:                           tests/integration/test_w5_workforce_lens.py (3)
+
+Code-only (no migration).
+
+================================================================================
+6. CROSS-CUTTING NOTES
+================================================================================
+
+Row-scoping:  every W3/W4/W5 read that could carry student rows honours the
+              caller's allowed_ids the same way the rest of the platform does.
+              Assignment requests are row-scoped by student for reviewers.
+
+Permissions:  no new permission codes. W2 uses student.read for reads and
+              student.write / recruitment.write for state transitions;
+              W3 rides on the existing HMAC-signed webhook gate;
+              W4/W5 reads gate on funding.read and student.read.
+
+Auditing:     every W2 state transition attributes the actor. W3 leaves the
+              full applied payload + error text on IntegrationLog.detail so
+              the reconciliation UI shows what happened.
+
+Idempotency:  W3 preserves the platform's at-least-once contract — a repeat
+              inbound message with the same sourceId is `duplicate`; a
+              repeat with a new sourceId targeting an already-paid row
+              returns `already_paid` without exploding.
+
+Total change: 5 workstreams, 1 new migration head (w2_supervisor_profile),
+              19 new tests, 6 new endpoints, 3 new FE pages, 1 new nav item.

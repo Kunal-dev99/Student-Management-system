@@ -1,16 +1,32 @@
 'use client'
 
 import Link from 'next/link'
-import { CheckSquare, Bell } from 'lucide-react'
+import { CheckSquare, Bell, Timer, TimerOff } from 'lucide-react'
 import { PageHeader } from '@/components/common/PageHeader'
 import { PageSection } from '@/components/common/PageSection'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useToast } from '@/components/ui/use-toast'
+import { useCan } from '@/shared/auth/Can'
 import {
-  useCompleteTask, useMarkNotificationRead, useNotifications, useTasks,
+  useCompleteTask, useMarkNotificationRead, useNotifications, useSlaReport, useTasks,
+  type Task,
 } from '@/features/workflow/api'
+
+/** F5 — small SLA pill next to a task title. */
+function SlaPill({ t }: { t: Task }) {
+  if (!t.slaTargetSeconds) return null
+  if (t.slaBreached) {
+    return <Badge variant="destructive" className="inline-flex items-center gap-1">
+      <TimerOff className="h-3 w-3" /> SLA breached
+    </Badge>
+  }
+  const hrs = Math.round(t.slaTargetSeconds / 3600)
+  return <Badge variant="secondary" className="inline-flex items-center gap-1">
+    <Timer className="h-3 w-3" /> SLA {hrs}h{t.slaWorkingDaysOnly ? ' (working)' : ''}
+  </Badge>
+}
 
 export default function TasksPage() {
   const { toast } = useToast()
@@ -18,11 +34,33 @@ export default function TasksPage() {
   const notifications = useNotifications()
   const complete = useCompleteTask()
   const markRead = useMarkNotificationRead()
+  // The SLA report is reporting.read — students/supervisors see their task list without it.
+  const sla = useSlaReport({ enabled: useCan('reporting.read') })
 
   return (
     <>
       <PageHeader title="Tasks & notifications" description="Work assigned to you and your roles." />
       <div className="px-6 pb-6 space-y-4">
+        {sla.data && sla.data.total > 0 && (
+          <PageSection icon={Timer} title="SLA snapshot (F5)" accent="primary"
+            description="Turnaround against institutional service levels — the platform's own promise back to the department.">
+            <div className="flex flex-wrap items-center gap-4">
+              <div><div className="text-label">Tasks with SLA</div>
+                <div className="text-2xl font-semibold num">{sla.data.total}</div></div>
+              <div><div className="text-label">Open with SLA</div>
+                <div className="text-2xl font-semibold num">{sla.data.openWithSla}</div></div>
+              <div><div className="text-label">Breached</div>
+                <div className={`text-2xl font-semibold num ${sla.data.breached > 0 ? 'text-[hsl(var(--destructive))]' : ''}`}>
+                  {sla.data.breached}
+                </div></div>
+              <div><div className="text-label">Within-target rate</div>
+                <div className="text-2xl font-semibold num">
+                  {Math.round(sla.data.withinTargetRate * 100)}%
+                </div></div>
+            </div>
+          </PageSection>
+        )}
+
         <PageSection icon={CheckSquare} title="My task queue" accent="primary">
           {tasks.isLoading ? <Skeleton className="h-20 w-full" /> : (
             <div className="space-y-2">
@@ -31,6 +69,7 @@ export default function TasksPage() {
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-sm font-medium">{t.title}</span>
                     {t.assigneeRole && <Badge variant="secondary">{t.assigneeRole}</Badge>}
+                    <SlaPill t={t} />
                     {t.aggregateType === 'student' && t.aggregateId && (
                       <Link href={`/students/${t.aggregateId}`} className="text-xs text-primary hover:underline">open student</Link>
                     )}

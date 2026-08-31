@@ -64,11 +64,8 @@ class Settings(BaseSettings):
     integration_research_url: str | None = None
     integration_hr_url: str | None = None
 
-    # Phase 5 — assistant. The rule-based intent parser is the primary path and needs nothing.
-    # The model fallback is OPT-IN: it only runs when assistant_llm_enabled is true AND a key is
-    # set. Leaving it off keeps every query on-premise (no student data sent to a third party).
-    assistant_llm_enabled: bool = False
-    anthropic_api_key: str | None = None
+    # CB-A/CB-C — the assistant is fully deterministic (fuzzy + bag-of-words). The LLM path
+    # was retired in CB-C; no anthropic_api_key or assistant_llm_enabled setting is consumed.
 
     sentry_dsn: str | None = None
     otel_exporter_endpoint: str | None = None

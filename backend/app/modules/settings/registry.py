@@ -135,15 +135,8 @@ SETTINGS: dict[str, SettingDef] = {s.key: s for s in [
                     "(when task raising is on).",
         type="float", default=0.7, min=0.5, max=0.95,
     ),
-    # --- Assistant ---
-    SettingDef(
-        key="assistant.llm_enabled", group="Assistant",
-        label="Allow LLM fallback in Ask PGR",
-        description="Off (default): the assistant answers only from its deterministic parser "
-                    "and concept graph. On: unrecognised questions may be sent to the "
-                    "configured LLM. Requires an API key in the server environment either way.",
-        type="bool", default=False,
-    ),
+    # CB-C — assistant.llm_enabled removed. The assistant is fully deterministic; there is no
+    # LLM fallback to gate. Kept here as a marker to avoid resurrecting the setting.
 ]}
 
 

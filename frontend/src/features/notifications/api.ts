@@ -7,6 +7,9 @@ export interface NotificationPreferences {
   emailEnabled: boolean
   digest: boolean
   mutedEvents: string[]
+  // F6 — quiet hours (minutes since midnight, 0..1439). Nulls disable the window.
+  quietStart?: number | null
+  quietEnd?: number | null
 }
 
 export const useUnreadCount = () =>

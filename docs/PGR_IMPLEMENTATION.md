@@ -216,6 +216,30 @@ Proven by `test_settings.py` (11 tests), including the one that matters most:
 `test_a_changed_setting_changes_real_behaviour` lowers the capacity limit to 2 and asserts the
 supervision guard starts refusing a third supervisee, then resets and asserts it succeeds.
 
+### Phase PL — Pattern Lab ✅ (all six phases, governed ML)
+Driven by `PGR_Pattern_Lab_Implementation_Plan.docx`; full plan + build records in
+`docs/PGR_PATTERN_LAB_PLAN.md`. The institutional learning layer at **Advanced → Pattern
+Lab**: Discover → Validate → Train → Approve → Deploy → Monitor → Retrain.
+
+| Phase | Delivered |
+|---|---|
+| **PL-1** Foundation | 4 governed targets (2 gated by **data-sufficiency gates** with the missing data named), feature registry with **structural leakage exclusion**, content-hashed reproducible datasets with full quality reports |
+| **PL-2** Discovery | Dependency-free statistics (median-split comparisons, two-proportion z, **Bonferroni**, φ-confounders); every finding a business-language sentence with evidence and the causation caution |
+| **PL-3** Training | Bounded candidate search (sklearn as optional `[ml]` extra — **no pandas, no AutoML framework, no MLflow**), stratified 5-fold CV, out-of-fold metrics, permutation importance; a run that cannot beat the baseline is reported **failed** |
+| **PL-4** Governance | trained→candidate→review→approved→production; **approver separation**; mandatory rationale; append-only governance log; auto-generated **model cards with computed limitations**; baseline block; `ml.approve` held by Institution Administrators only |
+| **PL-5** Predictions | Batch scoring from **production versions only** (266 students / 700 ms live); per-student **perturbation factors** ("Stipend amount +50.8 pp"); governed task-raising (off by default); student-detail panel beside the deterministic indicators |
+| **PL-6** Monitoring | Performance-vs-actuals (rank-statistic AUC, calibration-in-the-wild), **PSI drift** vs the frozen training matrix, health verdicts that name their reasons, review dates, **manual-first retraining** (new versions enter at candidate; nothing auto-promotes) |
+
+**The system caught its own first real issue**: monitoring flagged the live production model
+`review` — matured AUC 0.48 vs trained 0.70 with major drift in four features — the
+training-serving skew between point-in-time training features and scored-today features.
+That the monitor surfaced it, named it, and recommended review *without acting* is the
+guardrail architecture working end to end.
+
+New permissions `ml.read` / `ml.analyse` / `ml.train` / `ml.approve`; 4 migrations
+(`ddba4187dd3c` → `44faaad53ffb`); 7 tables; ~24 endpoints; 25 Pattern Lab tests across
+four files.
+
 **Supervisor matching is deliberately not ML.** The gap analysis suggested sentence-transformers;
 that adds a very large dependency to rank a few dozen academics against a bounded vocabulary, and —
 decisively — it makes the score unexplainable. Supervisor allocation is contested, so *"why was I

@@ -30,7 +30,7 @@ export function MilestoneReviewSection({ studentId, milestoneId }: { studentId: 
   const review = useReviewDetail(milestoneId)
   const panel = usePanel(milestoneId)
   const appeals = useAppeals(milestoneId)
-  const people = usePersons('')
+  const people = usePersons('', { enabled: hasPermission('person.read') })
   const addMember = useAddPanelMember(milestoneId)
   const signOff = useSignOffConditions(studentId, milestoneId)
   const submitAppeal = useSubmitAppeal(milestoneId)
@@ -45,6 +45,9 @@ export function MilestoneReviewSection({ studentId, milestoneId }: { studentId: 
   const err = (e: unknown) => toast({ title: 'Action failed', description: (e as Error).message, variant: 'destructive' })
   const r = review.data
   const canDecide = hasPermission('progression.decide')
+  // The panel-member picker lists /persons (person.read) — supervisors hold
+  // progression.decide but not person.read, so the form needs both.
+  const canManagePanel = canDecide && hasPermission('person.read')
 
   return (
     <div className="mt-3 pt-3 border-t border-border/60 space-y-4 bg-surface-2 rounded-md p-3">
@@ -62,7 +65,7 @@ export function MilestoneReviewSection({ studentId, milestoneId }: { studentId: 
             )) : <p className="text-helper">No panel members appointed yet.</p>}
           </div>
         )}
-        {canDecide && (
+        {canManagePanel && (
           <div className="flex flex-wrap items-end gap-2">
             <div className="min-w-[180px]">
               <Select value={personId} onValueChange={setPersonId}>

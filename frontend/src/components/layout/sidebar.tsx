@@ -39,6 +39,10 @@ export interface SidebarProps {
   adminNav?: NavItem[]
   /** Optional "Advanced" group rendered after Administration (e.g. Pattern Lab). */
   advancedNav?: NavItem[]
+  /** Optional institution-specific group (e.g. ICR) rendered after Workspace. */
+  icrNav?: NavItem[]
+  /** Heading for the institution-specific group. */
+  icrLabel?: string
   /** Full brand name shown when expanded. */
   brandName?: string
   /** Tagline under the brand name (e.g. "Oracle Partner"). */
@@ -65,6 +69,8 @@ export function Sidebar({
   mainNav,
   adminNav,
   advancedNav,
+  icrNav,
+  icrLabel = 'ICR',
   brandName = 'Brand',
   brandTagline,
   brandShort = 'BR',
@@ -160,6 +166,20 @@ export function Sidebar({
             </div>
           )}
           <nav className="space-y-0.5 px-2">{mainNav.map(renderItem)}</nav>
+
+          {icrNav && icrNav.length > 0 && (
+            <>
+              <Separator className="my-4 mx-2 bg-border" />
+              {sidebarOpen && (
+                <div className="px-4 mb-2">
+                  <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest">
+                    {icrLabel}
+                  </span>
+                </div>
+              )}
+              <nav className="space-y-0.5 px-2">{icrNav.map(renderItem)}</nav>
+            </>
+          )}
 
           {adminNav && adminNav.length > 0 && (
             <>

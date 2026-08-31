@@ -14,6 +14,7 @@ import { ApiError } from '@/shared/api/client'
 import {
   useReconciliation,
   useReplayDeadLetter,
+  useReplayDeadLettersBulk,
   type StatusCounts,
   type SystemTraffic,
 } from '@/features/integration/api'
@@ -101,7 +102,9 @@ export function ReconciliationPanel({ windowDays = 30 }: { windowDays?: number }
   const { toast } = useToast()
   const { data, isLoading, isError, error } = useReconciliation(windowDays)
   const replay = useReplayDeadLetter()
+  const bulkReplay = useReplayDeadLettersBulk()
   const [replayingId, setReplayingId] = useState<string | null>(null)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
 
   const onReplay = async (id: string, eventType: string) => {
     setReplayingId(id)
@@ -208,7 +211,36 @@ export function ReconciliationPanel({ windowDays = 30 }: { windowDays?: number }
 
       {/* Dead letters */}
       <div className="mt-6">
-        <h3 className="text-label mb-2">Dead letters</h3>
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-label">Dead letters</h3>
+          {deadLetters.length > 0 && (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                className="text-xs text-muted-foreground hover:text-foreground"
+                onClick={() => setSelected(new Set(selected.size === deadLetters.length ? [] : deadLetters.map((d) => d.id)))}
+              >
+                {selected.size === deadLetters.length ? 'Clear' : 'Select all'}
+              </button>
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={selected.size === 0 || bulkReplay.isPending}
+                onClick={async () => {
+                  const ids = Array.from(selected)
+                  try {
+                    const r = await bulkReplay.mutateAsync(ids)
+                    toast({ title: `Replayed ${r.replayed} / ${r.requested}` })
+                    setSelected(new Set())
+                  } catch (e) { toast({ title: 'Bulk replay failed', description: (e as Error).message, variant: 'destructive' }) }
+                }}
+              >
+                <RotateCcw className="h-3.5 w-3.5 mr-1" />
+                {bulkReplay.isPending ? 'Replaying…' : `Replay ${selected.size} selected`}
+              </Button>
+            </div>
+          )}
+        </div>
         {deadLetters.length === 0 ? (
           <Card className="p-4 text-helper">No dead-lettered events. Every outbound event has been delivered or is still retrying.</Card>
         ) : (
@@ -216,6 +248,7 @@ export function ReconciliationPanel({ windowDays = 30 }: { windowDays?: number }
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-6"></TableHead>
                   <TableHead>Event</TableHead>
                   <TableHead>Attempts</TableHead>
                   <TableHead>Last error</TableHead>
@@ -226,6 +259,17 @@ export function ReconciliationPanel({ windowDays = 30 }: { windowDays?: number }
               <TableBody>
                 {deadLetters.map((d) => (
                   <TableRow key={d.id}>
+                    <TableCell>
+                      <input
+                        type="checkbox"
+                        checked={selected.has(d.id)}
+                        onChange={(e) => {
+                          const next = new Set(selected)
+                          if (e.target.checked) next.add(d.id); else next.delete(d.id)
+                          setSelected(next)
+                        }}
+                      />
+                    </TableCell>
                     <TableCell className="font-medium">{d.eventType}</TableCell>
                     <TableCell className="num">{d.attempts}</TableCell>
                     <TableCell className="text-muted-foreground max-w-[420px]" title={d.lastError ?? undefined}>

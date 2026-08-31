@@ -39,6 +39,41 @@ async def funding_integrity(
     )
 
 
+@reports_router.get("/funding-cashflow", summary="Finance lens on stipend payments (W4)")
+async def funding_cashflow(
+    windowFrom: str | None = None,
+    windowTo: str | None = None,
+    session: AsyncSession = Depends(get_read_session),
+    principal: Principal = Depends(require_permission("funding.read")),
+) -> dict:
+    """W4 — the Finance-facing cut of the funding-integrity screen.
+
+    Cashflow totals for a window plus three actionable lists: Finance-rejected (HELD),
+    approved-but-overdue, and paid-without-Finance-reference.
+    """
+    from datetime import date as _date
+    from app.modules.funding.finance_lens import FinanceLensService
+    from app.modules.student_record.router import scoped_ids
+
+    allowed = await scoped_ids(principal, session)
+    wf = _date.fromisoformat(windowFrom) if windowFrom else None
+    wt = _date.fromisoformat(windowTo) if windowTo else None
+    return await FinanceLensService(session).snapshot(
+        allowed_ids=allowed, window_from=wf, window_to=wt,
+    )
+
+
+@reports_router.get("/supervisor-workforce", summary="Workforce lens — supervisor capacity institution-wide (W5)")
+async def supervisor_workforce(
+    session: AsyncSession = Depends(get_read_session),
+    _=Depends(require_permission("student.read")),
+) -> dict:
+    """W5 — institution-wide supervisor caseload / capacity / availability snapshot."""
+    from app.modules.supervision.workforce_lens import WorkforceLensService
+
+    return await WorkforceLensService(session).snapshot()
+
+
 @reports_router.get("/analytics", summary="Risk, completion, and forecasting analytics")
 async def analytics(
     session: AsyncSession = Depends(get_read_session),

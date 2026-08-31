@@ -18,6 +18,7 @@ import { PageSection } from '@/components/common/PageSection'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ApiError } from '@/shared/api/client'
+import { useCan } from '@/shared/auth/Can'
 import {
   useRelationshipGraph,
   type GraphEdge, type GraphNode, type GraphNodeKind, type GraphParams,
@@ -246,9 +247,11 @@ export function RelationshipGraph({
   const router = useRouter()
   const markerId = `rg-arrow-${useId().replace(/:/g, '')}`
   const [open, setOpen] = useState(defaultOpen)
-  // Nothing is fetched while the panel is folded away.
+  // Nothing is fetched while the panel is folded away, and never without the
+  // student.read the graph endpoint requires.
+  const canRead = useCan('student.read')
   const { data, isLoading, isError, error } = useRelationshipGraph({
-    studentId, awardId, limit, enabled: open,
+    studentId, awardId, limit, enabled: open && canRead,
   })
 
   const nodes = useMemo(() => data?.nodes ?? [], [data])

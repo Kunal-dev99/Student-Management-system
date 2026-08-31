@@ -1,6 +1,6 @@
 'use client'
 
-import { Activity, GraduationCap, Milestone, Wallet, BookOpenCheck } from 'lucide-react'
+import { Activity, GraduationCap, Milestone, Wallet, BookOpenCheck, UsersRound } from 'lucide-react'
 import { PageHeader } from '@/components/common/PageHeader'
 import { PageSection } from '@/components/common/PageSection'
 import { Badge } from '@/components/ui/badge'
@@ -9,6 +9,21 @@ import { useMyJourney } from '@/features/portal/api'
 
 function money(a: string | null, c: string | null) {
   return a ? `${c ?? ''} ${Number(a).toLocaleString()}`.trim() : '—'
+}
+
+const OPEN_MILESTONE = new Set(['not_started', 'due', 'submitted', 'under_review', 'overdue'])
+
+/** Overdue / due-soon flag for an undecided milestone. */
+function dueness(dueDate: string | null, status: string): 'overdue' | 'due-soon' | null {
+  if (!dueDate || !OPEN_MILESTONE.has(status)) return null
+  const days = (new Date(dueDate).getTime() - Date.now()) / 86_400_000
+  if (days < 0) return 'overdue'
+  if (days <= 30) return 'due-soon'
+  return null
+}
+
+function roleLabel(role: string) {
+  return role.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase())
 }
 
 export default function PortalPage() {
@@ -29,7 +44,7 @@ export default function PortalPage() {
     )
   }
 
-  const { person, student, milestones, funding, thesis } = data
+  const { person, student, milestones, funding, supervision, thesis } = data
 
   return (
     <>
@@ -62,12 +77,26 @@ export default function PortalPage() {
 
         <div className="grid gap-4 md:grid-cols-2">
           <PageSection icon={Milestone} title="My milestones" accent="primary">
-            {milestones.length ? milestones.map((m) => (
-              <div key={m.id} className="flex items-center justify-between border-b border-border/60 last:border-0 py-1.5">
-                <span className="text-sm">{m.name}</span>
-                <Badge variant={m.status === 'decided' ? 'success' : 'secondary'}>{m.status.replace(/_/g, ' ')}</Badge>
-              </div>
-            )) : <p className="text-helper">No milestones yet.</p>}
+            {milestones.length ? milestones.map((m) => {
+              const flag = dueness(m.dueDate, m.status)
+              return (
+                <div key={m.id} className="flex items-center justify-between gap-3 border-b border-border/60 last:border-0 py-1.5">
+                  <div className="min-w-0">
+                    <p className="text-sm truncate">{m.name}</p>
+                    {m.dueDate && (
+                      <p className={`text-xs num ${flag === 'overdue' ? 'text-destructive font-medium' : 'text-muted-foreground'}`}>
+                        Due {m.dueDate}
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {flag === 'overdue' && <Badge variant="destructive">Overdue</Badge>}
+                    {flag === 'due-soon' && <Badge variant="warning">Due soon</Badge>}
+                    <Badge variant={m.status === 'decided' ? 'success' : 'secondary'}>{m.status.replace(/_/g, ' ')}</Badge>
+                  </div>
+                </div>
+              )
+            }) : <p className="text-helper">No milestones yet.</p>}
           </PageSection>
 
           <PageSection icon={Wallet} title="My funding" accent="primary">
@@ -79,6 +108,41 @@ export default function PortalPage() {
             )) : <p className="text-helper">No active funding.</p>}
           </PageSection>
         </div>
+
+        {supervision && (
+          <PageSection icon={UsersRound} title="My supervision" accent="primary">
+            {supervision.team.length ? (
+              <div className="space-y-1">
+                {supervision.team.map((s) => (
+                  <div key={s.id} className="flex items-center justify-between border-b border-border/60 last:border-0 py-1.5">
+                    <span className="text-sm">{s.supervisorName}</span>
+                    <Badge variant={s.role === 'primary' ? 'success' : 'secondary'}>{roleLabel(s.role)}</Badge>
+                  </div>
+                ))}
+              </div>
+            ) : <p className="text-helper">No supervisors assigned yet.</p>}
+            {supervision.recentMeetings.length > 0 && (
+              <div className="mt-3">
+                <p className="text-label mb-1">
+                  Recent meetings{supervision.meetingCount > supervision.recentMeetings.length &&
+                    ` (last ${supervision.recentMeetings.length} of ${supervision.meetingCount})`}
+                </p>
+                {supervision.recentMeetings.map((mt) => (
+                  <div key={mt.id} className="flex items-center justify-between gap-3 border-b border-border/60 last:border-0 py-1.5">
+                    <span className="text-sm truncate">
+                      <span className="num">{mt.metOn}</span>
+                      {mt.supervisorName && <span className="text-muted-foreground"> · {mt.supervisorName}</span>}
+                      {mt.durationMinutes != null && <span className="text-muted-foreground num"> · {mt.durationMinutes} min</span>}
+                    </span>
+                    <Badge variant={mt.studentConfirmed ? 'success' : 'outline'}>
+                      {mt.studentConfirmed ? 'Confirmed' : 'Unconfirmed'}
+                    </Badge>
+                  </div>
+                ))}
+              </div>
+            )}
+          </PageSection>
+        )}
 
         <PageSection icon={BookOpenCheck} title="My thesis" accent="accent">
           {thesis ? (

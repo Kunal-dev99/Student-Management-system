@@ -1,0 +1,32 @@
+# PGR Platform backend — PRODUCTION dependency set.
+#
+# Subset of requirements.txt: no SQLite driver, no test tooling. Development machines and CI
+# keep using requirements.txt (which adds aiosqlite + pytest for the in-memory test suite).
+# Deploy with:  pip install -r requirements-prod.txt
+
+# --- web framework & validation ---
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+pydantic-settings==2.7.1
+email-validator==2.2.0             # pydantic EmailStr
+
+# --- database (PostgreSQL only in production) ---
+SQLAlchemy==2.0.36
+greenlet==3.1.1                    # SQLAlchemy async on Python 3.13
+alembic==1.14.0
+asyncpg==0.30.0                    # the ONLY database driver production needs
+
+# --- auth ---
+python-jose[cryptography]==3.3.0   # JWT
+passlib[bcrypt]==1.7.4             # password hashing
+
+# --- platform services ---
+httpx==0.28.1                      # outbound HTTP (integration adapters)
+APScheduler==3.11.0                # background worker scheduling
+python-multipart==0.0.20           # file uploads
+aiosmtplib==3.0.2                  # SMTP email
+
+# --- optional capabilities (safe to keep; remove only for a minimal image) ---
+anthropic==0.40.0                  # Ask PGR LLM fallback — inert unless ASSISTANT_LLM_ENABLED + key
+scikit-learn==1.9.0                # Pattern Lab model training/scoring — [ml] extra

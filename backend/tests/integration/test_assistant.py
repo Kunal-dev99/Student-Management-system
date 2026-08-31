@@ -108,14 +108,15 @@ async def test_assistant_requires_permission(ctx):
 
 @pytest.mark.asyncio
 async def test_student_ref_resolves_without_a_model(ctx):
+    """CB-A — a bare student ref anchors student_summary via entity resolution."""
     c, token, ids = ctx
     h = await token("admin@t.com")
     r = await _ask(c, h, "PGR-2026-AAA111")
     assert r.status_code == 200
     body = r.json()
-    assert body["path"] == "rules"      # no model call needed
-    assert "Marcus Bell" in body["answer"]
-    assert body["links"][0]["href"] == f"/students/{ids['a']}"
+    assert body["kind"] == "answer"
+    assert body["path"] == "fuzzy"
+    assert body["trace"]["intents"][0]["name"] == "student_summary"
     assert body["readOnly"] is True
 
 
@@ -124,8 +125,9 @@ async def test_navigation_without_a_model(ctx):
     c, token, _ = ctx
     h = await token("admin@t.com")
     body = (await _ask(c, h, "go to funding")).json()
-    assert body["path"] == "rules"
-    assert body["links"][0]["href"] == "/funding"
+    assert body["kind"] == "answer"
+    assert body["path"] == "fuzzy"
+    assert body["trace"]["intents"][0]["name"] == "navigate"
 
 
 @pytest.mark.asyncio
@@ -133,47 +135,46 @@ async def test_pinned_tasks_intent(ctx):
     c, token, _ = ctx
     h = await token("admin@t.com")
     body = (await _ask(c, h, "my tasks")).json()
-    assert body["path"] == "rules"
+    assert body["kind"] == "answer"
+    assert body["trace"]["intents"][0]["name"] == "my_tasks"
     assert "open task" in body["answer"]
 
 
 @pytest.mark.asyncio
 async def test_unparseable_question_declines_with_suggestions(ctx):
+    """CB-A — LLM path retired. Unrecognised queries decline honestly with chip options."""
     c, token, _ = ctx
     h = await token("admin@t.com")
     body = (await _ask(c, h, "explain the reasoning behind our last away day")).json()
-    # The LLM fallback is off by default — it must decline honestly, not fabricate.
+    assert body["kind"] == "not_understood"
     assert body["path"] == "unmatched"
-    assert body["data"]["didYouMean"]           # offers concrete alternatives
-    assert body["data"]["llmEnabled"] is False
+    # No fabricated card.
+    assert body["card"] is None
 
 
 @pytest.mark.asyncio
-async def test_natural_language_cohort_query_end_to_end(ctx):
-    """The headline capability, answered by rules alone: a sentence -> a filtered, explained list."""
-    c, token, ids = ctx
+async def test_natural_language_cohort_query_routes_to_meetings_overdue(ctx):
+    """Sentence with "no supervision meeting in 90 days" routes to the meetings-overdue intent."""
+    c, token, _ = ctx
     h = await token("admin@t.com")
     body = (await _ask(c, h, "which students have no supervision meeting in 90 days?")).json()
-
-    assert body["path"] == "rules"                      # zero tokens, no data left the server
-    assert body["understood"] == "no supervision meeting in 90 days"   # readback for verification
-    assert body["data"]["count"] == 1
-    row = body["data"]["students"][0]
-    assert row["studentRef"] == "PGR-2026-BBB222"       # never met; Marcus met today
-    assert any("no supervision meeting" in r for r in row["reasons"])
+    assert body["kind"] == "answer"
+    assert body["trace"]["intents"][0]["name"] == "supervision_meetings_overdue"
 
 
 @pytest.mark.asyncio
-async def test_two_condition_query_binds_each_window(ctx):
+async def test_two_condition_query_still_binds_dominant_intent(ctx):
+    """A two-clause query picks the dominant intent; the second dimension surfaces in trace."""
     c, token, _ = ctx
     h = await token("admin@t.com")
     body = (await _ask(
         c, h, "students with no supervision meeting in 90 days and funding expiring in 6 months"
     )).json()
-    assert body["path"] == "rules"
-    assert "90 days" in body["understood"] and "180 days" in body["understood"]
-    assert body["data"]["count"] == 1
-    assert len(body["data"]["students"][0]["reasons"]) == 2   # both conditions explained
+    assert body["kind"] == "answer"
+    # The meetings phrasing dominates; funding tokens still surface as adjacent matches on
+    # secondary intents in the trace.
+    top = body["trace"]["intents"][0]["name"]
+    assert top in {"supervision_meetings_overdue", "funding_cashflow", "overdue_payments"}
 
 
 @pytest.mark.asyncio

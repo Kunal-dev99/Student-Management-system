@@ -14,6 +14,7 @@ import {
   useDeclareIntention, useRecordOutcome, useSubmitThesis, useThesis,
   type ExaminationOutcome,
 } from '@/features/thesis/api'
+import { useAuth } from '@/shared/auth/AuthContext'
 import { useCompletion, useConfirmCompletion, useGraduate } from './api'
 import { ExaminersSection } from '@/features/thesis/ExaminersSection'
 import { VivaSection } from '@/features/thesis/VivaSection'
@@ -24,6 +25,10 @@ const THESIS_VARIANT = (s: string) =>
 
 export function ThesisCompletionPanel({ studentId }: { studentId: string }) {
   const { toast } = useToast()
+  const { hasPermission } = useAuth()
+  // Every thesis/completion action is student.write on the server; without it the
+  // panel is a read-only status view. Hiding is convenience — the API enforces.
+  const canAct = hasPermission('student.write')
   const thesisQ = useThesis(studentId)
   const completionQ = useCompletion(studentId)
   const declare = useDeclareIntention(studentId)
@@ -51,19 +56,19 @@ export function ThesisCompletionPanel({ studentId }: { studentId: string }) {
               {t?.examination?.outcome && <Badge variant="outline">{t.examination.outcome.replace(/_/g, ' ')}</Badge>}
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              {(!t || t.status === 'preparation') && (
+              {canAct && (!t || t.status === 'preparation') && (
                 <Button size="sm" disabled={declare.isPending}
                   onClick={async () => { try { await declare.mutateAsync('Doctoral Thesis'); toast({ title: 'Intention to submit declared' }) } catch (e) { err(e) } }}>
                   Declare intention
                 </Button>
               )}
-              {t?.status === 'intention_to_submit' && (
+              {canAct && t?.status === 'intention_to_submit' && (
                 <Button size="sm" disabled={submit.isPending}
                   onClick={async () => { try { await submit.mutateAsync({ id: t.id, documentRef: 'thesis.pdf' }); toast({ title: 'Thesis submitted' }) } catch (e) { err(e) } }}>
                   Submit thesis
                 </Button>
               )}
-              {t && ['submitted', 'under_examination', 'corrections', 'resubmission'].includes(t.status) && (
+              {canAct && t && ['submitted', 'under_examination', 'corrections', 'resubmission'].includes(t.status) && (
                 <>
                   <Select value={oc} onValueChange={(v) => setOc(v as ExaminationOutcome)}>
                     <SelectTrigger className="w-56 h-8"><SelectValue placeholder="Examination outcome…" /></SelectTrigger>
@@ -79,11 +84,11 @@ export function ThesisCompletionPanel({ studentId }: { studentId: string }) {
             </div>
           </div>
 
-          {/* Examiners (once the thesis is submitted) */}
-          {t?.submittedAt && <ExaminersSection studentId={studentId} thesisId={t.id} />}
+          {/* Examiner management and viva scheduling are PGR-office work
+              (student.write) — supervisors see thesis status above instead. */}
+          {canAct && t?.submittedAt && <ExaminersSection studentId={studentId} thesisId={t.id} />}
 
-          {/* Viva scheduling + corrections period (Phase 4B.4) */}
-          {t?.submittedAt && (
+          {canAct && t?.submittedAt && (
             <VivaSection studentId={studentId} thesisId={t.id} examination={t.examination} />
           )}
 
@@ -100,7 +105,7 @@ export function ThesisCompletionPanel({ studentId }: { studentId: string }) {
                 🎓 Graduated {c.graduationDate} — <span className="font-medium">{c.award?.title}</span> conferred.
                 The person is now <span className="font-medium">alumni</span>.
               </div>
-            ) : (
+            ) : canAct ? (
               <div className="flex flex-wrap items-center gap-2">
                 <Button size="sm" variant="secondary" disabled={!thesisApproved || c?.status === 'award_confirmed' || confirm.isPending}
                   onClick={async () => { try { await confirm.mutateAsync(); toast({ title: 'Completion confirmed' }) } catch (e) { err(e) } }}>
@@ -112,6 +117,8 @@ export function ThesisCompletionPanel({ studentId }: { studentId: string }) {
                 </Button>
                 {!thesisApproved && <span className="text-helper">Thesis must be approved first.</span>}
               </div>
+            ) : (
+              <p className="text-helper">Completion is confirmed by the PGR office once the thesis is approved.</p>
             )}
           </div>
         </div>

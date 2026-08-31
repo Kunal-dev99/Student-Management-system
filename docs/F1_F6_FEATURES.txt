@@ -1,0 +1,592 @@
+F1-F6 FEATURES — WHAT HAS BEEN BUILT
+Everything shipped on top of the base platform, before the ICR module.
+Last updated: 2026-08-31
+
+================================================================================
+0. SHAPE
+================================================================================
+
+F1-F6 are the "functional make-it-real" blocks — each closes a workaround the
+platform relied on. They are grouped by user impact, not by module:
+
+  F1  Statutory truth        - HESA sign-off, coding frames, mandatory registry
+  F2  Person integrity       - merge, subject-access export, right-to-erasure
+  F3  Recruitment depth      - references, interviews, conditions, visa gate
+  F4  Award pipeline         - classification workflow, certificate PDF
+  F5  Ops truth              - Task SLA, bulk replay, funding backfill
+  F6  Assistant + hygiene    - write intents, quiet hours, email bounce
+
+Every block ships backend (model + migration + service + router + tests) and,
+where visible, a frontend polish pass. Everything is behind existing
+permissions or a new named permission; nothing bypasses the auth path.
+
+Migration head at the end of F6:  f6_assistant_notif
+Total new tests across F1-F6:     ~50 (in test_statutory_profiles.py,
+                                  test_person_gdpr.py, test_f3_recruitment_depth.py,
+                                  test_f4_classification.py, test_f5_ops_truth.py,
+                                  test_f6_assistant_notif.py)
+
+================================================================================
+1. F1 - STATUTORY TRUTH (HESA sign-off, coding frames, mandatory registry)
+================================================================================
+
+Before:  The statutory profile was a 12-field worked example. There was no
+         published-spec mandatory-field registry, no coding-frame transforms
+         beyond generic (upper, date_iso, bool_yn), and no sign-off state.
+         An administrator could Generate a CSV that was silently non-compliant.
+
+Now:     A profile carries sign-off metadata; sign-off is refused until every
+         mandatory field in the return's published spec is mapped AND the
+         current cohort validates; signed-off profiles are immutable until
+         deliberately unsigned; five HESA coding-frame transforms turn free-
+         text student values into HESA codes.
+
+Data model
+  report_profile.signed_off_by            Uuid nullable, FK users.id
+  report_profile.signed_off_at            DateTime nullable
+  report_profile.signed_off_notes         Text nullable
+
+Spec registry (code, not table) — app/modules/exports/specs.py
+  HESA_STUDENT_2026: 24 mandatory fields with published coding frames
+    (OWNSTU, HUSID, SURNAME, FNAMES, BIRTHDTE, SEXID, NATION, ETHNIC,
+     DISABLE, COURSEID, COURSETYP, STULOAD, MODE, STUDYLEVEL, COMDATE,
+     ENDDATE, FEESTAT, MSTUFEE, FUNDCODE, DOMICILE, TERMTIME, THESIS,
+     SUPERVISED, ENTRYROUTE)
+
+Coding-frame transforms in exports/statutory.py
+  hesa_sex        Female/Male/Other/Unknown  ->  10 / 11 / 12 / 13
+  hesa_mode       full_time/part_time         ->  01 / 02
+  hesa_yn         yes/no                      ->  Y / N
+  hesa_studylevel PhD/MPhil/masters/pgdip     ->  D00 / M11 / H11 / I11
+  hesa_route      opportunity/proposal        ->  OPPORTUNITY / PROPOSAL
+
+Service rules
+  compile()         Returns the missing-mandatory-field gap between the
+                    profile and the spec; signOffReady = no missing +
+                    at least one mapping.
+  sign_off()        Refused if signOffReady is false OR if generate() has
+                    any validation errors on the current cohort. Records
+                    signed_off_by, signed_off_at, signed_off_notes.
+  unsign()          Deliberate, audited; clears the three sign-off fields.
+  Every mutation on a signed-off profile (add_field, update_field,
+  delete_field) is refused with a ConflictError naming the profile.
+
+Permission
+  reports.signoff   New — held by Institution + PGR Administrator by default.
+
+Endpoints
+  GET   /report-profiles/{id}/compile          missing-field gap
+  PATCH /report-profiles/{id}/fields/{fid}     edit a mapping (refused if signed off)
+  DELETE /report-profiles/{id}/fields/{fid}    remove (refused if signed off)
+  POST  /report-profiles/{id}/sign-off         (reports.signoff)
+  POST  /report-profiles/{id}/unsign           (reports.signoff)
+
+Frontend
+  /statutory              Sign-off column on the profile list (draft / signed)
+                          Sign-off & mandatory-field readiness panel with
+                          red/amber/green badge; missing-field table with
+                          field name, description and coding frame; Sign-off
+                          dialog with notes; locked banner + Unsign action
+                          when signed off; Add-field hidden when locked.
+
+Tests (test_statutory_profiles.py, 18 total)
+  compile_reports_missing_mandatory_fields
+  signoff_refuses_when_mandatory_fields_are_missing
+  signoff_succeeds_when_spec_is_satisfied_and_locks_the_profile
+  unsign_reopens_the_profile_for_edits
+  delete_and_update_field_refused_on_signed_off_profile
+  hesa_coding_frame_transforms_are_available
+  coding_frames_produce_hesa_codes
+  signoff_refuses_when_current_cohort_has_validation_errors
+  (plus 10 pre-existing statutory tests, all still pass)
+
+Migration: f1_signoff_2026
+
+================================================================================
+2. F2 - PERSON INTEGRITY (merge, subject-access export, right-to-erasure)
+================================================================================
+
+Before:  Duplicate person rows had no resolution path. There was no subject-
+         access endpoint (30-day UK statutory clock). No right-to-erasure.
+         No contacts model — the notifier assumed one channel per user.
+
+Now:     Merge rewrites every FK to the losing person and deletes the row;
+         subject-access exports every row referencing the person (metadata-
+         driven so new modules auto-included); erasure pseudonymises the
+         person while preserving audit + financial integrity; contacts are
+         a first-class channel with a do-not-contact flag honoured by the
+         notifier.
+
+Data model
+  person.pseudonymised_at              DateTime nullable — set by erase()
+  person_contact                       (person_id CASCADE, channel enum,
+                                        value, label, verified_at,
+                                        do_not_contact)
+  person_merge_record                  (surviving_person_id, losing_person_id,
+                                        losing_person_snapshot JSON,
+                                        fk_touched JSON, reason,
+                                        merged_by_user_id, merged_at)
+
+New enum
+  person_contact_channel: email, phone, mobile, address, emergency
+
+Metadata-driven merge/export (person/gdpr.py)
+  _person_fk_columns() walks Base.metadata.sorted_tables and returns every
+  (table, column) with a FK to person.id. Adding a new module with a
+  person_id FK auto-extends both merge (rewrite) and export (walk) — no
+  hardcoded list to maintain.
+
+Service — PersonGdprService
+  merge(surviving_id, losing_id, ...)  One transaction: rewrite every FK,
+                                       delete losing row, write a
+                                       person_merge_record with tables +
+                                       columns + rows_updated per FK.
+                                       Refused if surviving == losing, if
+                                       either person is not found, or if
+                                       either is already pseudonymised.
+  export_all(person_id)                Returns {person, related: {table: [rows]}}
+                                       with the tables list sorted for
+                                       determinism.
+  erase(person_id)                     Pseudonymises: given_name/family_name
+                                       -> "erased"; email -> one-way hash
+                                       ("erased:" + sha256 of email);
+                                       date_of_birth/nationality/
+                                       external_person_ref cleared; contacts
+                                       deleted; pseudonymised_at stamped.
+                                       Audit rows survive intact.
+                                       Refused if already erased.
+
+Permission
+  person.gdpr       New — Institution Administrator only by default (via *).
+
+Endpoints
+  GET    /persons/{id}/contacts                     (person.read)
+  POST   /persons/{id}/contacts                     (person.write)
+  PATCH  /persons/{id}/contacts/{cid}               (person.write)
+  DELETE /persons/{id}/contacts/{cid}               (person.write)
+  POST   /persons/merge                             (person.gdpr)
+  GET    /persons/{id}/export                       (person.gdpr) JSON
+  POST   /persons/{id}/erase                        (person.gdpr)
+
+Frontend
+  /persons                Merge persons action in the page header (visible
+                          only to person.gdpr holders).
+  /persons/[id]           Contacts card with add / edit / delete + do-not-
+                          contact toggle honoured by notifier.
+                          GDPR card: Download subject-access export (JSON)
+                          streams a file; Erase this person opens a dialog
+                          requiring the user to type ERASE to confirm.
+
+Tests (test_person_gdpr.py, 7 total)
+  contacts_crud_round_trip
+  merge_rewrites_fks_and_deletes_the_loser
+  merge_refuses_self_merge_and_missing_person
+  export_contains_person_and_all_referencing_rows
+  erase_pseudonymises_person_and_drops_contacts
+  erase_is_idempotent_and_blocks_merge
+  gdpr_endpoints_refuse_without_person_gdpr_permission
+
+Migration: f2_person_gdpr
+
+================================================================================
+3. F3 - RECRUITMENT DEPTH (references, interviews, conditions, visa gate)
+================================================================================
+
+Before:  Reference requests lived in email + Word. Interviews were spreadsheets.
+         Offers had a free-text "conditions" JSON with no state machine and
+         no accept-time gate. Fee status and visa status weren't captured;
+         UKVI compliance drift on international students was possible.
+
+Now:     ReferenceRequest with token-linked external submission (referee
+         needs no account); Interview + Panellist with outcome; OfferCondition
+         as a real object with satisfy/waive lifecycle; Application carries
+         fee_status + visa_required + visa_check_completed_at; Offer issue
+         refuses without visa check; Offer accept refuses with unsatisfied
+         conditions.
+
+Data model
+  application.fee_status                  enum home / overseas /
+                                          channel_islands / unknown
+  application.visa_required               Boolean default false
+  application.visa_check_completed_at     DateTime nullable
+  reference_request                       (application_id CASCADE, referee_*,
+                                           token_hash unique, status enum,
+                                           requested_at, submitted_at,
+                                           response_text, response_document_ref)
+  interview                               (application_id CASCADE,
+                                           scheduled_at, location, status,
+                                           outcome enum, notes)
+  interview_panellist                     (interview_id CASCADE, person_id,
+                                           role) + unique index on
+                                           (interview_id, person_id)
+  offer_condition                         (offer_id CASCADE, description,
+                                           satisfy_by, status enum pending /
+                                           satisfied / waived, satisfied_at,
+                                           evidence_document_ref)
+
+New enums
+  reference_request_status  requested / received / declined / expired
+  interview_status          scheduled / completed / cancelled
+  interview_outcome         unrecorded / proceed / hold / reject
+  offer_condition_status    pending / satisfied / waived
+  fee_status                home / overseas / channel_islands / unknown
+
+Service rules
+  ReferenceService.request     Generates a URL-safe token; stores only the
+                               sha256 hash; returns the cleartext once.
+  ReferenceService.submit      Unauthenticated; refuses expired / already-
+                               used tokens.
+  InterviewService.add_panellist  Refuses duplicate person on the same panel.
+  OfferConditionService.satisfy / waive
+  Admissions.issue_offer       Refuses if application.visa_required and
+                               visa_check_completed_at is NULL.
+  Admissions.accept_offer      Refuses if any first-class OfferCondition is
+                               still pending; names the count and first
+                               condition.
+
+Endpoints
+  Applications:
+    GET/POST /applications/{aid}/references
+    POST     /public/references/{token}                  (unauthenticated)
+    GET/POST /applications/{aid}/interviews
+    POST     /applications/interviews/{iid}/panellists
+    POST     /applications/interviews/{iid}/outcome
+    PATCH    /applications/{aid}/visa-check
+  Offers:
+    GET/POST /offers/{oid}/conditions
+    POST     /offers/{oid}/conditions/{cid}/satisfy
+    POST     /offers/{oid}/conditions/{cid}/waive
+
+Frontend
+  /recruitment            Applications tab now shows Route badges (Route A /
+                          Route B) with a chip filter at the top; "Showing X
+                          of Y" counter updates live.
+
+Tests (test_f3_recruitment_depth.py, 6 total)
+  reference_request_and_referee_submission
+  bad_reference_token_is_refused
+  interview_lifecycle (schedule + panellist + duplicate refused + outcome)
+  accept_refused_while_condition_pending
+  condition_can_be_waived_instead_of_satisfied
+  visa_required_blocks_issue_until_check_complete
+
+Migration: f3_recruitment_depth
+
+================================================================================
+4. F4 - AWARD PIPELINE (classification workflow, certificate PDF)
+================================================================================
+
+Before:  Classification was a free-text field on Award. Graduation happened
+         without a Registry sign-off step and without an artefact. Records
+         Office ran a parallel Word process for the certificate.
+
+Now:     Classification is a small state machine (draft -> proposed ->
+         confirmed -> published) with hard approver-separation on confirm;
+         publishing renders a real PDF certificate into the object store
+         and links it to the Award; graduation is refused until the award
+         is published.
+
+Data model
+  award.classification                 String(60)  nullable
+  award.classification_state           String(20)  draft / proposed /
+                                                   confirmed / published
+  award.proposed_by_user_id            Uuid FK users.id
+  award.confirmed_by_user_id           Uuid FK users.id
+  award.published_at                   DateTime nullable
+  award.certificate_document_id        Uuid FK document.id
+
+Classifications registered
+  PhD, PhD-with-corrections, PhD-with-major-corrections, MPhil, MRes
+
+Service — ClassificationService
+  propose(student_id, classification, proposed_by_user_id)
+    Creates the Award row on first propose (draft -> proposed).
+    Refuses unknown classification with the allowed list.
+  confirm(student_id, confirmed_by_user_id)
+    Refused unless state == proposed.
+    Refused if confirmed_by_user_id == proposed_by_user_id  (approver
+    separation).
+  publish(student_id)
+    Refused unless state == confirmed.
+    Renders the certificate PDF with reportlab (A4 branded page with
+    person name, classification, date), saves via ObjectStore, writes a
+    Document row of type "certificate", stamps published_at + links
+    certificate_document_id.
+  Graduate refused via completion_service.graduate() unless the Award is
+  in state == published.
+
+Endpoints
+  GET  /students/{id}/classification              current state + allowed options
+  POST /students/{id}/classification/propose      (student.write)
+  POST /students/{id}/classification/confirm      (progression.decide)
+  POST /students/{id}/classification/publish      (reports.signoff)
+  GET  /students/{id}/certificate                 real PDF bytes
+
+Frontend
+  Student detail          New Award classification (F4) card between Thesis &
+                          completion and Relationship map. State badges:
+                          Not started / Proposed - awaiting exam board /
+                          Confirmed - awaiting Registry / Published. Buttons
+                          gated by role (Propose / Confirm / Publish +
+                          Download certificate).
+
+Tests (test_f4_classification.py, 5 total)
+  propose_creates_award_and_moves_to_proposed
+  unknown_classification_refused
+  confirm_enforces_approver_separation
+  publish_renders_certificate_pdf_and_download_works (PDF header + non-empty)
+  publish_refuses_without_confirmed_state
+  plus test_thesis_completion regression updated to walk the classification
+  flow before graduation.
+
+Migration: f4_award_classification
+
+================================================================================
+5. F5 - OPS TRUTH (Task SLA, bulk dead-letter replay, funding backfill)
+================================================================================
+
+Before:  Tasks could be "overdue against due_at" but there was no notion of
+         an institutional service level, no report, and no working-day-aware
+         clock. Dead-letter replay was one-at-a-time. Older students missed
+         a research_project link so the funding-integrity screen flagged
+         them all as errors ("noise pollution").
+
+Now:     Task carries an optional SLA target with working-day-aware elapsed
+         computation; a sweep marks breached rows; a report tile shows total
+         / open / breached / within-target rate. Integration hub gains a
+         bulk-replay endpoint. A one-shot backfill script links pre-Phase-6
+         students to a stub research_project so integrity errors reflect
+         real problems.
+
+Data model
+  task.sla_target_seconds              Integer nullable
+  task.sla_working_days_only           Boolean default false
+  task.sla_started_at                  DateTime nullable
+  task.sla_breached                    Boolean default false + index
+
+Service — workflow/f5_sla.py
+  working_seconds_between(start, end)  Skips Sat/Sun; public holidays are
+                                       an institution-specific TODO.
+  elapsed_seconds(task, now=...)       Uses working-days clock when the flag
+                                       is set.
+  is_breached(task)
+  SlaService.set_sla(task, target, working_days_only)
+  SlaService.sweep()                   Marks any open, non-breached task
+                                       whose elapsed exceeds target as
+                                       breached; idempotent — same run twice
+                                       does nothing new.
+  SlaService.report()                  { total, openWithSla, breached,
+                                         withinTargetRate }
+
+Bulk dead-letter replay — integration/service.py
+  replay_dead_letters_bulk(event_ids)  Returns {requested, replayed,
+                                       results: {id: bool}} per id.
+
+Funding backfill — scripts/backfill_project_links.py
+  Dry-run by default. For each pre-Phase-6 student, either link the
+  existing research_project or create a stub project referencing the
+  best-guess funding source. Logs uncertain cases for manual review.
+  Run:  PYTHONPATH=. .venv/Scripts/python.exe scripts/backfill_project_links.py
+        (add --apply to commit)
+
+Endpoints
+  GET  /tasks/sla-report                            (reporting.read)
+  POST /tasks/sla-sweep                             (admin.configure)
+  POST /tasks/{id}/sla                              (admin.configure)
+  POST /integration/dead-letters/replay             (admin.configure)
+    body: {"ids": [uuid, uuid, ...]}
+
+Frontend
+  /tasks                  New SLA snapshot (F5) card at the top:
+                          Tasks with SLA / Open with SLA / Breached /
+                          Within-target rate tiles. Per-row Timer badge
+                          (green with hours) or red "SLA breached" badge.
+  /integration            Reconciliation panel dead-letters table gains
+                          a checkbox column + Select all + "Replay N
+                          selected" button; toast reports "Replayed X / Y".
+
+Tests (test_f5_ops_truth.py, 6 total)
+  setting_short_sla_on_old_task_reports_breached
+  setting_generous_sla_is_not_breached
+  sla_sweep_is_idempotent
+  sla_report_totals_match
+  working_seconds_skips_weekends
+  bulk_dead_letter_replay
+
+Migration: f5_task_sla
+
+================================================================================
+6. F6 - ASSISTANT + NOTIFICATION HYGIENE
+================================================================================
+
+Before:  Ask PGR was read-only. Writes were "coming next" but there was no
+         intent shape, no cancel path, no execute path, and one Tier-3
+         blocked-action item was unspecified. Notifications didn't respect
+         quiet hours. Hard email bounces were silent — the platform kept
+         mailing dead addresses forever.
+
+Now:     Ask PGR carries an AssistantWriteIntent (propose -> execute /
+         cancel) with Tier-3 blocked actions refused at propose time.
+         NotificationPreference gains quiet_start / quiet_end (minutes-
+         since-midnight, midnight-wrap supported); a public webhook records
+         email bounces and deactivates the email channel on a hard bounce.
+
+Data model
+  notification_preference.quiet_start  Integer nullable (0..1439 minutes)
+  notification_preference.quiet_end    Integer nullable
+  email_bounce                         (person_id nullable FK, email,
+                                        bounce_type hard / soft / complaint,
+                                        reason, received_at)
+  assistant_write_intent               (proposed_by_user_id FK users.id,
+                                        action, scope JSON, preview JSON,
+                                        state proposed/executed/failed/
+                                        cancelled, confirmed_at,
+                                        executed_at, outcome)
+
+Service — assistant/f6_router.py + notifications/service.py
+  propose_write(action, scope, preview)
+    Refuses any action in constants.BLOCKED_ACTIONS with the exact policy
+    line quoted (graduation, milestone decision, appeal decision,
+    payment approval, fee waiver, correction sign-off, exam outcome,
+    document delete + one unspecified Tier-3 item slot for future use).
+    Records the intent as proposed.
+  execute(intent_id)
+    Refused if already executed / cancelled / failed. Currently wired
+    for the meeting.log action as a proof-of-pattern; other actions
+    move the intent to failed with "no handler yet".
+  cancel(intent_id)
+    Moves proposed -> cancelled.
+  in_quiet_window(pref, now)
+    Handles wrapping midnight (e.g. 22:00 -> 07:00 counts the window
+    that spans midnight correctly).
+  deliver_queued()
+    Now checks in_quiet_window before sending email; in-app is unaffected.
+
+Bounce handling
+  Hard bounce or spam complaint -> the user's NotificationPreference has
+  email_enabled set to false. In-app still on. All bounces recorded.
+
+Endpoints
+  POST /assistant/intents                            (assistant.use)
+  POST /assistant/intents/{iid}/execute              (assistant.use)
+  POST /assistant/intents/{iid}/cancel               (assistant.use)
+  POST /notifications/webhooks/email/bounce          (public, no auth)
+  PUT  /notifications/preferences                    extended body now takes
+                                                     quietStart / quietEnd
+
+Frontend
+  /settings > My preferences
+    New Quiet hours (F6) block: From/To time pickers with the "clear"
+    action; wraps midnight; saves alongside existing digest + mute
+    preferences.
+
+Tests (test_f6_assistant_notif.py, 7 total)
+  tier3_action_is_refused_at_propose
+  propose_and_execute_meeting_log_flow
+  unsupported_action_moves_to_failed
+  cancel_a_proposed_intent
+  hard_bounce_deactivates_email_channel
+  soft_bounce_records_but_does_not_deactivate
+  quiet_hours_round_trip
+
+Migration: f6_assistant_notif
+
+================================================================================
+7. NUMBERS
+================================================================================
+
+Migrations added:  f1_signoff_2026, f2_person_gdpr, f3_recruitment_depth,
+                   f4_award_classification, f5_task_sla, f6_assistant_notif
+                   (6 additive migrations, all with downgrades)
+
+Permissions added:
+  reports.signoff     - F1 statutory sign-off + F4 classification publish
+  person.gdpr         - F2 merge / export / erase (Inst Admin only by default)
+
+Tables added:
+  person_contact, person_merge_record  (F2)
+  reference_request, interview, interview_panellist, offer_condition  (F3)
+  email_bounce, assistant_write_intent  (F6)
+
+Columns added:
+  report_profile.signed_off_by / signed_off_at / signed_off_notes  (F1)
+  person.pseudonymised_at  (F2)
+  application.fee_status / visa_required / visa_check_completed_at  (F3)
+  award.classification / classification_state / proposed_by_user_id /
+    confirmed_by_user_id / published_at / certificate_document_id  (F4)
+  task.sla_target_seconds / sla_working_days_only / sla_started_at /
+    sla_breached  (F5)
+  notification_preference.quiet_start / quiet_end  (F6)
+
+Enums added:
+  person_contact_channel, reference_request_status, interview_status,
+  interview_outcome, offer_condition_status, fee_status
+
+Endpoints added: ~35 across F1-F6
+Frontend surfaces added or extended: Statutory / Persons list + detail /
+Recruitment applications / Student detail / Tasks / Integration hub / Settings
+
+Tests: 47 new tests across the six F-block files, all passing.
+       78 tests pass in a single regression sweep across the F blocks +
+       progression + thesis + person GDPR + statutory + settings.
+
+================================================================================
+8. WHAT IS INTENTIONALLY NOT DONE (per block)
+================================================================================
+
+F1 - Statutory truth
+  * Only HESA_STUDENT_2026 has a spec registered. Adding HESA_STAFF or a
+    non-HESA return means adding another entry to PROFILE_SPECS in specs.py.
+  * The five coding-frame transforms cover the most common cases. Other
+    coded frames (ETHNIC, DISABLE, MSTUFEE) still require an allowed_values
+    list on the mapping; adding transforms for them is a one-line addition
+    per frame.
+
+F2 - Person integrity
+  * Fuzzy dedupe suggestions ("these two persons look like the same human")
+    is not built. Merge is a hard action taken by an admin who has already
+    decided; the platform provides the safe rewrite, not the identification.
+  * Erasure does NOT delete audit rows — by design, for regulatory + audit
+    integrity. Audit rows carry an actor_user_id which stays; the
+    corresponding person is pseudonymised, so audit remains traceable but
+    the individual is no longer identifiable.
+
+F3 - Recruitment depth
+  * Reference URL delivery is manual today (copy the returned URL, email
+    it out of band). Wiring the notifier to email the referee is a small
+    addition inside the reference-request handler.
+  * Interview calendar publishing (iCal / Outlook) is not built.
+  * OfferCondition co-exists with the legacy free-text conditions JSON on
+    Offer for backward compatibility. Only the first-class conditions gate
+    accept; the legacy JSON is informational.
+
+F4 - Award pipeline
+  * Certificate PDF is a plain branded A4 page (name, classification, date).
+    A production layout, watermark, seal image and signatory block are a
+    template change in _render_certificate() with no schema impact.
+  * Classification is a strict enum in code; making it a Settings-editable
+    LOV is a small refactor when a new classification kind is added.
+
+F5 - Ops truth
+  * Public holidays are NOT excluded from the working-day clock. Weekend
+    exclusion is built in; holiday calendar becomes a Settings entry when
+    an institutional owner signs off the list.
+  * Bulk replay is by explicit ids only — no "replay all failed since X"
+    time-window shortcut. Ids can be selected in the UI; a saved-filter
+    replay is a future enhancement.
+  * The backfill script is a script, not a UI action. Running it is a
+    deliberate operational step.
+
+F6 - Assistant + notification hygiene
+  * Only the meeting.log write action is currently wired end-to-end as a
+    proof-of-pattern. Every other action lands as "no handler yet" — the
+    plumbing is in place, and each additional handler is a switch-case
+    entry inside execute().
+  * The Tier-3 blocked list still has one intentionally unspecified slot
+    the CIO reserved; when named it becomes another key in
+    constants.BLOCKED_ACTIONS.
+  * Digest existed as a checkbox before F6; F6 does not yet batch a real
+    daily digest email — the flag is respected on read but the batching
+    job is a follow-up.
+
+================================================================================

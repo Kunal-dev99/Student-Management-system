@@ -5,6 +5,8 @@ import { usePathname } from 'next/navigation'
 import { ChevronRight, Home } from 'lucide-react'
 import { ReactNode } from 'react'
 import { cn } from '@/lib/utils'
+import { useAuth } from '@/shared/auth/AuthContext'
+import { homeRoute } from '@/shared/auth/homeRoute'
 
 export interface Breadcrumb {
   label: string
@@ -69,6 +71,7 @@ export function PageHeader({
   className,
 }: PageHeaderProps) {
   const pathname = usePathname()
+  const { principal } = useAuth()
   const crumbs = breadcrumbs ?? (hideBreadcrumbs ? [] : autoBreadcrumbs(pathname))
 
   return (
@@ -76,7 +79,7 @@ export function PageHeader({
       {crumbs.length > 0 && (
         <nav aria-label="Breadcrumb" className="mb-2 flex items-center gap-1 text-xs text-muted-foreground">
           <Link
-            href="/dashboard"
+            href={homeRoute(principal?.roles)}
             className="flex items-center gap-1 hover:text-foreground transition-colors"
             aria-label="Home"
           >

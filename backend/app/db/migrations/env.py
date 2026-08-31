@@ -16,6 +16,7 @@ from app.modules.identity import models as identity_models  # noqa: F401,E402
 from app.modules.person import models as person_models  # noqa: F401,E402
 from app.modules.student_record import models as student_models  # noqa: F401,E402
 from app.modules.recruitment import models as recruitment_models  # noqa: F401,E402
+from app.modules.recruitment import f3_models as recruitment_f3_models  # noqa: F401,E402
 from app.modules.admissions import models as admissions_models  # noqa: F401,E402
 from app.modules.supervision import models as supervision_models  # noqa: F401,E402
 from app.modules.progression import models as progression_models  # noqa: F401,E402
@@ -31,6 +32,10 @@ from app.modules.documents import models as documents_models  # noqa: F401,E402
 from app.modules.notifications import models as notifications_models  # noqa: F401,E402
 from app.modules.audit import models as audit_models  # noqa: F401,E402
 from app.modules.research import models as research_models  # noqa: F401,E402
+from app.modules.assistant import f6_models as assistant_f6_models  # noqa: F401,E402
+from app.modules.assistant import telemetry_models as assistant_telemetry_models  # noqa: F401,E402
+from app.modules.icr import models as icr_models  # noqa: F401,E402
+from app.modules.supervision import w2_models as supervision_w2_models  # noqa: F401,E402
 
 config = context.config
 config.set_main_option("sqlalchemy.url", get_settings().database_url)

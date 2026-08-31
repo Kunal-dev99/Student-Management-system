@@ -56,10 +56,18 @@ class NotificationService:
     async def get_or_default(self, user_id: uuid.UUID) -> dict:
         pref = await self._preference(user_id)
         if pref is None:
-            return {"emailEnabled": True, "digest": False, "mutedEvents": []}
-        return {"emailEnabled": pref.email_enabled, "digest": pref.digest, "mutedEvents": pref.muted_events or []}
+            return {"emailEnabled": True, "digest": False, "mutedEvents": [],
+                    "quietStart": None, "quietEnd": None}
+        return {
+            "emailEnabled": pref.email_enabled, "digest": pref.digest,
+            "mutedEvents": pref.muted_events or [],
+            "quietStart": pref.quiet_start, "quietEnd": pref.quiet_end,
+        }
 
-    async def update(self, user_id: uuid.UUID, *, email_enabled: bool, digest: bool, muted_events: list[str]) -> dict:
+    async def update(
+        self, user_id: uuid.UUID, *, email_enabled: bool, digest: bool, muted_events: list[str],
+        quiet_start: int | None = None, quiet_end: int | None = None,
+    ) -> dict:
         pref = await self._preference(user_id)
         if pref is None:
             pref = NotificationPreference(user_id=user_id)
@@ -67,8 +75,22 @@ class NotificationService:
         pref.email_enabled = email_enabled
         pref.digest = digest
         pref.muted_events = muted_events
+        pref.quiet_start = quiet_start
+        pref.quiet_end = quiet_end
         await self.session.commit()
         return await self.get_or_default(user_id)
+
+    @staticmethod
+    def in_quiet_window(pref: NotificationPreference | None, now: "datetime") -> bool:
+        """F6 — is the current time inside the user's quiet-hours window?"""
+        if pref is None or pref.quiet_start is None or pref.quiet_end is None:
+            return False
+        cur = now.hour * 60 + now.minute
+        start, end = pref.quiet_start, pref.quiet_end
+        if start <= end:
+            return start <= cur < end
+        # wraps midnight
+        return cur >= start or cur < end
 
     async def deliver_queued(self, limit: int = 200) -> dict:
         """Flush queued notifications: in-app becomes 'sent'; email sent when the user allows it."""
@@ -87,7 +109,11 @@ class NotificationService:
             pref = await self._preference(n.recipient_user_id)
             email_ok = institution_email and (pref is None or pref.email_enabled)
             muted = bool(pref and n.template in (pref.muted_events or []))
-            if email_ok and not muted:
+            # F6 — quiet hours delay non-urgent notifications; the row stays 'sent' in-app but
+            # the email is skipped until outside the window. A separate later run picks it up.
+            from datetime import datetime
+            in_quiet = self.in_quiet_window(pref, datetime.utcnow())
+            if email_ok and not muted and not in_quiet:
                 user = (await self.session.execute(
                     select(User).where(User.id == n.recipient_user_id)
                 )).scalar_one_or_none()

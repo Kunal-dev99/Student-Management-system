@@ -13,7 +13,9 @@ import {
 } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useToast } from '@/components/ui/use-toast'
+import { useAuth } from '@/shared/auth/AuthContext'
 import { useSupervisors } from '@/features/supervision/api'
+import { useStudentSummary } from '@/features/students/api'
 import {
   useConfirmMeeting, useRecordMeeting, useSupervisionCompliance, useSupervisionMeetings,
   type MeetingFormat,
@@ -28,6 +30,15 @@ function truncate(value: string | null, max = 60) {
 
 export function SupervisionMeetingsPanel({ studentId }: { studentId: string }) {
   const { toast } = useToast()
+  const { principal } = useAuth()
+  const summary = useStudentSummary(studentId)
+  // "Confirm" records the STUDENT's acknowledgment of the meeting note, so it is
+  // offered to that student (their own record) and to admin roles fixing records —
+  // not to the supervisor who wrote the note.
+  const roles = principal?.roles ?? []
+  const isAdmin = roles.includes('Institution Administrator') || roles.includes('PGR Administrator')
+  const canConfirm = isAdmin ||
+    (!!principal?.personId && principal.personId === summary.data?.personId)
   const meetings = useSupervisionMeetings(studentId)
   const compliance = useSupervisionCompliance(studentId)
   const supervisors = useSupervisors(studentId)
@@ -94,11 +105,13 @@ export function SupervisionMeetingsPanel({ studentId }: { studentId: string }) {
                         <span className="inline-flex items-center gap-1 text-sm text-[hsl(var(--success))]">
                           <Check className="h-4 w-4" /> confirmed
                         </span>
-                      ) : (
+                      ) : canConfirm ? (
                         <Button size="sm" variant="ghost" disabled={confirm.isPending}
                           onClick={async () => { try { await confirm.mutateAsync(m.id); toast({ title: 'Meeting confirmed' }) } catch (e) { err(e) } }}>
                           Confirm
                         </Button>
+                      ) : (
+                        <span className="text-helper">awaiting student</span>
                       )}
                     </TableCell>
                   </TableRow>

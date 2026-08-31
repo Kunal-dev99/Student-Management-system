@@ -16,6 +16,9 @@ import {
   Wallet,
   BookOpenCheck,
   Award,
+  Landmark,
+  TrendingUp,
+  GitFork,
   Cable,
   Workflow,
   Settings,
@@ -29,6 +32,8 @@ import { Header } from '@/components/layout/header'
 import { NotificationBell } from '@/components/notifications/NotificationBell'
 import { AskPgrLauncher, AskPgrPalette } from '@/components/assistant/AskPgrPalette'
 import { useAuth } from '@/shared/auth/AuthContext'
+import { homeRoute } from '@/shared/auth/homeRoute'
+import { canSeeRoute, findRouteAccess } from '@/shared/auth/routeAccess'
 
 /**
  * PGR app shell — composes the design-system Sidebar + Header around the routed
@@ -45,10 +50,20 @@ const mainNav: NavItem[] = [
   { href: '/admissions', label: 'Admissions', icon: FileCheck2 },
   { href: '/students', label: 'Students', icon: GraduationCap },
   { href: '/supervision', label: 'Supervision', icon: UsersRound },
+  { href: '/supervision/workforce', label: 'Workforce', icon: UsersRound },
   { href: '/progression', label: 'Progression', icon: Milestone },
   { href: '/funding', label: 'Funding', icon: Wallet },
   { href: '/thesis', label: 'Thesis', icon: BookOpenCheck },
   { href: '/completion', label: 'Completion', icon: Award },
+]
+
+// Institution-specific module (ICR). Its own sidebar group, its own sub-modules.
+const icrNavAll: NavItem[] = [
+  { href: '/icr', label: 'Overview', icon: Landmark },
+  { href: '/icr/transfer-viva', label: 'Transfer viva', icon: TrendingUp },
+  { href: '/icr/pathways', label: 'Pathways', icon: GitFork },
+  { href: '/icr/funding', label: 'Funding pillars', icon: Wallet },
+  { href: '/icr/model', label: 'The model', icon: BookOpenCheck },
 ]
 
 const baseAdminNav: NavItem[] = [
@@ -82,35 +97,38 @@ export function AppShell({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [canAsk, paletteOpen])
 
-  // Nav is shaped by /api/v1/me. Hiding is convenience — the API still enforces.
-  const adminNav: NavItem[] = [
-    ...(hasPermission('funding.read')
-      ? [{ href: '/funding-integrity', label: 'Funding integrity', icon: ShieldAlert }]
-      : []),
-    ...(hasPermission('reporting.read')
-      ? [{ href: '/statutory', label: 'Statutory', icon: FileSpreadsheet }]
-      : []),
-    ...baseAdminNav,
-    ...(hasPermission('audit.read')
-      ? [{ href: '/audit', label: 'Audit', icon: ScrollText }]
-      : []),
-  ]
+  // Nav is driven by the central route-access map (shared/auth/routeAccess.ts):
+  // a route appears only when the role may see it AND the permissions its data
+  // needs are held. Hiding is convenience — the API still enforces server-side.
+  const roles = principal?.roles ?? []
+  const visible = (items: NavItem[]) =>
+    items.filter((item) => {
+      const route = findRouteAccess(item.href)
+      return !route || canSeeRoute(route, roles, hasPermission)
+    })
 
+  const filteredMainNav = visible(mainNav)
+  const adminNav = visible([
+    { href: '/funding-integrity', label: 'Funding integrity', icon: ShieldAlert },
+    { href: '/statutory', label: 'Statutory', icon: FileSpreadsheet },
+    ...baseAdminNav,
+    { href: '/audit', label: 'Audit', icon: ScrollText },
+  ])
   // "Advanced" group — governed intelligence surfaces (Pattern Lab, ml.read).
-  const advancedNav: NavItem[] = hasPermission('ml.read')
-    ? [{ href: '/pattern-lab', label: 'Pattern Lab', icon: Sparkles }]
-    : []
+  const advancedNav = visible([{ href: '/pattern-lab', label: 'Pattern Lab', icon: Sparkles }])
+  const icrNav = visible(icrNavAll)
 
   return (
     <div className="min-h-screen bg-background">
       <Sidebar
-        mainNav={mainNav}
+        mainNav={filteredMainNav}
         adminNav={adminNav}
         advancedNav={advancedNav}
+        icrNav={icrNav}
         brandName="PGR Platform"
         brandTagline="Research Lifecycle"
         brandShort="PGR"
-        brandHref="/dashboard"
+        brandHref={homeRoute(roles)}
         user={{ name, email }}
         onLogout={logout}
       />

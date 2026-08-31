@@ -26,6 +26,7 @@ ALL_PERMS = [
     "person.read", "person.write", "student.read", "student.write",
     "recruitment.read", "recruitment.write", "funding.read", "funding.change",
     "progression.read", "progression.decide", "reporting.read", "admin.configure",
+    "reports.signoff",
 ]
 
 
@@ -42,6 +43,10 @@ async def client():
         s.add(role); await s.flush(); await s.refresh(role, ["permissions"]); role.permissions = perms
         user = User(email="admin@t.com", password_hash=hash_password("pw"), is_active=True)
         s.add(user); await s.flush(); await s.refresh(user, ["roles"]); user.roles = [role]
+        # Second admin: F4 approver separation means the classification confirmer
+        # must differ from the proposer.
+        user2 = User(email="examboard@t.com", password_hash=hash_password("pw"), is_active=True)
+        s.add(user2); await s.flush(); await s.refresh(user2, ["roles"]); user2.roles = [role]
         dept = Department(name="CS", code="CS"); s.add(dept); await s.flush()
         prog = Programme(name="PhD CS", code="PHD-CS", department_id=dept.id); s.add(prog); await s.flush()
         s.add(MilestoneDefinition(programme_id=prog.id, name="Induction", due_offset_days=0))
@@ -106,8 +111,15 @@ async def test_full_lifecycle_applicant_to_alumni(client):
     approved = await post(f"/api/v1/theses/{tid}/examination/outcome", {"outcome": "pass"})
     assert approved["status"] == "approved"
 
-    # 7) Completion -> graduation
+    # 7) Completion -> classification (F4: propose -> confirm -> publish) -> graduation
     await post(f"/api/v1/students/{sid}/completion/confirm")
+    await post(f"/api/v1/students/{sid}/classification/propose", {"classification": "PhD"})
+    # Approver separation: confirm must come from a different user than the proposer.
+    r2 = await c.post("/api/v1/auth/login", json={"email": "examboard@t.com", "password": "pw"})
+    r = await c.post(f"/api/v1/students/{sid}/classification/confirm",
+                     headers={"Authorization": f"Bearer {r2.json()['accessToken']}"})
+    assert r.status_code in (200, 201), f"confirm -> {r.status_code}: {r.text}"
+    await post(f"/api/v1/students/{sid}/classification/publish")
     grad = await post(f"/api/v1/students/{sid}/graduation")
     assert grad["status"] == "graduated"
     assert grad["award"]["title"] == "Doctor of Philosophy"

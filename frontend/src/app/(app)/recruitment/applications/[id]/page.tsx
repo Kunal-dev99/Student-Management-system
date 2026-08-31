@@ -7,6 +7,7 @@ import { ArrowLeft, ClipboardCheck, GitBranch, Mail } from 'lucide-react'
 import { PageHeader } from '@/components/common/PageHeader'
 import { PageSection } from '@/components/common/PageSection'
 import { Button } from '@/components/ui/button'
+import { useCan } from '@/shared/auth/Can'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -34,6 +35,10 @@ export default function ApplicationDetailPage() {
   const app = appQ.data
   const person = usePerson(app?.personId ?? '')
 
+  // Stage/assessment/offer controls are recruitment.write server-side; accepting
+  // an offer creates the student record, so that one is student.write.
+  const canRecruit = useCan('recruitment.write')
+  const canCreateStudent = useCan('student.write')
   const advance = useAdvance(id)
   const assess = useAssess(id)
   const createOffer = useCreateOffer(id)
@@ -69,7 +74,7 @@ export default function ApplicationDetailPage() {
           )}
         </PageSection>
 
-        <div className="grid gap-4 md:grid-cols-2">
+        {canRecruit && <div className="grid gap-4 md:grid-cols-2">
           <PageSection icon={GitBranch} title="Advance stage" accent="primary">
             <div className="space-y-2">
               <Select value={stage} onValueChange={setStage}>
@@ -108,33 +113,33 @@ export default function ApplicationDetailPage() {
                 }}>Record</Button>
             </div>
           </PageSection>
-        </div>
+        </div>}
 
         <PageSection icon={Mail} title="Offer" accent="primary">
           {offerQ.isLoading ? <Skeleton className="h-10 w-40" /> : !offer ? (
             <div className="flex items-center gap-3">
               <span className="text-helper">No offer yet.</span>
-              <Button size="sm" disabled={createOffer.isPending}
+              {canRecruit && <Button size="sm" disabled={createOffer.isPending}
                 onClick={async () => { try { await createOffer.mutateAsync(); toast({ title: 'Offer created (draft)' }) } catch (e) { err(e) } }}>
                 Create offer
-              </Button>
+              </Button>}
             </div>
           ) : (
             <div className="flex flex-wrap items-center gap-3">
               <OfferPill status={offer.status} />
-              {offer.status === 'draft' && (
+              {canRecruit && offer.status === 'draft' && (
                 <Button size="sm" disabled={issueOffer.isPending}
                   onClick={async () => { try { await issueOffer.mutateAsync(offer.id); toast({ title: 'Offer issued' }) } catch (e) { err(e) } }}>Issue</Button>
               )}
               {offer.status === 'issued' && (
                 <>
-                  <Button size="sm" disabled={acceptOffer.isPending}
+                  {canCreateStudent && <Button size="sm" disabled={acceptOffer.isPending}
                     onClick={async () => {
                       try { const s = await acceptOffer.mutateAsync(offer.id); toast({ title: 'Offer accepted', description: `Student ${s.studentRef} created (same person).` }) }
                       catch (e) { err(e) }
-                    }}>Accept → create student</Button>
-                  <Button size="sm" variant="outline" disabled={declineOffer.isPending}
-                    onClick={async () => { try { await declineOffer.mutateAsync(offer.id); toast({ title: 'Offer declined' }) } catch (e) { err(e) } }}>Decline</Button>
+                    }}>Accept → create student</Button>}
+                  {canRecruit && <Button size="sm" variant="outline" disabled={declineOffer.isPending}
+                    onClick={async () => { try { await declineOffer.mutateAsync(offer.id); toast({ title: 'Offer declined' }) } catch (e) { err(e) } }}>Decline</Button>}
                 </>
               )}
               {offer.status === 'accepted' && (

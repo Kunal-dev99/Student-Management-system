@@ -199,3 +199,154 @@ async def test_transforms_are_discoverable(ctx):
     c, h = ctx
     body = (await c.get("/api/v1/report-profiles/transforms", headers=h)).json()
     assert "upper" in body["transforms"] and "date_compact" in body["transforms"]
+
+
+# ============================================================================
+# F1 — statutory truth: sign-off gates + coding frames + immutability
+# ============================================================================
+
+from app.modules.exports.specs import HESA_STUDENT_2026
+
+
+async def _fully_map_hesa(c, h, profile_id):
+    """Add a minimal but valid mapping for every mandatory HESA field.
+
+    Uses an unresolvable source_expression per field so the ``defaultValue`` is applied — that
+    means every produced row carries the first allowed code (or 'X' for free fields), which
+    passes both the required-not-empty and allowed-values checks."""
+    for i, spec in enumerate(HESA_STUDENT_2026, start=1):
+        default = (spec.get("allowed") or [""])[0] or "X"
+        payload = {
+            "targetField": spec["field"],
+            "sourceExpression": f"student._absent_{spec['field']}",
+            "defaultValue": default,
+            "position": i,
+        }
+        if spec.get("allowed"):
+            payload["allowedValues"] = spec["allowed"]
+        r = await c.post(f"/api/v1/report-profiles/{profile_id}/fields", headers=h, json=payload)
+        assert r.status_code == 201, r.text
+
+
+@pytest.mark.asyncio
+async def test_compile_reports_missing_mandatory_fields(ctx):
+    c, h = ctx
+    p = await _profile(c, h)
+    await _field(c, h, p["id"], "HUSID", "student.ref")
+    r = await c.get(f"/api/v1/report-profiles/{p['id']}/compile", headers=h)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["specCode"] == "HESA_STUDENT"
+    assert body["mappedFieldCount"] == 1
+    assert body["specFieldCount"] == len(HESA_STUDENT_2026)
+    missing_fields = {m["field"] for m in body["missing"]}
+    assert "SURNAME" in missing_fields and "SEXID" in missing_fields
+    assert body["signOffReady"] is False
+
+
+@pytest.mark.asyncio
+async def test_signoff_refuses_when_mandatory_fields_are_missing(ctx):
+    c, h = ctx
+    p = await _profile(c, h)
+    await _field(c, h, p["id"], "HUSID", "student.ref")
+    r = await c.post(f"/api/v1/report-profiles/{p['id']}/sign-off", headers=h, json={"notes": "try"})
+    assert r.status_code == 422
+    msg = r.json()["error"]["message"].lower()
+    assert "mandatory" in msg and "unmapped" in msg
+
+
+@pytest.mark.asyncio
+async def test_signoff_succeeds_when_spec_is_satisfied_and_locks_the_profile(ctx):
+    c, h = ctx
+    p = await _profile(c, h)
+    await _fully_map_hesa(c, h, p["id"])
+    r = await c.post(f"/api/v1/report-profiles/{p['id']}/sign-off", headers=h, json={"notes": "Registry OK"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["signedOff"] is True
+    assert body["signedOffBy"] and body["signedOffAt"]
+    assert body["signedOffNotes"] == "Registry OK"
+    # A signed-off profile refuses mutations
+    r = await c.post(f"/api/v1/report-profiles/{p['id']}/fields", headers=h,
+                     json={"targetField": "EXTRA", "sourceExpression": "student.ref"})
+    assert r.status_code == 409
+    assert "signed off" in r.json()["error"]["message"].lower()
+
+
+@pytest.mark.asyncio
+async def test_unsign_reopens_the_profile_for_edits(ctx):
+    c, h = ctx
+    p = await _profile(c, h)
+    await _fully_map_hesa(c, h, p["id"])
+    await c.post(f"/api/v1/report-profiles/{p['id']}/sign-off", headers=h, json={})
+    r = await c.post(f"/api/v1/report-profiles/{p['id']}/unsign", headers=h)
+    assert r.status_code == 200
+    assert r.json()["signedOff"] is False
+    r = await c.post(f"/api/v1/report-profiles/{p['id']}/fields", headers=h,
+                     json={"targetField": "EXTRA", "sourceExpression": "student.ref"})
+    assert r.status_code == 201
+
+
+@pytest.mark.asyncio
+async def test_delete_and_update_field_refused_on_signed_off_profile(ctx):
+    c, h = ctx
+    p = await _profile(c, h)
+    await _fully_map_hesa(c, h, p["id"])
+    detail = (await c.get(f"/api/v1/report-profiles/{p['id']}", headers=h)).json()
+    fid = detail["fields"][0]["id"]
+    # Before sign-off: patch and delete are allowed
+    r = await c.patch(f"/api/v1/report-profiles/{p['id']}/fields/{fid}", headers=h,
+                      json={"defaultValue": "changed"})
+    assert r.status_code == 200
+    # Sign off
+    await c.post(f"/api/v1/report-profiles/{p['id']}/sign-off", headers=h, json={})
+    # After sign-off: patch and delete are refused
+    r = await c.patch(f"/api/v1/report-profiles/{p['id']}/fields/{fid}", headers=h,
+                      json={"defaultValue": "again"})
+    assert r.status_code == 409
+    r = await c.delete(f"/api/v1/report-profiles/{p['id']}/fields/{fid}", headers=h)
+    assert r.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_hesa_coding_frame_transforms_are_available(ctx):
+    c, h = ctx
+    r = await c.get("/api/v1/report-profiles/transforms", headers=h)
+    assert r.status_code == 200
+    tr = r.json()["transforms"]
+    for t in ("hesa_sex", "hesa_mode", "hesa_yn", "hesa_studylevel", "hesa_route"):
+        assert t in tr
+
+
+@pytest.mark.asyncio
+async def test_coding_frames_produce_hesa_codes(ctx):
+    """The hesa_mode transform must produce '01' / '02' from the student's study mode."""
+    c, h = ctx
+    p = await _profile(c, h)
+    await _field(c, h, p["id"], "MODE", "student.mode", transform="hesa_mode", allowed_values=["01","02","03","31"])
+    result = (await c.post(f"/api/v1/report-profiles/{p['id']}/generate", headers=h, json={})).json()
+    job_id = result["job"]["id"]
+    assert result["validation"]["valid"], result["validation"]
+    csv_text = (await c.get(f"/api/v1/exports/{job_id}/download", headers=h)).text
+    lines = [ln for ln in csv_text.strip().splitlines() if ln]
+    # header + two data rows, both full_time → coded '01'
+    assert lines[0] == "MODE"
+    assert lines[1] == "01" and lines[2] == "01"
+
+
+@pytest.mark.asyncio
+async def test_signoff_refuses_when_current_cohort_has_validation_errors(ctx):
+    """The Missing-nationality student in the fixture would trigger a required-field error;
+    sign-off must refuse rather than attest to a broken return."""
+    c, h = ctx
+    p = await _profile(c, h)
+    await _fully_map_hesa(c, h, p["id"])
+    # Add a required field that will fail on the partial student
+    r = await c.post(f"/api/v1/report-profiles/{p['id']}/fields", headers=h, json={
+        "targetField": "NATION_STRICT", "sourceExpression": "person.nationality",
+        "required": True,
+    })
+    assert r.status_code == 201
+    r = await c.post(f"/api/v1/report-profiles/{p['id']}/sign-off", headers=h, json={})
+    assert r.status_code == 422
+    assert "validation error" in r.json()["error"]["message"].lower()

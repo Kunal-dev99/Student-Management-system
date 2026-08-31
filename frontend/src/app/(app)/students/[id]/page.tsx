@@ -16,11 +16,14 @@ import { MilestonesPanel } from '@/features/progression/MilestonesPanel'
 import { FundingPanel } from '@/features/funding/FundingPanel'
 import { FundingLineagePanel } from '@/features/funding/FundingLineagePanel'
 import { ThesisCompletionPanel } from '@/features/completion/ThesisCompletionPanel'
+import { ClassificationCard } from '@/features/completion/ClassificationCard'
+import { SupervisorRequestsCard } from '@/features/supervision/SupervisorRequestsCard'
 import { RelationshipGraph } from '@/features/research/RelationshipGraph'
 import { StudentPredictionsPanel } from '@/features/pattern-lab/StudentPredictionsPanel'
 import { DocumentsPanel } from '@/components/documents/DocumentsPanel'
 import { useAudit } from '@/features/audit/api'
 import { useAuth } from '@/shared/auth/AuthContext'
+import { JourneyTracker } from '@/features/students/JourneyTracker'
 
 function Field({ label, value }: { label: string; value: string | null | undefined }) {
   return <div><p className="text-label">{label}</p><p className="text-sm mt-0.5">{value || '—'}</p></div>
@@ -67,6 +70,8 @@ export default function StudentDetailPage() {
           <ArrowLeft className="h-4 w-4" /> Back to students
         </Link>
 
+        <JourneyTracker student={s} />
+
         <PageSection icon={GraduationCap} title="Record" accent="primary">
           {student.isLoading ? <Skeleton className="h-20 w-full" /> : (
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
@@ -99,20 +104,27 @@ export default function StudentDetailPage() {
 
         <MilestonesPanel studentId={id} />
 
-        <FundingPanel studentId={id} />
+        {/* Money sections need funding.read — supervisors don't hold it, so the
+            sections disappear rather than rendering permission errors. */}
+        {hasPermission('funding.read') && <FundingPanel studentId={id} />}
 
-        <FundingLineagePanel studentId={id} />
+        {hasPermission('funding.read') && <FundingLineagePanel studentId={id} />}
 
+        <SupervisorRequestsCard studentId={id} />
         <ThesisCompletionPanel studentId={id} />
+        <ClassificationCard studentId={id} />
 
         {/* Everything above as one picture: award, funder, funding, project,
-            supervisors. Folded away by default — this record is already long. */}
-        <RelationshipGraph
-          studentId={id}
-          defaultOpen={false}
-          title="Relationship map"
-          description="This student's funder, award, funding, project and supervisors, drawn as one picture."
-        />
+            supervisors. Folded away by default — this record is already long.
+            The graph walks the funding chain, so it needs funding.read too. */}
+        {hasPermission('funding.read') && (
+          <RelationshipGraph
+            studentId={id}
+            defaultOpen={false}
+            title="Relationship map"
+            description="This student's funder, award, funding, project and supervisors, drawn as one picture."
+          />
+        )}
 
         <DocumentsPanel ownerType="student" ownerId={id} />
 
