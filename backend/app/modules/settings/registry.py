@@ -137,6 +137,31 @@ SETTINGS: dict[str, SettingDef] = {s.key: s for s in [
     ),
     # CB-C — assistant.llm_enabled removed. The assistant is fully deterministic; there is no
     # LLM fallback to gate. Kept here as a marker to avoid resurrecting the setting.
+    # --- Composer ---
+    # The composer is the one feature that sends institutional data to a third-party model,
+    # so it ships off and an administrator turns it on knowingly.
+    SettingDef(
+        key="composer.enabled", group="Composer",
+        label="Enable the composer",
+        description="Lets staff ask a question and get a generated dashboard back. Data is sent "
+                    "to the configured language model to decide the layout. Off by default; the "
+                    "rest of the platform is unaffected either way.",
+        type="bool", default=False,
+    ),
+    SettingDef(
+        key="composer.daily_token_budget", group="Composer",
+        label="Daily token budget per user",
+        description="Ceiling on model usage per person per day, so a runaway client cannot "
+                    "exhaust the account. Set to 0 for no limit.",
+        type="int", default=200_000, min=0, max=10_000_000,
+    ),
+    SettingDef(
+        key="composer.max_rows_per_block", group="Composer",
+        label="Maximum rows per generated table",
+        description="Caps how much a single generated table can return. Larger values give "
+                    "fuller answers and cost more tokens.",
+        type="int", default=50, min=5, max=200,
+    ),
 ]}
 
 

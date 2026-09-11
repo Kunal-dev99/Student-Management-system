@@ -89,8 +89,10 @@ export default function PersonsPage() {
 
   return (
     <>
-      <PageHeader title="Persons" description="One person across every identity over time."
-        actions={hasPermission('person.gdpr') ? <MergeDialog /> : undefined} />
+      <PageHeader
+        title="Persons"
+        actions={hasPermission('person.gdpr') ? <MergeDialog /> : undefined}
+      />
       <div className="px-6 pb-6 space-y-4">
         <div className="relative max-w-sm">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />

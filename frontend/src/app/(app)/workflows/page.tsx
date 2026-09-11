@@ -1,29 +1,20 @@
 'use client'
 
 import { useState } from 'react'
-import { GitBranch, Workflow } from 'lucide-react'
+import { GitBranch, Plus, Workflow } from 'lucide-react'
 import { PageHeader } from '@/components/common/PageHeader'
 import { PageSection } from '@/components/common/PageSection'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useToast } from '@/components/ui/use-toast'
 import {
   useActivateDefinition, useCreateDefinition, useDefinitions, useDispatchEvent,
   useInstances, useStartInstance,
 } from '@/features/workflows/api'
+import { WorkflowBuilder } from '@/features/workflows/WorkflowBuilder'
 
-const TEMPLATE = JSON.stringify({
-  key: 'review', name: 'Progress review', initialState: 'open',
-  states: ['open', 'submitted', 'decided'],
-  transitions: [
-    { from: 'open', on: 'submit', to: 'submitted', action: { createTask: { title: 'Review submission', assigneeRole: 'Supervisor' } } },
-    { from: 'submitted', on: 'decide', to: 'decided' },
-  ],
-  activate: true,
-}, null, 2)
 
 export default function WorkflowsPage() {
   const { toast } = useToast()
@@ -33,16 +24,38 @@ export default function WorkflowsPage() {
   const activate = useActivateDefinition()
   const start = useStartInstance()
   const dispatch = useDispatchEvent()
-  const [json, setJson] = useState(TEMPLATE)
+  const [builderOpen, setBuilderOpen] = useState(false)
   const [events, setEvents] = useState<Record<string, string>>({})
 
   const err = (e: unknown) => toast({ title: 'Failed', description: (e as Error).message, variant: 'destructive' })
 
   return (
     <>
-      <PageHeader title="Workflows" description="Configurable, versioned state machines — defined in data." />
+      <PageHeader title="Workflows" />
       <div className="px-6 pb-6 space-y-4">
-        <PageSection icon={Workflow} title="Definitions" accent="primary">
+        <WorkflowBuilder
+          open={builderOpen}
+          onOpenChange={setBuilderOpen}
+          submitting={createDef.isPending}
+          onCreate={async (body) => {
+            try {
+              const d = await createDef.mutateAsync(body as Parameters<typeof createDef.mutateAsync>[0])
+              toast({ title: `Created ${d.key} v${d.version}` })
+              setBuilderOpen(false)
+            } catch (e) { err(e) }
+          }}
+        />
+
+        <PageSection
+          icon={Workflow}
+          title={`Definitions${defs.data ? ` (${defs.data.length})` : ''}`}
+          accent="primary"
+          actions={
+            <Button size="sm" onClick={() => setBuilderOpen(true)}>
+              <Plus className="h-3.5 w-3.5 mr-1" /> New definition
+            </Button>
+          }
+        >
           {defs.isLoading ? <Skeleton className="h-16 w-full" /> : (
             <div className="space-y-2 mb-4">
               {defs.data?.map((d) => (
@@ -62,18 +75,14 @@ export default function WorkflowsPage() {
               {defs.data && defs.data.length === 0 && <p className="text-helper">No definitions yet.</p>}
             </div>
           )}
-          <div className="pt-2 border-t border-border">
-            <p className="text-label mb-1">New definition (JSON)</p>
-            <Textarea rows={10} value={json} onChange={(e) => setJson(e.target.value)} className="font-mono text-xs" />
-            <Button size="sm" className="mt-2" disabled={createDef.isPending}
-              onClick={async () => {
-                try { const body = JSON.parse(json); const d = await createDef.mutateAsync(body); toast({ title: `Created ${d.key} v${d.version}` }) }
-                catch (e) { err(e instanceof SyntaxError ? new Error('Invalid JSON') : e) }
-              }}>Create definition</Button>
-          </div>
         </PageSection>
 
-        <PageSection icon={GitBranch} title="Instances" accent="accent">
+        <PageSection
+          icon={GitBranch}
+          title={`Instances${instances.data ? ` (${instances.data.length})` : ''}`}
+          accent="accent"
+          description="Live workflow instances. Dispatch an event to advance one."
+        >
           {instances.isLoading ? <Skeleton className="h-16 w-full" /> : (
             <div className="space-y-2">
               {instances.data?.map((i) => (

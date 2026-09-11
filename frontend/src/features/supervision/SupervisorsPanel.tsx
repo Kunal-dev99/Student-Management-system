@@ -10,11 +10,11 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import { useToast } from '@/components/ui/use-toast'
-import { usePersons } from '@/features/persons/api'
 import { useAuth } from '@/shared/auth/AuthContext'
 import {
   useAssignSupervisor, useEndSupervisor, useSupervisors, type SupervisorRole,
 } from './api'
+import { useSupervisorPool } from './w2_api'
 
 export function SupervisorsPanel({ studentId }: { studentId: string }) {
   const { toast } = useToast()
@@ -58,20 +58,30 @@ export function SupervisorsPanel({ studentId }: { studentId: string }) {
 /** Separate component so the /persons query only fires for users who can assign. */
 function AssignForm({ studentId, onError }: { studentId: string; onError: (e: unknown) => void }) {
   const { toast } = useToast()
-  const people = usePersons('')
+  const pool = useSupervisorPool()
   const assign = useAssignSupervisor(studentId)
   const [personId, setPersonId] = useState('')
   const [role, setRole] = useState<SupervisorRole>('primary')
 
   return (
     <div className="flex flex-wrap items-end gap-2 pt-2 border-t border-border">
-      <div className="min-w-[200px]">
+      <div className="min-w-[240px]">
         <Select value={personId} onValueChange={setPersonId}>
-          <SelectTrigger><SelectValue placeholder="Choose a supervisor…" /></SelectTrigger>
+          <SelectTrigger>
+            <SelectValue placeholder={pool.isLoading ? 'Loading…' : 'Choose a supervisor…'} />
+          </SelectTrigger>
           <SelectContent>
-            {people.data?.data.map((p) => (
-              <SelectItem key={p.id} value={p.id}>{p.givenName} {p.familyName}</SelectItem>
+            {pool.data?.map((p) => (
+              <SelectItem key={p.id} value={p.id}>
+                {p.familyName}, {p.givenName}
+                {!p.hasProfile && ' · no profile'}
+              </SelectItem>
             ))}
+            {pool.data && pool.data.length === 0 && (
+              <div className="px-2 py-3 text-xs text-muted-foreground">
+                No supervisor-capable persons yet. Provision an employee/researcher first.
+              </div>
+            )}
           </SelectContent>
         </Select>
       </div>

@@ -20,7 +20,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ConflictError, NotFoundError, ValidationAppError
-from app.modules.settings.models import InstitutionSetting
+from app.modules.settings.models import InstitutionSetting, ValueSetOverride
 from app.modules.settings.registry import SETTINGS, grouped
 
 
@@ -101,7 +101,9 @@ class SettingsService:
 
         Built lazily so importing this module never drags in every domain model.
         """
-        from app.modules.funding.models import FundingArrangement, FundingSource
+        from app.modules.funding.models import (
+            CostCentre, FundingArrangement, FundingSource, ProjectCode,
+        )
         from app.modules.progression.models import MilestoneDefinition
         from app.modules.recruitment.models import Application, ResearchOpportunity
         from app.modules.research.models import ResearchAward, ResearchDemand
@@ -152,6 +154,25 @@ class SettingsService:
                     ("research awards", ResearchAward.funder_id),
                 ],
             },
+            # These two are referenced from funding_arrangement as STRING codes rather than
+            # FKs (finance codes are shared with external ledgers so we keep the code as text).
+            # `used_by_string` counts by matching the LOV row's `code` against the string column.
+            "cost-centres": {
+                "model": CostCentre, "label": "Cost centre",
+                "fields": {"name": str, "code": str},
+                "used_by": [],
+                "used_by_string": [
+                    ("funding arrangements", FundingArrangement.cost_centre, "code"),
+                ],
+            },
+            "project-codes": {
+                "model": ProjectCode, "label": "Project code",
+                "fields": {"name": str, "code": str},
+                "used_by": [],
+                "used_by_string": [
+                    ("funding arrangements", FundingArrangement.project_code, "code"),
+                ],
+            },
         }
 
     @staticmethod
@@ -179,6 +200,17 @@ class SettingsService:
                 select(fk, func.count()).where(fk.is_not(None)).group_by(fk)
             )).all():
                 usage[ref_id] = usage.get(ref_id, 0) + int(n)
+        # String-referenced LOVs (finance codes) — group by the string column, then
+        # translate matches back to the LOV row id via its `code` field.
+        for _, str_col, code_field in cfg.get("used_by_string", []):
+            code_counts = dict((c, int(n)) for c, n in (await self.session.execute(
+                select(str_col, func.count()).where(str_col.is_not(None), str_col != "")
+                .group_by(str_col)
+            )).all() if c)
+            for r in rows:
+                v = getattr(r, code_field)
+                if v in code_counts:
+                    usage[r.id] = usage.get(r.id, 0) + code_counts[v]
 
         return [{
             "id": str(r.id),
@@ -244,6 +276,16 @@ class SettingsService:
         # Deleting a value that live rows point at would break or orphan them. Refuse with an
         # exact account of what is using it, so the fix (re-point or retire) is obvious.
         holders = []
+        # String-referenced usage checks by matching the LOV's code against the string column.
+        for what, str_col, code_field in cfg.get("used_by_string", []):
+            code_val = getattr(row, code_field)
+            if not code_val:
+                continue
+            n = (await self.session.execute(
+                select(func.count()).where(str_col == code_val)
+            )).scalar_one()
+            if n:
+                holders.append(f"{n} {what}")
         for what, fk in cfg["used_by"]:
             n = (await self.session.execute(
                 select(func.count()).where(fk == row_id)
@@ -263,9 +305,19 @@ class SettingsService:
     # Platform-fixed value sets (read-only)
     # ------------------------------------------------------------------
 
-    def value_sets(self) -> list[dict]:
-        """Every domain enum, read-only. These are vocabulary with code attached to each value —
-        editable lists live in the LOV tables above; these are shown so nothing is invisible."""
+    def _humanise(self, code: str) -> str:
+        """Fallback display for a shipped value code — 'in_review' → 'In review'."""
+        return code.replace("_", " ").replace("-", " ").strip().capitalize()
+
+    async def value_sets(self) -> list[dict]:
+        """Every domain enum, with per-institution overrides merged in.
+
+        The value **code** is fixed by the platform — the string that appears in the
+        database, in FKs, and in business logic. The **label**, **description** and
+        **hidden** flag are institution-configurable: label/description are shown to
+        users, hidden hides a value from new selectors while keeping it valid on any
+        existing row. A value with no override behaves exactly as before.
+        """
         import enum as _enum
 
         from app.modules.admissions import constants as adm
@@ -279,19 +331,86 @@ class SettingsService:
         from app.modules.thesis import constants as th
         from app.modules.workflow import constants as wf
 
+        # (enum_name, value_code) → override row.
+        overrides: dict[tuple[str, str], ValueSetOverride] = {
+            (o.enum_name, o.value_code): o
+            for o in (await self.session.execute(select(ValueSetOverride))).scalars().all()
+        }
+
         out = []
+        seen: set[str] = set()
         for module, area in [(per, "Person"), (rec, "Recruitment"), (adm, "Admissions"),
                              (stu, "Student record"), (sup, "Supervision"), (prog, "Progression"),
                              (fund, "Funding"), (th, "Thesis"), (res, "Research"), (wf, "Workflow")]:
             for name in dir(module):
                 obj = getattr(module, name)
-                if isinstance(obj, type) and issubclass(obj, _enum.Enum) and obj is not _enum.Enum:
-                    out.append({"area": area, "name": name,
-                                "values": [e.value for e in obj]})
-        # A class imported into two constants modules would repeat; keep first occurrence.
-        seen, unique = set(), []
-        for vs in out:
-            if vs["name"] not in seen:
-                seen.add(vs["name"])
-                unique.append(vs)
-        return unique
+                if not (isinstance(obj, type) and issubclass(obj, _enum.Enum)
+                        and obj is not _enum.Enum):
+                    continue
+                if name in seen:
+                    continue
+                seen.add(name)
+                values = []
+                for e in obj:
+                    ovr = overrides.get((name, e.value))
+                    values.append({
+                        "code": e.value,
+                        "label": (ovr.label if ovr and ovr.label else self._humanise(e.value)),
+                        "description": (ovr.description if ovr else None),
+                        "hidden": bool(ovr.hidden) if ovr else False,
+                        "overridden": ovr is not None,
+                        "updatedAt": (ovr.updated_at.isoformat()
+                                      if ovr and ovr.updated_at else None),
+                    })
+                out.append({"area": area, "name": name, "values": values})
+        return out
+
+    async def value_set_upsert(self, enum_name: str, value_code: str,
+                                payload: dict, user_id: uuid.UUID | None) -> dict:
+        """Create-or-update an override. Empty label/description clears that field."""
+        # Confirm the (enum, code) pair actually exists in code — otherwise we'd let
+        # admins configure ghosts. Cheapest check: rebuild the value_sets index.
+        known = {(vs["name"], v["code"])
+                 for vs in await self.value_sets() for v in vs["values"]}
+        if (enum_name, value_code) not in known:
+            raise NotFoundError(
+                f"Unknown value set entry: {enum_name} / {value_code}"
+            )
+        row = (await self.session.execute(
+            select(ValueSetOverride).where(
+                ValueSetOverride.enum_name == enum_name,
+                ValueSetOverride.value_code == value_code,
+            )
+        )).scalar_one_or_none()
+
+        label = (payload.get("label") or "").strip() or None
+        description = (payload.get("description") or "").strip() or None
+        hidden = bool(payload.get("hidden", False))
+
+        if row is None:
+            row = ValueSetOverride(
+                enum_name=enum_name, value_code=value_code,
+                label=label, description=description, hidden=hidden,
+                updated_by_user_id=user_id,
+            )
+            self.session.add(row)
+        else:
+            row.label = label
+            row.description = description
+            row.hidden = hidden
+            row.updated_by_user_id = user_id
+        await self.session.commit()
+        return {"enumName": enum_name, "valueCode": value_code,
+                "label": label, "description": description, "hidden": hidden}
+
+    async def value_set_reset(self, enum_name: str, value_code: str) -> dict:
+        row = (await self.session.execute(
+            select(ValueSetOverride).where(
+                ValueSetOverride.enum_name == enum_name,
+                ValueSetOverride.value_code == value_code,
+            )
+        )).scalar_one_or_none()
+        if row is not None:
+            await self.session.delete(row)
+            await self.session.commit()
+        return {"enumName": enum_name, "valueCode": value_code, "overridden": False}

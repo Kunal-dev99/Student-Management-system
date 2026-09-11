@@ -214,7 +214,7 @@ export function useSupervisorSuggestions() {
  * Relationship graph (Phase 7 R5) — GET /research/graph.
  * ------------------------------------------------------------------ */
 
-export type GraphNodeKind = 'student' | 'project' | 'supervisor' | 'award' | 'funder' | 'funding'
+export type GraphNodeKind = 'student' | 'project' | 'supervisor' | 'award' | 'funder' | 'funding' | 'opportunity'
 
 export interface GraphNode {
   /** `"{kind}:{uuid}"` — edges reference this. */

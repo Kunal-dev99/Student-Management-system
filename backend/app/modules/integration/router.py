@@ -87,6 +87,76 @@ async def replay_dead_letters_bulk(
     return await _svc(session).replay_dead_letters_bulk(body.ids)
 
 
+# ---------------------------------------------------------------------------
+# Adapter targets — where each external system lives (URL + active toggle).
+# Configured through the Integration Hub UI, backed by `institution_setting`;
+# runtime falls back to the matching env var if nothing has been set yet.
+# ---------------------------------------------------------------------------
+
+
+class _TargetBody(BaseModel):
+    url: str | None = None
+    active: bool = True
+
+
+@router.get("/targets", summary="List every adapter and its current target configuration")
+async def list_targets(
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("admin.configure")),
+) -> dict:
+    from app.modules.integration.adapters import ADAPTER_META, ADAPTERS, resolve_target
+
+    out = []
+    for system, meta in ADAPTER_META.items():
+        url, active, source = await resolve_target(session, system)
+        out.append({
+            "system": system,
+            "label": meta["label"],
+            "description": meta["description"],
+            "url": url,
+            "active": active,
+            "source": source,   # "db" | "env" | "none"
+            "registered": system in ADAPTERS,
+        })
+    return {"targets": out}
+
+
+@router.put("/targets/{system}", summary="Configure an adapter target (URL + active toggle)")
+async def upsert_target(
+    system: str,
+    body: _TargetBody,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("admin.configure")),
+) -> dict:
+    from sqlalchemy import select
+
+    from app.modules.integration.adapters import ADAPTER_META, resolve_target
+    from app.modules.settings.models import InstitutionSetting
+
+    if system not in ADAPTER_META:
+        raise ValidationAppError(f"Unknown adapter system: {system}")
+
+    url_clean = (body.url or "").strip() or None
+    if url_clean and not (url_clean.startswith("http://") or url_clean.startswith("https://")):
+        raise ValidationAppError("URL must start with http:// or https://")
+
+    async def _put(key: str, value):
+        row = (await session.execute(
+            select(InstitutionSetting).where(InstitutionSetting.key == key)
+        )).scalar_one_or_none()
+        if row is None:
+            session.add(InstitutionSetting(key=key, value={"value": value}))
+        else:
+            row.value = {"value": value}
+
+    await _put(f"integration.{system}.url", url_clean)
+    await _put(f"integration.{system}.active", bool(body.active))
+    await session.commit()
+
+    url, active, source = await resolve_target(session, system)
+    return {"system": system, "url": url, "active": active, "source": source}
+
+
 @router.post("/webhooks/{system}", summary="Signed inbound webhook (idempotent by source id)")
 async def webhook(system: str, request: Request, session: AsyncSession = Depends(get_session)) -> dict:
     raw = await request.body()

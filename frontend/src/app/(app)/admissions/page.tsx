@@ -21,7 +21,7 @@ export default function AdmissionsPage() {
 
   return (
     <>
-      <PageHeader title="Admissions" description="Offers, acceptance, and onboarding." />
+      <PageHeader title="Admissions" />
       <div className="px-6 pb-6 space-y-4">
         <PageSection icon={FileCheck2} title="Applications awaiting an admissions decision" accent="primary">
           <p className="text-helper mb-3">
@@ -39,11 +39,18 @@ export default function AdmissionsPage() {
                 {isLoading && <TableRow><TableCell colSpan={3}><Skeleton className="h-5 w-full" /></TableCell></TableRow>}
                 {rows.map((a) => (
                   <TableRow key={a.id}>
-                    <TableCell className="font-mono text-sm">{a.id.slice(0, 8)}…</TableCell>
+                    <TableCell>
+                      <div className="flex flex-col">
+                        <span className="text-sm font-medium">{a.personName ?? '—'}</span>
+                        <span className="font-mono text-xs text-muted-foreground">
+                          submitted {a.submittedAt?.slice(0, 10) ?? a.createdAt.slice(0, 10)}
+                        </span>
+                      </div>
+                    </TableCell>
                     <TableCell><StagePill stage={a.currentStage} /></TableCell>
                     <TableCell className="text-right">
-                      <Link href={`/recruitment/applications/${a.id}`}>
-                        <Button size="sm" variant="secondary">Manage</Button>
+                      <Link href={`/recruitment/applications/${a.id}?from=admissions`}>
+                        <Button size="sm" variant="secondary">Manage offer</Button>
                       </Link>
                     </TableCell>
                   </TableRow>

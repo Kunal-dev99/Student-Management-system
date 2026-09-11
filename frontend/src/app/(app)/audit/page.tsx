@@ -35,7 +35,7 @@ export default function AuditPage() {
   if (!hasPermission('audit.read')) {
     return (
       <>
-        <PageHeader title="Audit" description="System audit trail." />
+        <PageHeader title="Audit" />
         <div className="px-6 pb-6">
           <PageSection icon={ShieldAlert} title="Not authorised" accent="danger">
             <p className="text-sm text-muted-foreground">
@@ -49,7 +49,7 @@ export default function AuditPage() {
 
   return (
     <>
-      <PageHeader title="Audit" description="Immutable record of privileged actions and state changes." />
+      <PageHeader title="Audit" />
       <div className="px-6 pb-6 space-y-4">
         <PageSection icon={ScrollText} title="Filters" accent="primary">
           <div className="flex flex-wrap items-end gap-2">

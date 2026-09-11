@@ -11,7 +11,7 @@ export default function FundingPage() {
   const { data, isLoading } = useFundingSources()
   return (
     <>
-      <PageHeader title="Funding" description="Funding sources and arrangements." />
+      <PageHeader title="Funding" />
       <div className="px-6 pb-6 space-y-4">
         <p className="text-helper">
           Funding arrangements are held per student and tracked over time (a change closes the

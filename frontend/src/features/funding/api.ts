@@ -51,6 +51,20 @@ export const useFundingSources = (opts?: { enabled?: boolean }) =>
     enabled: opts?.enabled ?? true,
   })
 
+/** Cost centres + project codes come from LOVs (Settings → List of values); funder ref
+ *  is a free-text unique external identifier suggested from prior arrangements. */
+export interface FundingVocabCode { code: string; name: string }
+export interface FundingVocab {
+  costCentres: FundingVocabCode[]
+  projectCodes: FundingVocabCode[]
+  funderReferences: string[]
+}
+export const useFundingVocab = () =>
+  useQuery({
+    queryKey: ['funding-vocab'],
+    queryFn: () => api.get<FundingVocab>('/funding/vocab'),
+  })
+
 export const useFunding = (studentId: string) =>
   useQuery({
     queryKey: ['funding', studentId],

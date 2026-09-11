@@ -32,7 +32,7 @@ export default function PersonDetailPage() {
 
   return (
     <>
-      <PageHeader title={title} description="Person 360 — profile, identities, and lifecycle." />
+      <PageHeader title={title} />
       <div className="px-6 pb-6 space-y-4">
         <Link href="/persons" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
           <ArrowLeft className="h-4 w-4" /> Back to persons

@@ -7,7 +7,7 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, UserRound } from 'lucide-react'
+import { ArrowLeft, ArrowUpRight, GraduationCap, UserRound } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -22,6 +22,8 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/components/ui/use-toast'
 import { ApiError } from '@/shared/api/client'
+import { usePerson } from '@/features/persons/api'
+import { useCaseload } from '@/features/supervision/api'
 import {
   useSupervisorProfile, useUpsertSupervisorProfile,
   type SupervisorAvailability,
@@ -33,6 +35,11 @@ export default function SupervisorProfilePage() {
   const { toast } = useToast()
   const q = useSupervisorProfile(personId)
   const save = useUpsertSupervisorProfile(personId)
+  const person = usePerson(personId)
+  const caseload = useCaseload(personId)
+  const supervisorName = person.data
+    ? `${person.data.givenName} ${person.data.familyName}`
+    : ''
 
   const [maxStudents, setMaxStudents] = useState('8')
   const [availability, setAvailability] = useState<SupervisorAvailability>('available')
@@ -69,11 +76,15 @@ export default function SupervisorProfilePage() {
 
   return (
     <>
-      <PageHeader title="Supervisor profile"
-        description="W2 — max students, availability, sabbatical window, and research areas." />
+      <PageHeader
+        title={supervisorName || 'Supervisor profile'}
+        description={supervisorName
+          ? `Supervisor profile · max students, availability, sabbatical, and current caseload.`
+          : 'Max students, availability, sabbatical window, research areas.'}
+      />
       <div className="px-6 pb-6 space-y-4">
-        <Link href="/supervision" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-          <ArrowLeft className="h-4 w-4" /> Back to supervision
+        <Link href="/supervision/workforce" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+          <ArrowLeft className="h-4 w-4" /> Back to workforce
         </Link>
 
         <PageSection icon={UserRound} title="Profile" accent="primary">
@@ -134,6 +145,47 @@ export default function SupervisorProfilePage() {
                 </span>
               </div>
             </div>
+          )}
+        </PageSection>
+
+        <PageSection
+          icon={GraduationCap}
+          title={`Current caseload${caseload.data ? ` (${caseload.data.length})` : ''}`}
+          accent="primary"
+          description="Students this supervisor is currently supervising. Meetings shown to spot supervision gaps."
+        >
+          {caseload.isLoading ? (
+            <Skeleton className="h-24 w-full" />
+          ) : (caseload.data ?? []).length === 0 ? (
+            <p className="text-helper">No active supervisees.</p>
+          ) : (
+            <ul className="divide-y divide-border/50 rounded-md border border-border/50">
+              {(caseload.data ?? []).map((c) => (
+                <li key={c.relationshipId} className="flex items-center justify-between gap-3 px-3 py-2">
+                  <div className="min-w-0 space-y-0.5">
+                    <Link
+                      href={`/students/${c.studentId}`}
+                      className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
+                    >
+                      {c.personName}
+                      <ArrowUpRight className="h-3.5 w-3.5" />
+                    </Link>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-xs text-muted-foreground">{c.studentRef}</span>
+                      <Badge variant="outline">{c.role.replace(/_/g, ' ')}</Badge>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    {c.meetingOverdue
+                      ? <Badge variant="warning">meetings overdue</Badge>
+                      : <Badge variant="success">up to date</Badge>}
+                    <p className="text-helper num mt-0.5">
+                      last {c.lastMeetingOn ?? '—'}
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ul>
           )}
         </PageSection>
       </div>

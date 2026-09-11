@@ -1,6 +1,7 @@
 'use client'
 
 import { Badge } from '@/components/ui/badge'
+import { titleCase } from '@/lib/utils'
 import type { CandidateStage, OfferStatus, OpportunityStatus } from './api'
 
 type Variant = 'default' | 'secondary' | 'success' | 'info' | 'warning' | 'destructive' | 'outline'
@@ -20,7 +21,7 @@ const OFFER: Record<OfferStatus, Variant> = {
   expired: 'outline', withdrawn: 'outline',
 }
 
-const label = (s: string) => s.replace(/_/g, ' ')
+const label = (s: string) => titleCase(s)
 
 export const OpportunityPill = ({ status }: { status: OpportunityStatus }) => (
   <Badge variant={OPP[status]}>{label(status)}</Badge>

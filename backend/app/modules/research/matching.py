@@ -185,12 +185,15 @@ class MatchingService:
         self, *, student_id: uuid.UUID | None = None, award_id: uuid.UUID | None = None,
         allowed_ids: list[uuid.UUID] | None = None, limit: int = 40,
     ) -> dict:
-        """Nodes and edges for Person ↔ Research ↔ Supervisor ↔ Award ↔ Funding.
+        """Nodes and edges for Person ↔ Research ↔ Supervisor ↔ Award ↔ Funding ↔ Opportunity.
 
         Centre it on one student or one award, or omit both for a bounded overview.
+        Standalone awards and opportunities are ALWAYS included — the map is the record
+        of what exists, not only what has already been linked to a student.
         """
         from app.modules.funding.constants import FundingStatus
         from app.modules.funding.models import FundingArrangement, FundingSource
+        from app.modules.recruitment.models import ResearchOpportunity
 
         stmt = select(Student, Person).join(Person, Person.id == Student.person_id)
         if student_id:
@@ -198,33 +201,47 @@ class MatchingService:
         if allowed_ids is not None:
             stmt = stmt.where(Student.id.in_(allowed_ids))
         student_rows = (await self.session.execute(stmt.limit(limit))).all()
-        if not student_rows:
-            return {"nodes": [], "edges": [], "note": "Nothing in scope to draw."}
 
         ids = [st.id for st, _ in student_rows]
         projects = {p.student_id: p for p in (await self.session.execute(
             select(ResearchProject).where(ResearchProject.student_id.in_(ids))
-        )).scalars().unique().all()}
+        )).scalars().unique().all()} if ids else {}
         arrangements = list((await self.session.execute(
             select(FundingArrangement).where(
                 FundingArrangement.student_id.in_(ids),
                 FundingArrangement.status == FundingStatus.active,
             )
-        )).scalars().all())
+        )).scalars().all()) if ids else []
         rels = list((await self.session.execute(
             select(SupervisorRelationship).where(
                 SupervisorRelationship.student_id.in_(ids),
                 SupervisorRelationship.valid_to.is_(None),
             )
-        )).scalars().all())
+        )).scalars().all()) if ids else []
 
-        award_ids = {p.research_award_id for p in projects.values() if p.research_award_id}
-        award_ids |= {a.research_award_id for a in arrangements if a.research_award_id}
-        if award_id:
-            award_ids.add(award_id)
+        # Always include EVERY award and opportunity in scope, even the ones no student
+        # has been attached to yet. The bounded `limit` keeps this safe for large tenants.
         awards = {a.id: a for a in (await self.session.execute(
-            select(ResearchAward).where(ResearchAward.id.in_(list(award_ids)))
-        )).scalars().all()} if award_ids else {}
+            select(ResearchAward).order_by(ResearchAward.created_at.desc()).limit(limit)
+        )).scalars().all()}
+        # Union in awards referenced by projects/arrangements so a focused (student=…) view
+        # still shows the award behind that student's project even if it's older than the
+        # top-N slice.
+        extra_award_ids = ({p.research_award_id for p in projects.values() if p.research_award_id}
+                           | {a.research_award_id for a in arrangements if a.research_award_id})
+        if award_id:
+            extra_award_ids.add(award_id)
+        extra_award_ids -= set(awards.keys())
+        if extra_award_ids:
+            for a in (await self.session.execute(
+                select(ResearchAward).where(ResearchAward.id.in_(list(extra_award_ids)))
+            )).scalars().all():
+                awards[a.id] = a
+
+        opportunities = list((await self.session.execute(
+            select(ResearchOpportunity)
+            .order_by(ResearchOpportunity.created_at.desc()).limit(limit)
+        )).scalars().all())
 
         funder_ids = {a.funder_id for a in awards.values() if a.funder_id}
         funder_ids |= {a.funding_source_id for a in arrangements if a.funding_source_id}
@@ -232,7 +249,11 @@ class MatchingService:
             select(FundingSource).where(FundingSource.id.in_(list(funder_ids)))
         )).scalars().all()} if funder_ids else {}
 
-        supervisor_ids = {r.supervisor_person_id for r in rels}
+        # Principal supervisors on opportunities need Person rows for their labels.
+        supervisor_ids_from_opps = {o.principal_supervisor_id for o in opportunities
+                                     if o.principal_supervisor_id}
+
+        supervisor_ids = {r.supervisor_person_id for r in rels} | supervisor_ids_from_opps
         supervisors = {p.id: p for p in (await self.session.execute(
             select(Person).where(Person.id.in_(list(supervisor_ids)))
         )).scalars().all()} if supervisor_ids else {}
@@ -284,12 +305,32 @@ class MatchingService:
                     edges.append({"source": node("funder", f.id, f.name), "target": fn,
                                   "label": "provides"})
 
+        # Every award (linked or standalone) gets a node, and its funder is drawn.
         for aw in awards.values():
+            an = node("award", aw.id, aw.award_ref, sub=aw.title)
             if aw.funder_id and aw.funder_id in funders:
                 f = funders[aw.funder_id]
                 edges.append({"source": node("funder", f.id, f.name),
-                              "target": node("award", aw.id, aw.award_ref, sub=aw.title),
-                              "label": "awards"})
+                              "target": an, "label": "awards"})
+
+        # Opportunities — always drawn, connected to their award and supervisor when set.
+        # A subtitle carries positions + status so an unlinked opportunity still tells its story.
+        for opp in opportunities:
+            status_val = opp.status.value if hasattr(opp.status, "value") else str(opp.status)
+            sub = f"{opp.positions_filled}/{opp.positions_available} filled · {status_val}"
+            on = node("opportunity", opp.id, opp.title, sub=sub)
+            if opp.research_award_id and opp.research_award_id in awards:
+                aw = awards[opp.research_award_id]
+                edges.append({"source": node("award", aw.id, aw.award_ref, sub=aw.title),
+                              "target": on, "label": "funds"})
+            if opp.principal_supervisor_id and opp.principal_supervisor_id in supervisors:
+                sup = supervisors[opp.principal_supervisor_id]
+                edges.append({
+                    "source": node("supervisor", sup.id,
+                                   f"{sup.given_name} {sup.family_name}",
+                                   link=f"/persons/{sup.id}"),
+                    "target": on, "label": "leads",
+                })
 
         # De-duplicate edges (a funder can reach a student by several paths).
         seen, unique_edges = set(), []

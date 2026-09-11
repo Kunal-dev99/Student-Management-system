@@ -2,7 +2,10 @@
 
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
-import { ArrowLeft, GraduationCap, User, History } from 'lucide-react'
+import { useState } from 'react'
+import { ArrowLeft, GraduationCap, Sparkles, User, History } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { MeetingBriefDrawer } from '@/features/meeting-brief/MeetingBriefDrawer'
 import { PageHeader } from '@/components/common/PageHeader'
 import { PageSection } from '@/components/common/PageSection'
 import { Badge } from '@/components/ui/badge'
@@ -61,14 +64,28 @@ export default function StudentDetailPage() {
   const student = useStudent(id)
   const summary = useStudentSummary(id)
   const s = student.data
+  const [briefOpen, setBriefOpen] = useState(false)
 
   return (
     <>
-      <PageHeader title={summary.data?.personName ?? 'Student'} description="PGR student record." />
+      <PageHeader title={summary.data?.personName ?? 'Student'} />
       <div className="px-6 pb-6 space-y-4">
-        <Link href="/students" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-          <ArrowLeft className="h-4 w-4" /> Back to students
-        </Link>
+        <div className="flex items-center justify-between">
+          <Link href="/students" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+            <ArrowLeft className="h-4 w-4" /> Back to students
+          </Link>
+          <Button size="sm" variant="secondary" onClick={() => setBriefOpen(true)}>
+            <Sparkles className="h-3.5 w-3.5 mr-1.5 text-primary" />
+            Prepare for meeting
+          </Button>
+        </div>
+
+        <MeetingBriefDrawer
+          studentId={id}
+          studentName={summary.data?.personName}
+          open={briefOpen}
+          onOpenChange={setBriefOpen}
+        />
 
         <JourneyTracker student={s} />
 

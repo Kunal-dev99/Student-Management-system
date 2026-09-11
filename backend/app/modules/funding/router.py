@@ -4,6 +4,7 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import require_permission
@@ -33,6 +34,33 @@ sources_router = APIRouter(prefix="/funding-sources", tags=["funding"])
 
 def _svc(session: AsyncSession) -> FundingService:
     return FundingService(FundingRepository(session))
+
+
+@funding_router.get("/vocab",
+                    summary="Cost centres / project codes (from LOVs) + funder references (from history)")
+async def funding_vocab(
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("funding.read")),
+) -> dict:
+    """Cost centres and project codes are institution-configurable LOVs — managed under
+    Settings → List of values. Funder reference is still a free string (each grant has a
+    unique external identifier), so it's suggested from prior arrangements for consistency."""
+    from sqlalchemy import distinct
+    from app.modules.funding.models import (
+        CostCentre, FundingArrangement as _FA, ProjectCode,
+    )
+
+    cc = [{"code": r.code, "name": r.name}
+          for r in (await session.execute(
+              select(CostCentre).order_by(CostCentre.code))).scalars().all()]
+    pc = [{"code": r.code, "name": r.name}
+          for r in (await session.execute(
+              select(ProjectCode).order_by(ProjectCode.code))).scalars().all()]
+    fr = sorted(v for v, in (await session.execute(
+        select(distinct(_FA.funder_reference))
+        .where(_FA.funder_reference.is_not(None), _FA.funder_reference != "")
+    )).all() if v)
+    return {"costCentres": cc, "projectCodes": pc, "funderReferences": fr}
 
 
 @sources_router.get("", response_model=list[FundingSourceOut], summary="List funding sources")

@@ -128,6 +128,36 @@ export interface ScheduledRunResult {
   viewsRefreshed: string
 }
 
+/* ------------------------------------------------------------------ *
+ * Adapter targets — the "Integration Hub" configuration surface.
+ * ------------------------------------------------------------------ */
+
+export interface AdapterTarget {
+  system: string
+  label: string
+  description: string
+  url: string | null
+  active: boolean
+  source: 'db' | 'env' | 'none'
+  registered: boolean
+}
+
+export const useAdapterTargets = () =>
+  useQuery({
+    queryKey: ['integration', 'targets'],
+    queryFn: () => api.get<{ targets: AdapterTarget[] }>('/integration/targets')
+      .then((r) => r.targets),
+  })
+
+export function useUpsertAdapterTarget() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ system, url, active }: { system: string; url: string | null; active: boolean }) =>
+      api.put<AdapterTarget>(`/integration/targets/${system}`, { url, active }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['integration', 'targets'] }),
+  })
+}
+
 export function useRunScheduledJobs() {
   const qc = useQueryClient()
   return useMutation({

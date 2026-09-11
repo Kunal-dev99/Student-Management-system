@@ -25,11 +25,12 @@
  * information.
  */
 
-import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import Link from 'next/link'
 import {
   Activity,
   AlertTriangle,
+  ArrowRight,
   Boxes,
   CheckCircle2,
   ChevronDown,
@@ -40,6 +41,7 @@ import {
   FlaskConical,
   Info,
   LayoutDashboard,
+  Loader2,
   Lock,
   Microscope,
   Plus,
@@ -48,6 +50,7 @@ import {
   Sparkles,
   Target,
   TrendingUp,
+  type LucideIcon,
 } from 'lucide-react'
 import { PageHeader } from '@/components/common/PageHeader'
 import { PageSection } from '@/components/common/PageSection'
@@ -66,7 +69,6 @@ import { Skeleton } from '@/components/ui/skeleton'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useToast } from '@/components/ui/use-toast'
 import { cn } from '@/lib/utils'
 import { ApiError } from '@/shared/api/client'
@@ -1198,6 +1200,71 @@ function QualityReport({ dataset }: { dataset: PatternDataset }) {
           {q.predictionPoint}
         </p>
       </div>
+
+      {q.cleaning && (
+        <div className="rounded-md border border-[hsl(var(--success)/0.3)] bg-[hsl(var(--success)/0.06)] p-3">
+          <div className="flex items-start gap-2">
+            <Sparkles className="h-4 w-4 text-[hsl(var(--success))] shrink-0 mt-0.5" />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm">
+                <span className="font-medium">Auto-clean.</span> {q.cleaning.summary}
+              </p>
+              {(q.cleaning.imputed.length > 0
+                || q.cleaning.removedFeatures.length > 0
+                || q.cleaning.outliersCapped.length > 0
+                || q.cleaning.duplicatesRemoved > 0) && (
+                <div className="mt-2 grid gap-3 sm:grid-cols-2 text-xs">
+                  {q.cleaning.imputed.length > 0 && (
+                    <div>
+                      <p className="text-label mb-1">Filled with median</p>
+                      <ul className="space-y-0.5">
+                        {q.cleaning.imputed.slice(0, 6).map((x) => (
+                          <li key={x.key} className="flex justify-between gap-2 text-muted-foreground">
+                            <span className="truncate">{x.label}</span>
+                            <span className="num shrink-0">{x.count}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {q.cleaning.removedFeatures.length > 0 && (
+                    <div>
+                      <p className="text-label mb-1">Features dropped</p>
+                      <ul className="space-y-0.5">
+                        {q.cleaning.removedFeatures.slice(0, 6).map((x) => (
+                          <li key={x.key} className="text-muted-foreground">
+                            <span className="truncate">{x.label}</span>{' '}
+                            <span className="text-muted-foreground/70">— {x.reason}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {q.cleaning.outliersCapped.length > 0 && (
+                    <div>
+                      <p className="text-label mb-1">Outliers capped (1st/99th pct)</p>
+                      <ul className="space-y-0.5">
+                        {q.cleaning.outliersCapped.slice(0, 6).map((x) => (
+                          <li key={x.key} className="flex justify-between gap-2 text-muted-foreground">
+                            <span className="truncate">{x.label}</span>
+                            <span className="num shrink-0">{x.count}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {q.cleaning.duplicatesRemoved > 0 && (
+                    <div>
+                      <p className="text-label mb-1">Duplicate rows removed</p>
+                      <p className="num text-muted-foreground">{q.cleaning.duplicatesRemoved}</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       <LeakageCallout features={q.excludedFeatures} />
 
@@ -2612,20 +2679,112 @@ function MonitoringTab({ canTrain }: { canTrain: boolean }) {
 
 /* ---------------------------------- page ---------------------------------- */
 
+/**
+ * UI-first Pattern Lab: pick a model, pick a version, and everything else on the
+ * screen re-focuses to that selection. Governance actions, predictions and monitoring
+ * for the picked model live in one working pane rather than five tabs of prose.
+ *
+ * The heavier reading — dataset build, discovery, training — is one collapsible
+ * "Explore & train" pane at the bottom for the analyst who's actively working. The
+ * grid at the very bottom lists every model, so nothing is hidden.
+ */
+
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select'
+
+function pickProdVersion(model: MlModel | null): MlModelVersion | null {
+  if (!model) return null
+  return model.versions.find((v) => v.status === 'production') ??
+         model.versions[0] ??
+         null
+}
+
+function accuracyBand(v: number | null | undefined) {
+  if (v == null) return { label: 'Not yet graded', tone: 'muted' as const }
+  if (v >= 0.8) return { label: 'Strong', tone: 'good' as const }
+  if (v >= 0.7) return { label: 'Fair', tone: 'ok' as const }
+  if (v >= 0.6) return { label: 'Weak', tone: 'watch' as const }
+  return { label: 'No better than guessing', tone: 'weak' as const }
+}
+
+const ACCURACY_TONE: Record<string, string> = {
+  good: 'text-[hsl(var(--success))]',
+  ok: 'text-foreground',
+  watch: 'text-[hsl(var(--warning))]',
+  weak: 'text-destructive',
+  muted: 'text-muted-foreground',
+}
+
+const HEALTH_TONE: Record<string, string> = {
+  ok: 'text-[hsl(var(--success))] bg-[hsl(var(--success))]/10 border-[hsl(var(--success))]/30',
+  watch: 'text-[hsl(var(--warning))] bg-[hsl(var(--warning))]/10 border-[hsl(var(--warning))]/30',
+  review: 'text-destructive bg-destructive/10 border-destructive/30',
+}
+
+function StatTileMini({ label, value, tone }: {
+  label: string; value: ReactNode; tone?: string
+}) {
+  return (
+    <div className="rounded-md border border-border bg-card px-4 py-3">
+      <p className="text-[11px] uppercase tracking-wider text-muted-foreground mb-0.5">
+        {label}
+      </p>
+      <p className={cn('text-lg font-semibold num leading-tight', tone)}>{value}</p>
+    </div>
+  )
+}
+
 export default function PatternLabPage() {
   const { hasPermission } = useAuth()
   const canRead = hasPermission('ml.read')
   const canAnalyse = hasPermission('ml.analyse')
   const canTrain = hasPermission('ml.train')
-  const [tab, setTab] = useState('overview')
+
+  const modelsQ = useMlModels()
+  const batchesQ = usePredictionBatches()
+  const monitoringQ = useMonitoring()
+
+  const models = modelsQ.data ?? []
+  const [focusedModelId, setFocusedModelId] = useState<string | null>(null)
+  const [focusedVersionId, setFocusedVersionId] = useState<string | null>(null)
+  const [exploreOpen, setExploreOpen] = useState(false)
+  const [exploreFlash, setExploreFlash] = useState(false)
+  const [cardVersionId, setCardVersionId] = useState<string | null>(null)
+  const exploreRef = useRef<HTMLElement | null>(null)
+
+  const openNewAnalysis = () => {
+    setExploreOpen(true)
+    setExploreFlash(true)
+    // Wait for the section to mount before scrolling to it.
+    requestAnimationFrame(() => {
+      exploreRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+    window.setTimeout(() => setExploreFlash(false), 1800)
+  }
+
+  // Auto-focus first production model, or first model overall.
+  useEffect(() => {
+    if (focusedModelId || models.length === 0) return
+    const prod = models.find((m) => m.versions.some((v) => v.status === 'production'))
+    const first = prod ?? models[0]
+    setFocusedModelId(first.id)
+    const prodVer = pickProdVersion(first)
+    setFocusedVersionId(prodVer?.id ?? null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [models.length])
+
+  const focusedModel = models.find((m) => m.id === focusedModelId) ?? null
+  const focusedVersion = focusedModel?.versions.find((v) => v.id === focusedVersionId)
+    ?? pickProdVersion(focusedModel)
+
+  const batch = (batchesQ.data ?? []).find((b) => b.modelId === focusedModelId) ?? null
+  const monitoring = (monitoringQ.data ?? []).find((m) => m.modelId === focusedModelId) ?? null
 
   if (!canRead) {
     return (
       <>
-        <PageHeader
-          title="Pattern Lab"
-          description="Governed pattern discovery over the institution's own lifecycle data."
-        />
+        <PageHeader title="Pattern Lab" />
         <div className="px-6 pb-6"><NoPermission /></div>
       </>
     )
@@ -2635,68 +2794,467 @@ export default function PatternLabPage() {
     <>
       <PageHeader
         title="Pattern Lab"
-        description="Governed pattern discovery over the institution's own lifecycle data — every number carries its evidence."
         actions={
-          <Button onClick={() => setTab('discover')}>
+          <Button onClick={openNewAnalysis}>
             <Plus className="h-4 w-4 mr-1.5" /> New analysis
           </Button>
         }
       />
-      <div className="px-6 pb-6">
-        <Tabs value={tab} onValueChange={setTab}>
-          <TabsList>
-            <TabsTrigger value="overview"><LayoutDashboard className="h-4 w-4 mr-1.5" /> Overview</TabsTrigger>
-            <TabsTrigger value="discover"><Microscope className="h-4 w-4 mr-1.5" /> Discover</TabsTrigger>
-            <TabsTrigger value="models"><Boxes className="h-4 w-4 mr-1.5" /> Models</TabsTrigger>
-            <TabsTrigger value="predictions"><TrendingUp className="h-4 w-4 mr-1.5" /> Predictions</TabsTrigger>
-            <TabsTrigger value="monitoring"><Activity className="h-4 w-4 mr-1.5" /> Monitoring</TabsTrigger>
-          </TabsList>
-          <JourneyBar tab={tab} onGo={setTab} />
-          <TabsContent value="overview" className="mt-4">
-            <PlainIntro>
-              Pattern Lab studies your own students&apos; history and highlights patterns — for
-              example, which current students resemble past students who ran into funding trouble.
-              Everything here is <b>advisory</b>: it never changes a record, and a person always
-              decides what to do about it.
-            </PlainIntro>
-            <OverviewTab onNewAnalysis={() => setTab('discover')} />
-          </TabsContent>
-          <TabsContent value="discover" className="mt-4">
-            <PlainIntro>
-              An analysis starts here. Pick one of the pre-approved questions, take a snapshot of
-              the history, and run it. If there isn&apos;t enough reliable history to answer a
-              question honestly, that question is <b>locked</b> and tells you exactly what&apos;s
-              missing — the platform would rather refuse than guess.
-            </PlainIntro>
-            <DiscoverTab canAnalyse={canAnalyse} canTrain={canTrain} />
-          </TabsContent>
-          <TabsContent value="models" className="mt-4">
-            <PlainIntro>
-              A &ldquo;model&rdquo; is a rule-of-thumb learned from your history. New models start
-              as <b>candidates</b>; a person decides whether one is good enough to use — and
-              whoever built it is not allowed to approve it. The accuracy score runs from 0.5
-              (a coin toss) to 1.0 (perfect).
-            </PlainIntro>
-            <ModelsTab onGoDiscover={() => setTab('discover')} />
-          </TabsContent>
-          <TabsContent value="predictions" className="mt-4">
-            <PlainIntro>
-              Each approved model gives every current student a score — &ldquo;this student looks
-              74% similar to past students who lost funding&rdquo;. A score is a prompt for a human
-              conversation, never an automatic decision, and each one lists the factors behind it.
-            </PlainIntro>
-            <PredictionsTab canTrain={canTrain} />
-          </TabsContent>
-          <TabsContent value="monitoring" className="mt-4">
-            <PlainIntro>
-              This tab checks whether the models are still telling the truth: old predictions are
-              compared with what actually happened. A model doing badly is flagged for
-              <b> review</b> right here — the platform grades its own work and says so honestly.
-            </PlainIntro>
-            <MonitoringTab canTrain={canTrain} />
-          </TabsContent>
-        </Tabs>
+      <div className="px-6 pb-8">
+        {models.length === 0 ? (
+          <div className="rounded-md border border-dashed border-border p-10 text-center max-w-md mx-auto mt-8">
+            <Sparkles className="h-6 w-6 mx-auto text-muted-foreground mb-2" />
+            <p className="font-medium">No models yet</p>
+            <p className="text-helper text-sm mt-1">Build your first one in Explore.</p>
+            <Button size="sm" className="mt-4" onClick={openNewAnalysis}>
+              Open Explore <ArrowRight className="h-3.5 w-3.5 ml-1" />
+            </Button>
+          </div>
+        ) : (
+          <div className="grid gap-5 md:grid-cols-[260px_minmax(0,1fr)]">
+            {/* Left rail — every model, always visible */}
+            <aside className="space-y-2 md:sticky md:top-4 md:self-start md:max-h-[calc(100vh-6rem)] md:overflow-y-auto md:pr-1">
+              <div className="flex items-baseline justify-between px-1">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Models
+                </span>
+                <span className="text-[11px] text-muted-foreground num">{models.length}</span>
+              </div>
+              {models.map((m) => {
+                const prod = pickProdVersion(m)
+                const acc = accuracyBand(prod?.metrics?.aucMean)
+                const active = m.id === focusedModelId
+                return (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => {
+                      setFocusedModelId(m.id)
+                      setFocusedVersionId(prod?.id ?? null)
+                    }}
+                    className={cn(
+                      'w-full text-left rounded-md border px-3 py-2 transition-colors',
+                      active
+                        ? 'border-primary bg-primary/[0.06]'
+                        : 'border-border bg-card hover:border-primary/40',
+                    )}
+                  >
+                    <p className="text-sm font-medium truncate">{m.name}</p>
+                    <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
+                      {prod
+                        ? <StatusBadge status={prod.status} className="text-[10px] px-1.5 py-0" />
+                        : <Badge variant="outline" className="text-[10px]">no versions</Badge>}
+                      <span className={cn('num', ACCURACY_TONE[acc.tone])}>
+                        {prod?.metrics?.aucMean != null ? prod.metrics.aucMean.toFixed(2) : '—'}
+                      </span>
+                    </div>
+                  </button>
+                )
+              })}
+            </aside>
+
+            {/* Right — focus pane with sticky version picker */}
+            <div className="space-y-4 min-w-0">
+              <div className="sticky top-0 z-10 -mx-6 md:mx-0 px-6 md:px-0 py-2 bg-background/90 backdrop-blur border-b border-border/60 md:border-0 md:bg-transparent md:backdrop-blur-0 md:py-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Select
+                    value={focusedVersionId ?? ''}
+                    onValueChange={setFocusedVersionId}
+                    disabled={!focusedModel || focusedModel.versions.length === 0}
+                  >
+                    <SelectTrigger className="w-56 h-8 text-xs">
+                      <SelectValue placeholder="Version" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(focusedModel?.versions ?? []).map((v) => (
+                        <SelectItem key={v.id} value={v.id}>
+                          v{v.versionNo} · {v.status}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <div className="ml-auto flex items-center gap-1">
+                    {focusedVersion && (
+                      <Button size="sm" variant="ghost" onClick={() => setCardVersionId(focusedVersion.id)}>
+                        <FileText className="h-3.5 w-3.5 mr-1" /> Card
+                      </Button>
+                    )}
+                    <Button size="sm" variant="ghost" onClick={() => setExploreOpen((v) => !v)}>
+                      <Microscope className="h-3.5 w-3.5 mr-1" />
+                      {exploreOpen ? 'Hide' : 'Explore'}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
+              {focusedModel && focusedVersion ? (
+                <FocusPane
+                  model={focusedModel}
+                  version={focusedVersion}
+                  batch={batch}
+                  monitoring={monitoring}
+                />
+              ) : (
+                <div className="rounded-md border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+                  Pick a model on the left.
+                </div>
+              )}
+
+              {exploreOpen && (
+                <section
+                  ref={exploreRef}
+                  className={cn(
+                    'rounded-lg border bg-card p-5 scroll-mt-24 transition-all duration-500',
+                    exploreFlash
+                      ? 'border-primary ring-4 ring-primary/30 shadow-lg'
+                      : 'border-border',
+                  )}
+                >
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <Microscope className="h-4 w-4 text-primary" />
+                      <h2 className="text-base font-semibold">Explore &amp; train</h2>
+                    </div>
+                    <Button size="sm" variant="ghost" onClick={() => setExploreOpen(false)}>Close</Button>
+                  </div>
+                  <DiscoverTab canAnalyse={canAnalyse} canTrain={canTrain} />
+                </section>
+              )}
+            </div>
+          </div>
+        )}
+
+        <ModelCardDialog versionId={cardVersionId} onClose={() => setCardVersionId(null)} />
       </div>
     </>
+  )
+}
+
+/**
+ * The focus pane: everything about the picked (model, version) — lifecycle stepper,
+ * headline stats, governance actions, this-model's predictions, this-model's health.
+ * No prose, just the working surface.
+ */
+/**
+ * "How to use this model" card — shown only when the focused version is in production.
+ * Answers the question every user asks after promoting: *now what?* — where the scores
+ * appear, how to trigger a scoring batch, and how to review flagged students.
+ */
+function LiveModelGuide({
+  model, batch,
+}: {
+  model: MlModel
+  batch: ModelBatch | null
+}) {
+  const { toast } = useToast()
+  const score = useScoreModel()
+  const scoredAt = batch?.scoredAt ? new Date(batch.scoredAt).toLocaleString() : null
+  const flagged = batch?.distribution.find((d) => d.band === '80–100%')?.count ?? 0
+
+  return (
+    <section className="rounded-md border border-[hsl(var(--success)/0.4)] bg-[hsl(var(--success)/0.06)] p-4 space-y-3">
+      <div className="flex items-start gap-2">
+        <CheckCircle2 className="h-4 w-4 text-[hsl(var(--success))] shrink-0 mt-0.5" />
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium">This model is live in production.</p>
+          <p className="text-helper text-xs mt-0.5">
+            Scores are attached to individual students and drive the Weekly Review Queue.
+          </p>
+        </div>
+      </div>
+
+      <div className="grid gap-2 sm:grid-cols-3 text-xs">
+        <div className="rounded-sm border border-border bg-card px-3 py-2">
+          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Last scored</p>
+          <p className="text-sm num mt-0.5">{scoredAt ?? 'never'}</p>
+          <p className="text-[11px] text-muted-foreground mt-0.5">
+            {batch ? `${batch.scored} student${batch.scored === 1 ? '' : 's'}` : 'run a batch to score'}
+          </p>
+        </div>
+        <div className="rounded-sm border border-border bg-card px-3 py-2">
+          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Flagged (80–100%)</p>
+          <p className="text-sm num mt-0.5">{batch ? flagged : '—'}</p>
+          <p className="text-[11px] text-muted-foreground mt-0.5">high-probability outcomes</p>
+        </div>
+        <div className="rounded-sm border border-border bg-card px-3 py-2">
+          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Refresh</p>
+          <Button
+            size="sm" variant="outline" className="mt-1 h-7 w-full"
+            disabled={score.isPending}
+            onClick={async () => {
+              try {
+                const res = await score.mutateAsync(model.id)
+                toast({ title: 'Batch scored',
+                  description: `${res.scored} student(s) scored just now.` })
+              } catch (e) {
+                toast({ title: 'Score failed',
+                  description: (e as Error).message, variant: 'destructive' })
+              }
+            }}
+          >
+            {score.isPending
+              ? <><Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> Scoring…</>
+              : <>Score now</>}
+          </Button>
+        </div>
+      </div>
+
+      <div>
+        <p className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1.5">
+          Where these scores appear
+        </p>
+        <div className="flex flex-wrap gap-1.5">
+          <Link href="/reviews/weekly"
+            className="inline-flex items-center gap-1 rounded-full border border-border bg-card px-3 py-1 text-xs hover:border-primary/50">
+            Weekly Review Queue <ArrowRight className="h-3 w-3" />
+          </Link>
+          <Link href="/analytics"
+            className="inline-flex items-center gap-1 rounded-full border border-border bg-card px-3 py-1 text-xs hover:border-primary/50">
+            Analytics — risk overview <ArrowRight className="h-3 w-3" />
+          </Link>
+          <span className="inline-flex items-center gap-1 rounded-full border border-border bg-card px-3 py-1 text-xs text-muted-foreground">
+            Student page → &ldquo;Model predictions&rdquo; panel
+          </span>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function FocusPane({
+  model, version, batch, monitoring,
+}: {
+  model: MlModel
+  version: MlModelVersion
+  batch: ModelBatch | null
+  monitoring: MonitoringEntry | null
+}) {
+  const acc = accuracyBand(version.metrics?.aucMean)
+  const trainedOn = version.metrics?.n
+  const highRisk = batch
+    ? batch.distribution.find((d) => d.band === '80–100%')?.count ?? 0
+    : null
+
+  const hasPredictions = !!(batch && batch.top.length > 0)
+  const hasWatchpoints = !!(monitoring && monitoring.reasons.length > 0)
+  const [detailTab, setDetailTab] = useState<'predictions' | 'watchpoints'>(
+    hasPredictions ? 'predictions' : 'watchpoints',
+  )
+
+  return (
+    <div className="space-y-4">
+      {/* Header line: model name + lifecycle stepper on one row */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-base font-semibold truncate">{model.name}</h2>
+        <StatusPipeline status={version.status} />
+      </div>
+
+      {/* Headline stat strip */}
+      <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-5">
+        <StatTileMini
+          label="Accuracy (AUC)"
+          value={
+            <>
+              {version.metrics?.aucMean != null
+                ? version.metrics.aucMean.toFixed(2)
+                : '—'}
+              <span className="text-xs font-normal ml-2 text-muted-foreground">
+                {acc.label}
+              </span>
+              {version.metrics?.aucCi95Low != null && version.metrics?.aucCi95High != null && (
+                <div className="text-[11px] font-normal text-muted-foreground mt-0.5 num">
+                  95% CI {version.metrics.aucCi95Low.toFixed(2)}–{version.metrics.aucCi95High.toFixed(2)}
+                </div>
+              )}
+            </>
+          }
+          tone={ACCURACY_TONE[acc.tone]}
+        />
+        <StatTileMini
+          label="Trained on"
+          value={<>{trainedOn ?? '—'} <span className="text-xs font-normal text-muted-foreground">students</span></>}
+        />
+        <StatTileMini
+          label={batch ? 'Flagged now' : 'Never scored'}
+          value={
+            batch ? (
+              <>
+                {highRisk}
+                <span className="text-xs font-normal text-muted-foreground ml-1">
+                  of {batch.scored}
+                </span>
+              </>
+            ) : '—'
+          }
+        />
+        <StatTileMini
+          label="Calibration"
+          value={
+            version.metrics?.expectedCalibrationError != null ? (
+              <>
+                <span className="text-lg num">
+                  {version.metrics.expectedCalibrationError.toFixed(3)}
+                </span>
+                <span className="text-xs font-normal text-muted-foreground ml-1">
+                  ECE
+                </span>
+                {version.metrics.operatingThreshold != null && (
+                  <div className="text-[11px] font-normal text-muted-foreground mt-0.5">
+                    op. threshold {version.metrics.operatingThreshold}
+                  </div>
+                )}
+              </>
+            ) : (
+              <span className="text-muted-foreground text-sm font-normal">—</span>
+            )
+          }
+        />
+        <StatTileMini
+          label="Health"
+          value={
+            monitoring ? (
+              <span className={cn(
+                'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium capitalize',
+                HEALTH_TONE[monitoring.health],
+              )}>
+                {monitoring.health}
+              </span>
+            ) : (
+              <span className="text-muted-foreground text-sm font-normal">not yet</span>
+            )
+          }
+        />
+      </div>
+
+      {/* Governance — compact row */}
+      <div className="rounded-md border border-border bg-card px-3 py-2 flex flex-wrap items-center justify-between gap-3">
+        <p className="text-xs text-muted-foreground">
+          {version.status === 'candidate' && 'Submit for review'}
+          {version.status === 'review' && 'Awaiting approval'}
+          {version.status === 'approved' && 'Ready to promote'}
+          {version.status === 'production' && 'Live'}
+          {version.status === 'trained' && 'No candidate yet'}
+          {version.status === 'declined' && 'Ended'}
+          {version.status === 'retired' && 'Retired'}
+        </p>
+        <GovernanceActions version={version} />
+      </div>
+
+      {version.status === 'production' && <LiveModelGuide model={model} batch={batch} />}
+
+      {/* Tabbed detail — collapses Predictions and Watchpoints into one scroll position */}
+      {(hasPredictions || hasWatchpoints) && (
+        <section className="rounded-md border border-border bg-card overflow-hidden">
+          <div className="border-b border-border flex items-center gap-1 px-2 pt-1.5">
+            {hasPredictions && (
+              <button
+                type="button"
+                onClick={() => setDetailTab('predictions')}
+                className={cn(
+                  'px-3 py-1.5 text-xs font-medium border-b-2 transition-colors',
+                  detailTab === 'predictions'
+                    ? 'border-primary text-foreground'
+                    : 'border-transparent text-muted-foreground hover:text-foreground',
+                )}
+              >
+                Predictions
+                <span className="ml-1.5 text-[10px] text-muted-foreground num">
+                  {Math.min(batch!.top.length, 10)}/{batch!.scored}
+                </span>
+              </button>
+            )}
+            {hasWatchpoints && (
+              <button
+                type="button"
+                onClick={() => setDetailTab('watchpoints')}
+                className={cn(
+                  'px-3 py-1.5 text-xs font-medium border-b-2 transition-colors',
+                  detailTab === 'watchpoints'
+                    ? 'border-primary text-foreground'
+                    : 'border-transparent text-muted-foreground hover:text-foreground',
+                )}
+              >
+                Watchpoints
+                <span className="ml-1.5 text-[10px] text-muted-foreground num">
+                  {monitoring!.reasons.length}
+                </span>
+              </button>
+            )}
+            {batch && (
+              <span className="ml-auto mr-2 text-[10px] text-muted-foreground">
+                {batch.scoredAt ? new Date(batch.scoredAt).toLocaleDateString() : ''}
+              </span>
+            )}
+          </div>
+
+          {detailTab === 'predictions' && hasPredictions && (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Student</TableHead>
+                  <TableHead className="w-32">Probability</TableHead>
+                  <TableHead>Because</TableHead>
+                  <TableHead className="w-20"></TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {batch!.top.slice(0, 10).map((p) => (
+                  <TableRow key={p.studentId}>
+                    <TableCell>
+                      <p className="text-sm font-medium">{p.studentName}</p>
+                      <p className="text-xs text-muted-foreground num">{p.studentRef}</p>
+                    </TableCell>
+                    <TableCell>
+                      <ProbabilityMeterSm value={p.probability} />
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {p.factors.filter((f) => f.deltaPp > 0).slice(0, 2)
+                        .map((f) => f.label.toLowerCase()).join(' · ')
+                        || 'no single factor dominates'}
+                    </TableCell>
+                    <TableCell>
+                      <Button size="sm" variant="ghost" asChild>
+                        <Link href={p.link}>
+                          Open <ChevronRight className="h-3 w-3 ml-1" />
+                        </Link>
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+
+          {detailTab === 'watchpoints' && hasWatchpoints && (
+            <div className={cn('p-4 border-t border-border', HEALTH_TONE[monitoring!.health])}>
+              <ul className="text-sm space-y-1">
+                {monitoring!.reasons.map((r, i) => (
+                  <li key={i} className="flex items-start gap-2">
+                    <span aria-hidden>·</span>
+                    <span>{r}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </section>
+      )}
+    </div>
+  )
+}
+
+function ProbabilityMeterSm({ value }: { value: number }) {
+  const pct = Math.round(value * 100)
+  const tone =
+    pct >= 80 ? 'bg-destructive/80'
+    : pct >= 60 ? 'bg-[hsl(var(--warning))]/80'
+    : 'bg-primary/60'
+  return (
+    <div className="flex items-center gap-2">
+      <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+        <div className={cn('h-full rounded-full', tone)} style={{ width: `${pct}%` }} />
+      </div>
+      <span className="text-xs num text-muted-foreground w-8 text-right">{pct}%</span>
+    </div>
   )
 }

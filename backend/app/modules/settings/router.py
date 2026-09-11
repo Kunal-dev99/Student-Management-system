@@ -65,12 +65,43 @@ async def reference_kinds(
     return SettingsService(session).lov_kinds()
 
 
-@reference_router.get("/value-sets", summary="Platform-fixed value sets (read-only)")
+@reference_router.get("/value-sets", summary="Platform value sets with per-institution overrides merged in")
 async def value_sets(
     session: AsyncSession = Depends(get_read_session),
     _=Depends(require_permission("admin.configure")),
 ) -> list[dict]:
-    return SettingsService(session).value_sets()
+    return await SettingsService(session).value_sets()
+
+
+class ValueSetWrite(BaseModel):
+    label: str | None = None
+    description: str | None = None
+    hidden: bool = False
+
+
+@reference_router.put("/value-sets/{enum_name}/{value_code}",
+                      summary="Override an enum value's label/description/hidden flag")
+async def value_set_upsert(
+    enum_name: str,
+    value_code: str,
+    body: ValueSetWrite,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_permission("admin.configure")),
+) -> dict:
+    return await SettingsService(session).value_set_upsert(
+        enum_name, value_code, body.model_dump(), principal.user_id
+    )
+
+
+@reference_router.delete("/value-sets/{enum_name}/{value_code}",
+                         summary="Reset an enum value back to the shipped default")
+async def value_set_reset(
+    enum_name: str,
+    value_code: str,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("admin.configure")),
+) -> dict:
+    return await SettingsService(session).value_set_reset(enum_name, value_code)
 
 
 @reference_router.get("/{kind}", summary="List one reference list, with usage counts")

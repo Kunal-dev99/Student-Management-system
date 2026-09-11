@@ -24,7 +24,31 @@ async def get_current_principal(
     if creds is None or not creds.credentials:
         raise AuthError("Authentication required")
     service = IdentityService(IdentityRepository(session))
-    return await service.principal_from_access_token(creds.credentials)
+    principal = await service.principal_from_access_token(creds.credentials)
+    # MT-1 — set the Postgres session-local tenant context if the principal carries one.
+    # No-op today (RLS policies land in Phase 2), but the plumbing is now here so the
+    # switch is a one-line change per table when we're ready.
+    await _set_tenant_context(session, principal)
+    return principal
+
+
+async def _set_tenant_context(session: AsyncSession, principal: Principal) -> None:
+    """Set `app.current_tenant` on the Postgres session so RLS can read it.
+
+    Silent no-op for principals without a tenant (Phase 1 skeleton) and on non-Postgres
+    dialects (SQLite tests) — SET LOCAL is a Postgres-only construct.
+    """
+    if principal.tenant_id is None:
+        return
+    if session.bind is None or session.bind.dialect.name != "postgresql":
+        return
+    from sqlalchemy import text as _text
+    # SET LOCAL scopes the setting to the current transaction — perfect for a per-request
+    # tenant. `set_config(..., true)` is the parameterised form (SET LOCAL doesn't bind).
+    await session.execute(
+        _text("SELECT set_config('app.current_tenant', :tid, true)")
+        .bindparams(tid=str(principal.tenant_id))
+    )
 
 
 def require_permission(code: str):

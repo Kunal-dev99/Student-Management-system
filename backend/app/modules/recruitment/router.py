@@ -24,6 +24,19 @@ from app.modules.recruitment.schemas import (
 )
 from app.modules.recruitment.service import RecruitmentService
 
+
+async def _person_names(session: AsyncSession, person_ids) -> dict[str, str]:
+    """Fetch given/family names for a batch of person ids so list rows can be enriched."""
+    from sqlalchemy import select
+    from app.modules.person.models import Person
+    ids = list({p for p in person_ids if p})
+    if not ids:
+        return {}
+    rows = (await session.execute(
+        select(Person.id, Person.given_name, Person.family_name).where(Person.id.in_(ids))
+    )).all()
+    return {str(pid): f"{gn} {fn}" for pid, gn, fn in rows}
+
 opp_router = APIRouter(prefix="/opportunities", tags=["recruitment"])
 app_router = APIRouter(prefix="/applications", tags=["recruitment"])
 pipeline_router = APIRouter(prefix="/recruitment", tags=["recruitment"])
@@ -95,7 +108,12 @@ async def list_applications(
     _=Depends(require_permission("recruitment.read")),
 ) -> dict:
     rows, total = await _svc(session).list_applications(limit=page.limit, offset=page.offset, stage=stage)
-    data = [ApplicationOut.model_validate(a).model_dump(by_alias=True) for a in rows]
+    names = await _person_names(session, [r.person_id for r in rows])
+    data = []
+    for r in rows:
+        d = ApplicationOut.model_validate(r).model_dump(by_alias=True)
+        d["personName"] = names.get(str(r.person_id))
+        data.append(d)
     return list_envelope(data, limit=page.limit, total=total)
 
 
@@ -108,13 +126,17 @@ async def create_application(
     return ApplicationOut.model_validate(await _svc(session).create_application(body))
 
 
-@app_router.get("/{aid}", response_model=ApplicationOut, summary="Get application")
+@app_router.get("/{aid}", summary="Get application")
 async def get_application(
     aid: uuid.UUID,
     session: AsyncSession = Depends(get_session),
     _=Depends(require_permission("recruitment.read")),
-) -> ApplicationOut:
-    return ApplicationOut.model_validate(await _svc(session).get_application(aid))
+) -> dict:
+    row = await _svc(session).get_application(aid)
+    names = await _person_names(session, [row.person_id])
+    out = ApplicationOut.model_validate(row).model_dump(by_alias=True)
+    out["personName"] = names.get(str(row.person_id))
+    return out
 
 
 @app_router.post("/{aid}/advance", response_model=ApplicationOut, summary="Advance stage")

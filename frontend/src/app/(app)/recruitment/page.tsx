@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { AlertTriangle, GitBranch, Megaphone, Plus } from 'lucide-react'
+import { AlertTriangle, Check, GitBranch, Megaphone, Pencil, Plus, X } from 'lucide-react'
 import { PageHeader } from '@/components/common/PageHeader'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -20,11 +20,14 @@ import {
 import { useToast } from '@/components/ui/use-toast'
 import { Can, useCan } from '@/shared/auth/Can'
 import {
-  useApplications, useCreateOpportunity, useOpportunities, usePipeline,
+  useApplications, useCreateApplication, useCreateOpportunity, useCreatePersonQuick,
+  useOpportunities, usePipeline, useUpdateOpportunity,
   useTransitionOpportunity, type OpportunityStatus,
 } from '@/features/recruitment/api'
 import { OpportunityPill, StagePill } from '@/features/recruitment/StatusPills'
 import { useAwards, useDemands, usePositionLineage } from '@/features/research/api'
+import { ApiError } from '@/shared/api/client'
+import { usePersons } from '@/features/persons/api'
 
 // Allowed opportunity transitions (mirrors the backend FSM, arch §8.4).
 // W1.3 — 'paused' is bidirectional with open, and also reachable from recruiting.
@@ -244,6 +247,59 @@ function LineageDialog({ opportunityId, title }: { opportunityId: string; title:
   )
 }
 
+/** Inline "positions_available" editor on the Places cell. Click the pencil,
+ *  type the new cap, save. Read-only for anyone without recruitment.write. */
+function CapacityCell({ id, filled, available }: { id: string; filled: number; available: number }) {
+  const { toast } = useToast()
+  const canWrite = useCan('recruitment.write')
+  const update = useUpdateOpportunity()
+  const [editing, setEditing] = useState(false)
+  const [val, setVal] = useState(String(available))
+  const over = filled >= available
+
+  const save = async () => {
+    const n = parseInt(val, 10)
+    if (!Number.isFinite(n) || n < 1) {
+      toast({ title: 'Enter a positive number', variant: 'destructive' }); return
+    }
+    try {
+      await update.mutateAsync({ id, body: { positionsAvailable: n } })
+      toast({ title: `Capacity updated to ${n}` })
+      setEditing(false)
+    } catch (e) {
+      toast({ title: 'Update failed', description: (e as Error).message, variant: 'destructive' })
+    }
+  }
+
+  if (editing) {
+    return (
+      <div className="flex items-center gap-1">
+        <span className="num text-muted-foreground">{filled} /</span>
+        <Input value={val} onChange={(e) => setVal(e.target.value)} className="h-7 w-16 num" />
+        <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={save} disabled={update.isPending}>
+          <Check className="h-3.5 w-3.5 text-success" />
+        </Button>
+        <Button size="sm" variant="ghost" className="h-7 w-7 p-0"
+                onClick={() => { setEditing(false); setVal(String(available)) }}>
+          <X className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+    )
+  }
+  return (
+    <div className="flex items-center gap-2">
+      <span className="num">{filled} / {available}</span>
+      {over && <Badge variant="warning">full</Badge>}
+      {canWrite && (
+        <Button size="sm" variant="ghost" className="h-6 w-6 p-0" title="Edit capacity"
+                onClick={() => { setVal(String(available)); setEditing(true) }}>
+          <Pencil className="h-3 w-3 text-muted-foreground" />
+        </Button>
+      )}
+    </div>
+  )
+}
+
 function OpportunitiesTab() {
   const { data, isLoading } = useOpportunities()
   // W1.8 — opportunity_type filter chip
@@ -299,10 +355,11 @@ function OpportunitiesTab() {
                   {o.stipendAmount ? `${o.currency ?? ''} ${Number(o.stipendAmount).toLocaleString()}` : '—'}
                 </TableCell>
                 <TableCell>
-                  <div className="flex items-center gap-2">
-                    <span className="num">{o.positionsFilled ?? 0} / {o.positionsAvailable}</span>
-                    {(o.positionsFilled ?? 0) >= o.positionsAvailable && <Badge variant="warning">full</Badge>}
-                  </div>
+                  <CapacityCell
+                    id={o.id}
+                    filled={o.positionsFilled ?? 0}
+                    available={o.positionsAvailable}
+                  />
                 </TableCell>
                 <TableCell><OpportunityStatusControl id={o.id} status={o.status} /></TableCell>
                 <TableCell className="text-right">
@@ -319,6 +376,206 @@ function OpportunitiesTab() {
         </Table>
       </div>
     </div>
+  )
+}
+
+/** New Application dialog — Route A (opportunity-led) or Route B (student-led).
+ *  Handles the person side too: pick an existing Person, or create a new one
+ *  inline. Backend requires an existing person_id, so a new person is created
+ *  first and the application POST follows. */
+function NewApplicationDialog() {
+  const { toast } = useToast()
+  const [open, setOpen] = useState(false)
+  const [route, setRoute] = useState<'opportunity_led' | 'student_led'>('opportunity_led')
+  const [personMode, setPersonMode] = useState<'existing' | 'new'>('new')
+  const [personId, setPersonId] = useState('')
+  const [personSearch, setPersonSearch] = useState('')
+  const [givenName, setGivenName] = useState('')
+  const [familyName, setFamilyName] = useState('')
+  const [email, setEmail] = useState('')
+  const [opportunityId, setOpportunityId] = useState('')
+  const [proposalRef, setProposalRef] = useState('')
+
+  const opps = useOpportunities()
+  const persons = usePersons(personSearch, { enabled: personMode === 'existing' })
+  const createPerson = useCreatePersonQuick()
+  const createApp = useCreateApplication()
+
+  const reset = () => {
+    setRoute('opportunity_led')
+    setPersonMode('new')
+    setPersonId(''); setPersonSearch('')
+    setGivenName(''); setFamilyName(''); setEmail('')
+    setOpportunityId(''); setProposalRef('')
+  }
+
+  const ACCEPTS_APPLICATIONS = new Set(['open', 'recruiting', 'approved'])
+  const allOpps = opps.data?.data ?? []
+  // Show every opportunity so a newly-created one is visible, but only the ones whose
+  // status accepts applications are selectable. The rest render as disabled rows with
+  // their current status so the user understands what to do next (e.g. approve a draft).
+  const sortedOpps = [...allOpps].sort((a, b) => {
+    const ai = ACCEPTS_APPLICATIONS.has(a.status) ? 0 : 1
+    const bi = ACCEPTS_APPLICATIONS.has(b.status) ? 0 : 1
+    return ai - bi || a.title.localeCompare(b.title)
+  })
+  const hiddenBecauseStatus = allOpps.filter((o) => !ACCEPTS_APPLICATIONS.has(o.status))
+
+  const personValid = personMode === 'existing'
+    ? !!personId
+    : !!givenName.trim() && !!familyName.trim()
+  const routeValid = route === 'opportunity_led' ? !!opportunityId : true
+  const canSubmit = personValid && routeValid && !createPerson.isPending && !createApp.isPending
+
+  const submit = async () => {
+    try {
+      let pid = personId
+      if (personMode === 'new') {
+        const p = await createPerson.mutateAsync({
+          givenName: givenName.trim(),
+          familyName: familyName.trim(),
+          email: email.trim() || null,
+        })
+        pid = p.id
+      }
+      const app = await createApp.mutateAsync({
+        personId: pid,
+        route,
+        researchOpportunityId: route === 'opportunity_led' ? opportunityId : null,
+        proposalDocumentRef: route === 'student_led' ? (proposalRef.trim() || null) : null,
+      })
+      toast({ title: 'Application created', description: `${route.replace('_', ' ')} · id ${app.id.slice(0, 8)}…` })
+      setOpen(false)
+      reset()
+    } catch (e) {
+      toast({ title: 'Could not create application', description: (e as ApiError).message, variant: 'destructive' })
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) reset() }}>
+      <DialogTrigger asChild>
+        <Button size="sm"><Plus className="h-4 w-4 mr-1" /> New application</Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-lg">
+        <DialogHeader><DialogTitle>New application</DialogTitle></DialogHeader>
+        <div className="space-y-4">
+          {/* Route selector */}
+          <div className="space-y-1.5">
+            <Label>Route</Label>
+            <Select value={route} onValueChange={(v) => setRoute(v as typeof route)}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="opportunity_led">Route A · opportunity-led (advertised position)</SelectItem>
+                <SelectItem value="student_led">Route B · student-led (unsolicited proposal)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Person: existing or new */}
+          <div className="space-y-1.5">
+            <Label>Applicant</Label>
+            <div className="flex gap-1.5 mb-1">
+              <button type="button"
+                onClick={() => setPersonMode('new')}
+                className={`px-2.5 py-1 rounded-full text-xs border transition ${
+                  personMode === 'new' ? 'bg-primary text-primary-foreground border-primary'
+                  : 'text-muted-foreground border-border hover:text-foreground'}`}>
+                New person
+              </button>
+              <button type="button"
+                onClick={() => setPersonMode('existing')}
+                className={`px-2.5 py-1 rounded-full text-xs border transition ${
+                  personMode === 'existing' ? 'bg-primary text-primary-foreground border-primary'
+                  : 'text-muted-foreground border-border hover:text-foreground'}`}>
+                Existing person
+              </button>
+            </div>
+            {personMode === 'new' ? (
+              <div className="grid grid-cols-2 gap-2">
+                <Input placeholder="Given name *" value={givenName} onChange={(e) => setGivenName(e.target.value)} />
+                <Input placeholder="Family name *" value={familyName} onChange={(e) => setFamilyName(e.target.value)} />
+                <Input className="col-span-2" placeholder="Email (optional)" type="email"
+                       value={email} onChange={(e) => setEmail(e.target.value)} />
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                <Input placeholder="Search by name…" value={personSearch}
+                       onChange={(e) => setPersonSearch(e.target.value)} />
+                <Select value={personId} onValueChange={setPersonId}>
+                  <SelectTrigger><SelectValue placeholder="Pick a person" /></SelectTrigger>
+                  <SelectContent>
+                    {persons.data?.data?.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.givenName} {p.familyName}
+                        {p.email ? ` (${p.email})` : ''}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </div>
+
+          {/* Route-specific fields */}
+          {route === 'opportunity_led' ? (
+            <div className="space-y-1.5">
+              <Label>Research opportunity *</Label>
+              <Select value={opportunityId} onValueChange={setOpportunityId}>
+                <SelectTrigger><SelectValue placeholder="Pick an opportunity" /></SelectTrigger>
+                <SelectContent>
+                  {sortedOpps.length === 0 ? (
+                    <SelectItem value="_none" disabled>No opportunities yet</SelectItem>
+                  ) : sortedOpps.map((o) => {
+                    const takesApps = ACCEPTS_APPLICATIONS.has(o.status)
+                    return (
+                      <SelectItem key={o.id} value={o.id} disabled={!takesApps}>
+                        <span className="flex items-center gap-2">
+                          <span>{o.title}</span>
+                          <span className={`text-[10px] uppercase tracking-wider rounded-sm px-1.5 py-0.5 border ${
+                            takesApps
+                              ? 'border-[hsl(var(--success)/0.3)] bg-[hsl(var(--success)/0.1)] text-[hsl(var(--success))]'
+                              : 'border-border bg-surface-2 text-muted-foreground'
+                          }`}>{o.status}</span>
+                        </span>
+                      </SelectItem>
+                    )
+                  })}
+                </SelectContent>
+              </Select>
+              {hiddenBecauseStatus.length > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  {hiddenBecauseStatus.length} opportunit{hiddenBecauseStatus.length === 1 ? 'y is' : 'ies are'} listed
+                  but not selectable — only <span className="font-mono">approved</span>, <span className="font-mono">open</span>{' '}
+                  or <span className="font-mono">recruiting</span> statuses accept applications.
+                  Approve a draft from the Opportunities tab first.
+                </p>
+              )}
+              {sortedOpps.length === 0 && (
+                <p className="text-xs text-muted-foreground">
+                  No opportunities yet. Create one on the Opportunities tab first.
+                </p>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              <Label>Proposal document reference</Label>
+              <Input placeholder="e.g. proposal-2026-aisha-rahman.pdf" value={proposalRef}
+                     onChange={(e) => setProposalRef(e.target.value)} />
+              <p className="text-xs text-muted-foreground">
+                Optional but recommended — the reference to the applicant&apos;s uploaded proposal.
+              </p>
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
+          <Button onClick={submit} disabled={!canSubmit}>
+            {(createPerson.isPending || createApp.isPending) ? 'Creating…' : 'Create application'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -345,6 +602,10 @@ function ApplicationsTab() {
         {pipeline.data && pipeline.data.total === 0 && (
           <p className="text-helper">No applications in the pipeline yet.</p>
         )}
+      </div>
+
+      <div className="flex items-center justify-end">
+        <Can perm="recruitment.write"><NewApplicationDialog /></Can>
       </div>
 
       <div className="flex flex-wrap gap-1.5 items-center">
@@ -383,7 +644,7 @@ function ApplicationsTab() {
               <TableRow key={a.id}>
                 <TableCell className="font-medium">
                   <Link href={`/recruitment/applications/${a.id}`} className="hover:text-primary">
-                    {a.id.slice(0, 8)}…
+                    {a.personName ?? `${a.id.slice(0, 8)}…`}
                   </Link>
                 </TableCell>
                 <TableCell>
@@ -410,7 +671,7 @@ function ApplicationsTab() {
 export default function RecruitmentPage() {
   return (
     <>
-      <PageHeader title="Recruitment" description="Opportunities and the application pipeline." />
+      <PageHeader title="Recruitment" />
       <div className="px-6 pb-6">
         <Tabs defaultValue="opportunities">
           <TabsList>

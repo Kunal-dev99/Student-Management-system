@@ -26,7 +26,7 @@ export default function AssignmentQueuePage() {
   return (
     <>
       <PageHeader title="Supervisor assignment queue"
-        description="W2 — pending and decided supervisor assignment requests across the institution." />
+        description="Pending and decided supervisor assignment requests." />
       <div className="px-6 pb-6 space-y-4">
         <PageSection icon={ClipboardList} title="Requests" accent="primary">
           <div className="flex flex-wrap items-center gap-1.5 mb-3">
@@ -57,16 +57,24 @@ export default function AssignmentQueuePage() {
               <TableBody>
                 {q.data.requests.map((r) => (
                   <TableRow key={r.id}>
-                    <TableCell className="font-mono text-xs">
-                      <Link href={`/students/${r.studentId}`} className="hover:text-primary">
-                        {r.studentId.slice(0,8)}…
+                    <TableCell>
+                      <Link href={`/students/${r.studentId}`} className="text-sm font-medium hover:text-primary">
+                        {r.studentName ?? `${r.studentId.slice(0, 8)}…`}
+                      </Link>
+                      {r.studentRef && (
+                        <div className="font-mono text-xs text-muted-foreground">{r.studentRef}</div>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Link href={`/supervision/${r.proposedSupervisorPersonId}`}
+                            className="text-sm font-medium hover:text-primary">
+                        {r.proposedSupervisorName ?? `${r.proposedSupervisorPersonId.slice(0, 8)}…`}
                       </Link>
                     </TableCell>
-                    <TableCell className="font-mono text-xs">{r.proposedSupervisorPersonId.slice(0,8)}…</TableCell>
-                    <TableCell><Badge variant="secondary">{r.proposedRole}</Badge></TableCell>
+                    <TableCell><Badge variant="secondary">{r.proposedRole.replace(/_/g,' ')}</Badge></TableCell>
                     <TableCell><Badge>{r.state.replace(/_/g,' ')}</Badge></TableCell>
                     <TableCell className="num">{r.matchScore ?? '—'}</TableCell>
-                    <TableCell className="text-helper num">{new Date(r.createdAt).toLocaleDateString()}</TableCell>
+                    <TableCell className="text-helper num">{r.createdAt?.slice(0, 10) ?? '—'}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>

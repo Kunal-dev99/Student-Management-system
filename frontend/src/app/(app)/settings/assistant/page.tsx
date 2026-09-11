@@ -87,7 +87,7 @@ export default function AssistantVocabReviewPage() {
     <>
       <PageHeader
         title="Assistant vocab review"
-        description="CB-C — every query Ask PGR flagged as clarify or not_understood. Grow the vocabulary from real user phrasings, or mark reviewed if there's no fit."
+        description="Queries the assistant didn't recognise. Assign each to an intent, or mark reviewed."
       />
       <div className="px-6 pb-6 space-y-4">
         <div className="flex items-center gap-2">

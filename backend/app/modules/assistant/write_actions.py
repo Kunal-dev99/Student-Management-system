@@ -173,3 +173,293 @@ async def _execute_submit_signoff(session, principal, args) -> dict:
 
 
 registry.register("submit_signoff", stage=_stage_submit_signoff, execute=_execute_submit_signoff)
+
+
+# ---------------- complete_task ----------------
+
+async def _stage_complete_task(session, principal, decision) -> StagePlan | None:
+    """Complete the caller's OLDEST open task.
+
+    The assistant is a shortcut, so it targets the next task in the queue rather than
+    making the user pick — if there are multiple, the user can ask again after the first.
+    """
+    from app.modules.workflow.repository import WorkflowRepository
+    tasks = await WorkflowRepository(session).tasks_for(
+        principal.user_id, principal.roles, only_open=True,
+    )
+    if not tasks:
+        return None
+    t = tasks[0]
+    return StagePlan(
+        action="complete_task",
+        target={"kind": "task", "id": str(t.id),
+                "label": f'Complete task "{t.title}"'},
+        args={"taskId": str(t.id)},
+        diff={"before": {"status": t.status.value if hasattr(t.status, "value") else str(t.status)},
+              "after": {"status": "done"},
+              "title": t.title},
+    )
+
+
+async def _execute_complete_task(session, principal, args) -> dict:
+    from app.modules.workflow.repository import WorkflowRepository
+    from app.modules.workflow.service import WorkflowService
+    task = await WorkflowService(WorkflowRepository(session)).complete_task(
+        uuid.UUID(args["taskId"]), principal,
+    )
+    return {"taskId": str(task.id), "title": task.title,
+            "status": task.status.value if hasattr(task.status, "value") else str(task.status)}
+
+
+registry.register("complete_task", stage=_stage_complete_task, execute=_execute_complete_task)
+
+
+# ---------------- mark_notifications_read ----------------
+
+async def _stage_mark_notifications_read(session, principal, decision) -> StagePlan | None:
+    """Mark every unread notification in the caller's inbox as read."""
+    from app.modules.workflow.constants import NotificationStatus
+    from app.modules.workflow.repository import WorkflowRepository
+    notifs = await WorkflowRepository(session).notifications_for(principal.user_id)
+    unread = [n for n in notifs if n.status != NotificationStatus.read]
+    if not unread:
+        return None
+    return StagePlan(
+        action="mark_notifications_read",
+        target={"kind": "notifications", "id": str(principal.user_id),
+                "label": f"Mark {len(unread)} notification(s) as read"},
+        args={"count": len(unread)},
+        diff={"before": {"unread": len(unread)}, "after": {"unread": 0}},
+    )
+
+
+async def _execute_mark_notifications_read(session, principal, args) -> dict:
+    from app.modules.workflow.constants import NotificationStatus
+    from app.modules.workflow.repository import WorkflowRepository
+    notifs = await WorkflowRepository(session).notifications_for(principal.user_id)
+    marked = 0
+    for n in notifs:
+        if n.status != NotificationStatus.read:
+            n.status = NotificationStatus.read
+            marked += 1
+    await session.commit()
+    return {"marked": marked}
+
+
+registry.register(
+    "mark_notifications_read",
+    stage=_stage_mark_notifications_read, execute=_execute_mark_notifications_read,
+)
+
+
+# ---------------- transition_opportunity ----------------
+
+async def _stage_transition_opportunity(session, principal, decision) -> StagePlan | None:
+    """Advance an opportunity to its next reasonable status.
+
+    Draft → Approved → Open. If the resolved token set names a status word ("approve",
+    "open", "publish"), that word decides; otherwise we pick the natural next state.
+    """
+    from app.modules.recruitment.constants import OPPORTUNITY_TRANSITIONS, OpportunityStatus
+    from app.modules.recruitment.models import ResearchOpportunity
+
+    # Find opportunity by name mention in tokens — fallback to first draft.
+    opp = None
+    tokens = " ".join(decision.tokens)
+    all_opps = (await session.execute(
+        select(ResearchOpportunity).order_by(ResearchOpportunity.created_at.desc()).limit(50)
+    )).scalars().all()
+    for o in all_opps:
+        if o.title and o.title.lower() in tokens.lower():
+            opp = o
+            break
+    if opp is None:
+        # Fall back to the newest draft in scope.
+        opp = next((o for o in all_opps if o.status == OpportunityStatus.draft), None)
+    if opp is None:
+        return None
+
+    # Choose target state — prefer next allowed forward step, unless a status word is present.
+    allowed = OPPORTUNITY_TRANSITIONS.get(opp.status, set())
+    preferred_by_word = {
+        "approve": OpportunityStatus.approved,
+        "open": OpportunityStatus.open,
+        "publish": OpportunityStatus.open,
+        "recruit": OpportunityStatus.recruiting,
+        "recruiting": OpportunityStatus.recruiting,
+        "pause": OpportunityStatus.paused,
+        "close": OpportunityStatus.closed,
+        "fill": OpportunityStatus.filled,
+        "filled": OpportunityStatus.filled,
+    }
+    target = None
+    for word, state in preferred_by_word.items():
+        if word in tokens.lower() and state in allowed:
+            target = state
+            break
+    if target is None:
+        forward_order = [OpportunityStatus.approved, OpportunityStatus.open,
+                         OpportunityStatus.recruiting, OpportunityStatus.filled,
+                         OpportunityStatus.closed]
+        target = next((s for s in forward_order if s in allowed), None)
+    if target is None:
+        return None
+
+    return StagePlan(
+        action="transition_opportunity",
+        target={"kind": "opportunity", "id": str(opp.id),
+                "label": f'Move "{opp.title}" to {target.value}'},
+        args={"opportunityId": str(opp.id), "toStatus": target.value},
+        diff={"before": {"status": opp.status.value}, "after": {"status": target.value},
+              "title": opp.title},
+    )
+
+
+async def _execute_transition_opportunity(session, principal, args) -> dict:
+    from app.modules.recruitment.constants import OpportunityStatus
+    from app.modules.recruitment.repository import RecruitmentRepository
+    from app.modules.recruitment.service import RecruitmentService
+    svc = RecruitmentService(RecruitmentRepository(session))
+    opp = await svc.transition_opportunity(
+        uuid.UUID(args["opportunityId"]), OpportunityStatus(args["toStatus"]),
+    )
+    return {"opportunityId": str(opp.id), "title": opp.title,
+            "status": opp.status.value if hasattr(opp.status, "value") else str(opp.status)}
+
+
+registry.register(
+    "transition_opportunity",
+    stage=_stage_transition_opportunity, execute=_execute_transition_opportunity,
+)
+
+
+# ---------------- add_supervision_meeting_note ----------------
+
+def _extract_note_text(query: str, student_name: str | None = None) -> str:
+    """Trim command words + the student's name off so the note reads like the user meant.
+
+    'add a note for alice: discussed timeline' → 'discussed timeline'
+    'log a supervision meeting with Marcus Bell'   → '' (no explicit note)
+    'log a note for Marcus Bell about the timeline' → 'the timeline'
+    """
+    import re
+    q = query.strip()
+    # If there's a colon, everything after it is the note.
+    if ":" in q:
+        return q.split(":", 1)[1].strip() or ""
+    q = re.sub(
+        r"^(add|log|record|note|write)\s+(a\s+)?(supervision\s+)?"
+        r"(meeting\s+)?(note|meeting)?\s*(for|with|about|on)?\s*",
+        "", q, flags=re.IGNORECASE,
+    )
+    # Strip the student's name from the tail — if what's left IS just the name
+    # (or empty), there's no genuine note to record.
+    if student_name:
+        pattern = re.escape(student_name)
+        q = re.sub(pattern, "", q, flags=re.IGNORECASE).strip(" ,.-")
+    return q.strip()
+
+
+async def _stage_add_supervision_meeting(session, principal, decision) -> StagePlan | None:
+    from datetime import date as _date
+
+    if not decision.entities:
+        return None
+    student = decision.entities[0]
+    note = _extract_note_text(decision.query, student.name)
+    diff = {"before": {"meeting": "—"},
+            "after": {"meeting": _date.today().isoformat()},
+            "student": student.name}
+    if note:
+        diff["notes"] = note[:120] + ("…" if len(note) > 120 else "")
+    return StagePlan(
+        action="add_supervision_meeting",
+        target={"kind": "student", "id": student.id,
+                "label": f"Log supervision meeting with {student.name}"},
+        args={
+            "studentId": student.id,
+            "metOn": _date.today().isoformat(),
+            "notes": note or None,
+        },
+        diff=diff,
+    )
+
+
+async def _execute_add_supervision_meeting(session, principal, args) -> dict:
+    from datetime import date as _date
+    from app.modules.supervision.constants import MeetingFormat
+    from app.modules.supervision.repository import SupervisionRepository
+    from app.modules.supervision.service import SupervisionService
+    svc = SupervisionService(SupervisionRepository(session))
+    return await svc.record_meeting(
+        uuid.UUID(args["studentId"]),
+        supervisor_person_id=principal.person_id,
+        met_on=_date.fromisoformat(args["metOn"]),
+        format=MeetingFormat.online,
+        duration_minutes=None,
+        notes=args.get("notes"),
+        actions=None,
+        next_meeting_on=None,
+        recorded_by_user_id=principal.user_id,
+    )
+
+
+registry.register(
+    "add_supervision_meeting",
+    stage=_stage_add_supervision_meeting, execute=_execute_add_supervision_meeting,
+)
+
+
+# ---------------- assign_supervisor ----------------
+
+async def _stage_assign_supervisor(session, principal, decision) -> StagePlan | None:
+    """Assign the caller as primary supervisor to the resolved student.
+
+    Simple, safe default: the caller (must have a person record) becomes primary. A future
+    version can also parse "assign Elena Ford to Alice" by matching a second person name.
+    """
+    if not decision.entities:
+        return None
+    if principal.person_id is None:
+        return None
+    student = decision.entities[0]
+    # Decide role by verb in query.
+    tokens = " ".join(decision.tokens).lower()
+    role_str = "co_supervisor" if any(w in tokens for w in ("co", "co-supervisor", "second")) \
+        else "primary"
+    return StagePlan(
+        action="assign_supervisor",
+        target={"kind": "student", "id": student.id,
+                "label": f"Assign you as {role_str.replace('_', ' ')} of {student.name}"},
+        args={"studentId": student.id,
+              "supervisorPersonId": str(principal.person_id),
+              "role": role_str},
+        diff={"before": {"role": "—"},
+              "after": {"role": role_str},
+              "student": student.name},
+    )
+
+
+async def _execute_assign_supervisor(session, principal, args) -> dict:
+    from app.modules.supervision.constants import SupervisorRole
+    from app.modules.supervision.repository import SupervisionRepository
+    from app.modules.supervision.service import SupervisionService
+    svc = SupervisionService(SupervisionRepository(session))
+    rel = await svc.assign(
+        student_id=uuid.UUID(args["studentId"]),
+        supervisor_person_id=uuid.UUID(args["supervisorPersonId"]),
+        role=SupervisorRole(args["role"]),
+    )
+    return {
+        "relationshipId": str(rel.id),
+        "studentId": str(rel.student_id),
+        "supervisorPersonId": str(rel.supervisor_person_id),
+        "role": rel.role.value if hasattr(rel.role, "value") else str(rel.role),
+        "status": rel.status.value if hasattr(rel.status, "value") else str(rel.status),
+    }
+
+
+registry.register(
+    "assign_supervisor",
+    stage=_stage_assign_supervisor, execute=_execute_assign_supervisor,
+)

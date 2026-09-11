@@ -30,6 +30,20 @@ class FundingSource(UUIDMixin, TimestampMixin, Base):
     funder_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
 
+class CostCentre(UUIDMixin, TimestampMixin, Base):
+    """A finance ledger bucket — institution-configurable via Settings → List of values."""
+    __tablename__ = "cost_centre"
+    name: Mapped[str] = mapped_column(String(200))
+    code: Mapped[str] = mapped_column(String(50), unique=True)
+
+
+class ProjectCode(UUIDMixin, TimestampMixin, Base):
+    """An internal project/grant code — institution-configurable via Settings → List of values."""
+    __tablename__ = "project_code"
+    name: Mapped[str] = mapped_column(String(200))
+    code: Mapped[str] = mapped_column(String(50), unique=True)
+
+
 class FundingArrangement(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "funding_arrangement"
 

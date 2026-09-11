@@ -59,12 +59,22 @@ export interface SkippedTest {
   reason: string
 }
 
+export interface CleaningReport {
+  duplicatesRemoved: number
+  imputed: { key: string; label: string; count: number; method: string; value: number }[]
+  removedFeatures: { key: string; label: string; reason: string }[]
+  outliersCapped: { key: string; label: string; count: number; low: number; high: number }[]
+  summary: string
+}
+
 export interface DatasetQuality {
   exclusions: { reason: string; count: number }[]
   completeness: Record<string, number>
   excludedFeatures: ExcludedFeature[]
   activeFeatures: ActiveFeature[]
   predictionPoint: string
+  /** Auto-clean report from the dataset builder (added 2026-09). */
+  cleaning?: CleaningReport
   /** Present only after discovery has run on this dataset. */
   discoverySkipped?: SkippedTest[]
   testsRun?: number
@@ -136,10 +146,20 @@ export interface PermutationImportanceItem {
 export interface CandidateMetrics {
   aucMean: number
   aucStd: number
+  /** 95% bootstrap confidence interval on AUC (300 iterations). */
+  aucCi95Low?: number
+  aucCi95High?: number
   averagePrecision: number
   brierScore: number
+  /** Expected calibration error — 0 = perfectly calibrated probabilities. */
+  expectedCalibrationError?: number
   precisionAt50: number | null
   recallAt50: number | null
+  /** Operating point chosen by maximising out-of-fold F1. */
+  operatingThreshold?: number
+  operatingF1?: number
+  /** Calibration wrapper method ('isotonic' when positives ≥ 60, else 'sigmoid'). */
+  calibrationMethod?: string
   cvFolds: number
   n: number
   positives: number

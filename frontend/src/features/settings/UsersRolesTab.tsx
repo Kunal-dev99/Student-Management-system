@@ -11,7 +11,7 @@
  */
 
 import { useState } from 'react'
-import { KeyRound, Pencil, ShieldCheck, UserPlus, Users } from 'lucide-react'
+import { KeyRound, Pencil, ShieldCheck, Trash2, UserPlus, Users } from 'lucide-react'
 import { PageSection } from '@/components/common/PageSection'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -27,7 +27,7 @@ import { useToast } from '@/components/ui/use-toast'
 import { ApiError } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthContext'
 import {
-  useAdminRoles, useAdminUsers, useInviteUser, useSendPasswordReset, useUpdateUser,
+  useAdminRoles, useAdminUsers, useDeleteUser, useInviteUser, useSendPasswordReset, useUpdateUser,
   type AdminRole, type AdminUser,
 } from '@/features/settings/api'
 
@@ -166,8 +166,12 @@ function UserRow({ user, roles }: { user: AdminUser; roles: AdminRole[] }) {
   const { principal } = useAuth()
   const update = useUpdateUser()
   const sendReset = useSendPasswordReset()
+  const del = useDeleteUser()
   const isSelf = principal?.userId === user.id
   const locked = !!user.lockedUntil && new Date(user.lockedUntil) > new Date()
+  // Only invited-but-never-used accounts are safe to hard-delete — anyone who
+  // has signed in has left an audit trail that must be preserved.
+  const canDelete = !user.hasPassword && !isSelf
 
   const toggleActive = async () => {
     try {
@@ -185,6 +189,21 @@ function UserRow({ user, roles }: { user: AdminUser; roles: AdminRole[] }) {
       toast({ title: 'Password reset sent', description: `An email is on its way to ${user.email}.` })
     } catch (e) {
       toast({ title: 'Reset not sent', description: (e as ApiError).message, variant: 'destructive' })
+    }
+  }
+
+  const remove = async () => {
+    if (!window.confirm(
+      `Delete the invited user ${user.email}?\n\n` +
+      `This is allowed because they have never signed in — no history to preserve. ` +
+      `Once they set a password, deactivate is the only option.`,
+    )) return
+    try {
+      await del.mutateAsync(user.id)
+      toast({ title: `Invited user ${user.email} deleted` })
+    } catch (e) {
+      // 409 message from backend is descriptive — surface verbatim.
+      toast({ title: 'Delete refused', description: (e as ApiError).message, variant: 'destructive' })
     }
   }
 
@@ -234,6 +253,16 @@ function UserRow({ user, roles }: { user: AdminUser; roles: AdminRole[] }) {
           >
             {user.isActive ? 'Deactivate' : 'Activate'}
           </Button>
+          {canDelete && (
+            <Button
+              variant="ghost" size="sm" className="h-7 px-2 text-danger hover:text-danger"
+              title="Delete this invited-but-never-used account (safe cleanup for wrong-email invites)"
+              disabled={del.isPending}
+              onClick={remove}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
+          )}
         </div>
       </TableCell>
     </TableRow>

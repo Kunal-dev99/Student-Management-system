@@ -66,6 +66,24 @@ export const useSupervisorWorkforce = () =>
   })
 
 
+export interface SupervisorPoolMember {
+  id: string
+  givenName: string
+  familyName: string
+  email: string | null
+  hasProfile: boolean
+  currentlySupervising: boolean
+}
+
+/** Supervisor-capable persons for pickers. Dedup'd, name-sorted, excludes
+ *  people who aren't employees/researchers/existing supervisors. */
+export const useSupervisorPool = () =>
+  useQuery({
+    queryKey: ['supervisor', 'pool'],
+    queryFn: () => api.get<{ pool: SupervisorPoolMember[] }>('/supervisors/pool')
+      .then((r) => r.pool),
+  })
+
 export const useSupervisorProfile = (personId: string | null) =>
   useQuery({
     queryKey: ['supervisor', 'profile', personId],
@@ -80,7 +98,13 @@ export function useUpsertSupervisorProfile(personId: string) {
   return useMutation({
     mutationFn: (body: Partial<SupervisorProfile>) =>
       api.put<SupervisorProfile>(`/supervisors/${personId}/profile`, body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['supervisor', 'profile', personId] }),
+    onSuccess: () => {
+      // Profile page itself.
+      qc.invalidateQueries({ queryKey: ['supervisor', 'profile', personId] })
+      // Any list that reads this supervisor's cap/availability.
+      qc.invalidateQueries({ queryKey: ['supervisor', 'workforce'] })
+      qc.invalidateQueries({ queryKey: ['supervisor-requests'] })
+    },
   })
 }
 
@@ -112,7 +136,10 @@ export type AssignmentRequestState =
 export interface AssignmentRequest {
   id: string
   studentId: string
+  studentRef?: string | null
+  studentName?: string | null
   proposedSupervisorPersonId: string
+  proposedSupervisorName?: string | null
   proposedRole: 'primary' | 'co_supervisor'
   state: AssignmentRequestState
   matchScore: number | null

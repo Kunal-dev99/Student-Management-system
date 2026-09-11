@@ -53,11 +53,15 @@ export interface AssistantTraceEntity {
 }
 
 export interface AssistantTrace {
-  normalised: string
-  tokens: string[]
-  entities: AssistantTraceEntity[]
-  timeSlot: { from: string; to: string } | null
-  intents: AssistantTraceIntent[]
+  /** Route-decision traces always fill these; confirm/execute traces don't. */
+  normalised?: string
+  tokens?: string[]
+  entities?: AssistantTraceEntity[]
+  timeSlot?: { from: string; to: string } | null
+  intents?: AssistantTraceIntent[]
+  /** Present on confirm/execute traces only. */
+  executed?: string
+  pendingId?: string
 }
 
 export interface AssistantLink {

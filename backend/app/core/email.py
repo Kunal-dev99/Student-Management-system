@@ -17,7 +17,7 @@ from app.core.config import get_settings
 logger = logging.getLogger("pgr.email")
 
 
-async def send_email(*, to: str, subject: str, body: str) -> None:
+async def send_email(*, to: str, subject: str, body: str, html: str | None = None) -> None:
     settings = get_settings()
     if settings.email_backend == "console":
         logger.info("EMAIL (console backend)\n  To: %s\n  Subject: %s\n  %s", to, subject, body)
@@ -28,6 +28,8 @@ async def send_email(*, to: str, subject: str, body: str) -> None:
     msg["To"] = to
     msg["Subject"] = subject
     msg.set_content(body)
+    if html:
+        msg.add_alternative(html, subtype="html")
 
     import aiosmtplib  # local import so the dev/console path needs no SMTP lib at import time
 

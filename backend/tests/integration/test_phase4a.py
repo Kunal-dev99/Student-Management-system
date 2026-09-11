@@ -141,13 +141,14 @@ async def test_password_reset_cycle(ctx, monkeypatch):
     c, sm, ids = ctx
     captured = {}
 
-    async def fake_send(*, to, subject, body):
+    async def fake_send(*, to, subject, body, html=None):
         captured["body"] = body
 
     monkeypatch.setattr("app.modules.identity.service.send_email", fake_send)
     req = await c.post("/api/v1/auth/password-reset/request", json={"email": "admin@t.com"})
     assert req.status_code == 200
-    token = captured["body"].split("token=")[1].strip()
+    # Body now contains text after the reset link — take only the token itself.
+    token = captured["body"].split("token=")[1].split()[0].rstrip('.')
     conf = await c.post("/api/v1/auth/password-reset/confirm", json={"token": token, "newPassword": "newpass123"})
     assert conf.status_code == 200
     # old password rejected, new one works

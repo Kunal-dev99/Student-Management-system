@@ -32,7 +32,7 @@ export default function DashboardPage() {
 
   return (
     <>
-      <PageHeader title="Executive dashboard" description="PGR lifecycle at a glance." />
+      <PageHeader title="Executive dashboard" />
       <div className="px-6 pb-6 space-y-4">
         <PageSection icon={Activity} title="Platform connectivity" accent="primary">
           <div className="flex flex-wrap items-center gap-3 text-sm">

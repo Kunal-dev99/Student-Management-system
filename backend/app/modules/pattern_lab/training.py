@@ -46,12 +46,17 @@ def sklearn_available() -> bool:
 
 
 def _candidates():
-    """The bounded search space. Small grids on purpose — see module docstring."""
+    """The bounded search space.
+
+    Small grids on purpose — see the module docstring. We include the two libraries the
+    tabular-ML community actually deploys (xgboost, lightgbm) alongside the sklearn
+    baselines; both are loaded only if installed so the pipeline degrades gracefully.
+    """
     from sklearn.dummy import DummyClassifier
     from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
     from sklearn.linear_model import LogisticRegression
 
-    return [
+    candidates: list[tuple[str, object, dict]] = [
         ("baseline_prior", DummyClassifier(strategy="prior"), {}),
         ("logistic_regression", LogisticRegression(max_iter=2000, class_weight="balanced"),
          {"C": [0.1, 1.0]}),
@@ -61,6 +66,107 @@ def _candidates():
         ("gradient_boosting", GradientBoostingClassifier(random_state=0),
          {"max_depth": [2, 3], "n_estimators": [100]}),
     ]
+
+    # xgboost — industry-standard tabular booster; optional so the pipeline still runs
+    # in a stripped-down environment.
+    try:
+        from xgboost import XGBClassifier
+        candidates.append((
+            "xgboost",
+            XGBClassifier(
+                n_estimators=200, max_depth=3, learning_rate=0.1,
+                eval_metric="logloss", random_state=0, tree_method="hist",
+                verbosity=0,
+            ),
+            {"max_depth": [3, 5], "learning_rate": [0.05, 0.1]},
+        ))
+    except ImportError:
+        pass
+
+    # lightgbm — sibling to xgboost, faster on wide-ish tabular data.
+    try:
+        from lightgbm import LGBMClassifier
+        candidates.append((
+            "lightgbm",
+            LGBMClassifier(
+                n_estimators=200, max_depth=-1, num_leaves=31,
+                learning_rate=0.1, class_weight="balanced",
+                random_state=0, verbose=-1,
+            ),
+            {"num_leaves": [15, 31], "learning_rate": [0.05, 0.1]},
+        ))
+    except ImportError:
+        pass
+
+    return candidates
+
+
+def _bootstrap_auc_ci(y_true, proba, n_iter: int = 300, seed: int = 0) -> tuple[float, float]:
+    """Percentile bootstrap 95% CI on ROC-AUC.
+
+    Communicates uncertainty honestly — a point estimate like "AUC 0.82" hides how much
+    of that number is signal vs. sample noise. At n≈500 an AUC often carries a ±0.05
+    band; showing both makes the reader read the model correctly.
+    """
+    import numpy as np
+    from sklearn.metrics import roc_auc_score
+
+    rng = np.random.default_rng(seed)
+    n = len(y_true)
+    scores = []
+    for _ in range(n_iter):
+        idx = rng.integers(0, n, size=n)
+        if len(set(y_true[idx])) < 2:
+            continue
+        scores.append(roc_auc_score(y_true[idx], proba[idx]))
+    if not scores:
+        return (0.5, 0.5)
+    scores.sort()
+    return (round(float(scores[int(0.025 * len(scores))]), 4),
+            round(float(scores[int(0.975 * len(scores))]), 4))
+
+
+def _expected_calibration_error(y_true, proba, n_bins: int = 10) -> float:
+    """ECE — weighted difference between predicted and realised rate per bin.
+
+    Zero = perfectly calibrated. Anything above ~0.05 is worth calibrating. Reported
+    alongside the raw AUC so a reader can spot models that rank well but return
+    over/under-confident probabilities.
+    """
+    import numpy as np
+
+    bins = np.linspace(0, 1, n_bins + 1)
+    ece = 0.0
+    n = len(y_true)
+    for i in range(n_bins):
+        mask = (proba >= bins[i]) & (proba < bins[i + 1] if i < n_bins - 1 else proba <= bins[i + 1])
+        if not mask.any():
+            continue
+        conf = float(proba[mask].mean())
+        acc = float(y_true[mask].mean())
+        ece += (mask.sum() / n) * abs(conf - acc)
+    return round(float(ece), 4)
+
+
+def _optimal_threshold(y_true, proba) -> tuple[float, float]:
+    """Threshold that maximises F1 on out-of-fold predictions.
+
+    Returns (threshold, f1). Fixed 0.5 is arbitrary — for imbalanced targets the operating
+    point that trades precision vs recall best is often 0.2–0.4. Storing it lets the
+    prediction service score consistently at the point the model was tuned for.
+    """
+    import numpy as np
+    from sklearn.metrics import f1_score
+
+    best_t, best_f1 = 0.5, 0.0
+    for t in np.linspace(0.05, 0.95, 19):
+        preds = (proba >= t).astype(int)
+        if preds.sum() == 0:
+            continue
+        f1 = f1_score(y_true, preds, zero_division=0)
+        if f1 > best_f1:
+            best_f1, best_t = f1, float(t)
+    return round(best_t, 3), round(float(best_f1), 4)
 
 
 class TrainingService:
@@ -84,6 +190,7 @@ class TrainingService:
             )
 
         import numpy as np
+        from sklearn.calibration import CalibratedClassifierCV
         from sklearn.impute import SimpleImputer
         from sklearn.inspection import permutation_importance
         from sklearn.metrics import (
@@ -170,12 +277,23 @@ class TrainingService:
             tp = int(((preds == 1) & (y == 1)).sum())
             fp = int(((preds == 1) & (y == 0)).sum())
             fn = int(((preds == 0) & (y == 1)).sum())
+
+            # Uncertainty + calibration + operating point — the three things a point
+            # estimate hides. All computed on out-of-fold probabilities.
+            auc_lo, auc_hi = _bootstrap_auc_ci(y, proba)
+            ece = _expected_calibration_error(y, proba)
+            opt_thr, opt_f1 = _optimal_threshold(y, proba)
+
             metrics = {
                 "aucMean": round(auc_mean, 4), "aucStd": round(auc_std, 4),
+                "aucCi95Low": auc_lo, "aucCi95High": auc_hi,
                 "averagePrecision": round(float(average_precision_score(y, proba)), 4),
                 "brierScore": round(float(brier_score_loss(y, proba)), 4),
+                "expectedCalibrationError": ece,
                 "precisionAt50": round(tp / (tp + fp), 4) if (tp + fp) else None,
                 "recallAt50": round(tp / (tp + fn), 4) if (tp + fn) else None,
+                "operatingThreshold": opt_thr,
+                "operatingF1": opt_f1,
                 "cvFolds": CV_FOLDS, "n": int(len(y)), "positives": int(y.sum()),
             }
 
@@ -201,12 +319,21 @@ class TrainingService:
                 key=lambda d: -abs(d["importance"]))
             metrics["permutationImportance"] = importance[:10]
 
-            final = best.fit(X, y)   # refit on everything for the stored artifact
+            # Wrap the fitted estimator with probability calibration. Isotonic when we
+            # have enough positives to fit it cleanly, Platt (sigmoid) otherwise. The
+            # metrics above are already-calibrated (out-of-fold), so the stored artifact
+            # matches what we told the reader.
+            positives = int(y.sum())
+            calibration_method = "isotonic" if positives >= 60 else "sigmoid"
+            calibrated = CalibratedClassifierCV(best, method=calibration_method, cv=cv)
+            calibrated.fit(X, y)
+            metrics["calibrationMethod"] = calibration_method
+
             version = MlModelVersion(
                 model_id=model.id, training_run_id=run.id, version_no=next_no,
                 algorithm=algo, params=params, dataset_version=ds.version,
                 feature_keys=keys, metrics=metrics, beats_baseline=beats,
-                status="trained", artifact=pickle.dumps(final),
+                status="trained", artifact=pickle.dumps(calibrated),
             )
             self.session.add(version)
             results.append({"algorithm": algo, "params": params, "metrics": metrics,

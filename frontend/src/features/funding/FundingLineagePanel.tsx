@@ -208,12 +208,38 @@ export function FundingLineagePanel({ studentId }: { studentId: string }) {
               secondary={`${active} currently open`}
             />
             <Arrow />
-            <Hop
-              label="Stipend"
-              linked={data.totals.committed !== '0' || data.totals.paid !== '0'}
-              primary={`${money(data.totals.paid, data.totals.currency)} paid`}
-              secondary={`${money(data.totals.committed, data.totals.currency)} committed`}
-            />
+            {(() => {
+              // The lineage's stipend hop used to show ONLY paid + committed instalments,
+              // which stayed at £0 until an instalment schedule was generated — so setting
+              // a stipend on the arrangement didn't visibly reflect. Add the arrangements'
+              // DECLARED stipend as the primary reading. Paid / committed become the sub-line.
+              const declared = data.arrangements.reduce((sum, a) => {
+                if (a.validTo != null) return sum          // count OPEN arrangements only
+                return sum + (a.stipendAmount ? Number(a.stipendAmount) : 0)
+              }, 0)
+              const currency = data.arrangements.find((a) => a.currency)?.currency
+                ?? data.totals.currency
+              const anyDeclared = declared > 0
+              const anyScheduled = data.totals.committed !== '0' || data.totals.paid !== '0'
+              return (
+                <Hop
+                  label="Stipend"
+                  linked={anyDeclared || anyScheduled}
+                  primary={
+                    anyDeclared
+                      ? `${money(String(declared), currency)}/yr declared`
+                      : `${money(data.totals.paid, data.totals.currency)} paid`
+                  }
+                  secondary={
+                    anyDeclared
+                      ? `${money(data.totals.paid, data.totals.currency)} paid · ${money(data.totals.committed, data.totals.currency)} committed`
+                      : (anyScheduled
+                          ? `${money(data.totals.committed, data.totals.currency)} committed`
+                          : 'no schedule yet — generate one from the arrangement')
+                  }
+                />
+              )
+            })()}
           </div>
 
           {/* Per-arrangement detail — which award each slice of money is drawn from. */}
@@ -235,6 +261,11 @@ export function FundingLineagePanel({ studentId }: { studentId: string }) {
                     {a.instalments} instalment{a.instalments === 1 ? '' : 's'} ·{' '}
                     {money(a.paidTotal, a.currency)} paid
                   </span>
+                  {a.instalments === 0 && a.stipendAmount && Number(a.stipendAmount) > 0 && (
+                    <Badge variant="warning" className="text-[10px]">
+                      no schedule — click Payments &gt; Generate on the arrangement
+                    </Badge>
+                  )}
                 </div>
               ))}
             </div>

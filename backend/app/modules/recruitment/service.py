@@ -132,9 +132,28 @@ class RecruitmentService:
     ) -> Application:
         app = await self.get_application(aid)
         if app.current_stage in TERMINAL_STAGES:
-            raise WorkflowError(f"Application is in terminal stage {app.current_stage.value}")
+            # Explain WHY the action was refused and point the user to the next thing to do —
+            # a bare "terminal stage" message leaves an admin guessing.
+            stage = app.current_stage
+            hints = {
+                CandidateStage.converted:
+                    "This application has already been converted to a student — the record now "
+                    "lives on the Students page. Open the student record instead of editing "
+                    "this application.",
+                CandidateStage.rejected:
+                    "This application was rejected and is closed. If the same person applies "
+                    "again, start a new application in Recruitment.",
+                CandidateStage.withdrawn:
+                    "This application was withdrawn by the applicant and is closed. Start a "
+                    "new application in Recruitment if they re-apply.",
+            }
+            hint = hints.get(stage, "This application is in a final state and can't be advanced.")
+            raise WorkflowError(hint)
         if to_stage == app.current_stage:
-            raise WorkflowError("Application is already in that stage")
+            raise WorkflowError(
+                f"This application is already at '{app.current_stage.value.replace('_', ' ')}' — "
+                "pick a different next stage."
+            )
         app.history.append(
             CandidateStageHistory(
                 from_stage=app.current_stage, to_stage=to_stage, reason=reason,

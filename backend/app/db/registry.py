@@ -5,6 +5,8 @@ same effect by importing every router. Mirrors the import block in the Alembic e
 """
 from __future__ import annotations
 
+from app.modules.tenant import models as tenant_models  # noqa: F401
+from app.modules.composer import models as composer_models  # noqa: F401
 from app.modules.identity import models as identity_models  # noqa: F401
 from app.modules.person import models as person_models  # noqa: F401
 from app.modules.student_record import models as student_models  # noqa: F401
@@ -27,3 +29,4 @@ from app.modules.audit import models as audit_models  # noqa: F401
 from app.modules.research import models as research_models  # noqa: F401
 from app.modules.assistant import f6_models as assistant_f6_models  # noqa: F401
 from app.modules.assistant import telemetry_models as assistant_telemetry_models  # noqa: F401
+from app.modules.portal import models as portal_models  # noqa: F401

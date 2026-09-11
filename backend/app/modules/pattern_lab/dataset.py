@@ -176,6 +176,114 @@ class DatasetBuilder:
                 f"needs ≥{t.min_eligible} eligible and ≥{t.min_minority} in the smaller class "
                 f"(have {eligible} eligible, smaller class {min(positives, negatives)})"}
 
+    # ------------------------------------------------------------------
+    # Auto-clean — reproducible hygiene on the built matrix
+    # ------------------------------------------------------------------
+
+    def _auto_clean(self, rows: list[dict], active: list) -> dict:
+        """In-place cleaning of `rows`. Returns a report the UI surfaces."""
+        report = {
+            "duplicates_removed": 0,
+            "imputed": [],
+            "removed_features": [],
+            "outliers_capped": [],
+            "removed_keys": set(),
+            "summary": "No cleaning needed — dataset is already tidy.",
+        }
+        if not rows:
+            return report
+
+        # 1) Deduplicate on studentId (defensive — a duplicate context would double-count).
+        seen: set[str] = set()
+        deduped = []
+        for r in rows:
+            if r["studentId"] in seen:
+                report["duplicates_removed"] += 1
+                continue
+            seen.add(r["studentId"])
+            deduped.append(r)
+        rows[:] = deduped
+        n = len(rows)
+
+        # 2) Drop features that are constant or ≥80% missing — they can't inform.
+        for f in active:
+            values = [r["features"].get(f.key) for r in rows]
+            present = [v for v in values if v is not None]
+            if not present or (len(present) / n) < 0.20:
+                report["removed_features"].append(
+                    {"key": f.key, "label": f.label,
+                     "reason": f"only {len(present)}/{n} records had a value"}
+                )
+                report["removed_keys"].add(f.key)
+                continue
+            uniq = {round(v, 6) for v in present}
+            if len(uniq) <= 1:
+                report["removed_features"].append(
+                    {"key": f.key, "label": f.label,
+                     "reason": "same value on every record — no signal"}
+                )
+                report["removed_keys"].add(f.key)
+
+        # 3) Median-impute low-missingness features (≤30% gaps); winsorise numeric outliers.
+        for f in active:
+            if f.key in report["removed_keys"]:
+                continue
+            values = [r["features"].get(f.key) for r in rows]
+            present = sorted([v for v in values if v is not None])
+            missing = n - len(present)
+
+            if 0 < missing <= int(0.30 * n):
+                median = present[len(present) // 2]
+                for r in rows:
+                    if r["features"].get(f.key) is None:
+                        r["features"][f.key] = median
+                report["imputed"].append(
+                    {"key": f.key, "label": f.label,
+                     "count": missing, "method": "median",
+                     "value": round(median, 4)}
+                )
+                # Refresh present set so outlier bounds use the imputed values too.
+                present = sorted(r["features"][f.key] for r in rows
+                                 if r["features"].get(f.key) is not None)
+
+            # Only winsorise features with meaningful spread and enough points.
+            if len(present) >= 20 and (present[-1] - present[0]) > 1e-9:
+                lo = present[max(0, int(0.01 * len(present)))]
+                hi = present[min(len(present) - 1, int(0.99 * len(present)))]
+                if hi > lo:
+                    capped = 0
+                    for r in rows:
+                        v = r["features"].get(f.key)
+                        if v is None:
+                            continue
+                        if v < lo:
+                            r["features"][f.key] = lo; capped += 1
+                        elif v > hi:
+                            r["features"][f.key] = hi; capped += 1
+                    if capped:
+                        report["outliers_capped"].append(
+                            {"key": f.key, "label": f.label, "count": capped,
+                             "low": round(lo, 4), "high": round(hi, 4)}
+                        )
+
+        # 4) Human summary line (surfaced in the UI header).
+        bits = []
+        if report["duplicates_removed"]:
+            bits.append(f"{report['duplicates_removed']} duplicate row(s) removed")
+        if report["imputed"]:
+            n_imp = sum(x["count"] for x in report["imputed"])
+            bits.append(f"{n_imp} missing value(s) filled with medians "
+                        f"across {len(report['imputed'])} feature(s)")
+        if report["removed_features"]:
+            bits.append(f"{len(report['removed_features'])} feature(s) dropped "
+                        "(constant or mostly missing)")
+        if report["outliers_capped"]:
+            n_cap = sum(x["count"] for x in report["outliers_capped"])
+            bits.append(f"{n_cap} extreme value(s) capped at the 1st/99th percentile")
+        if bits:
+            report["summary"] = "; ".join(bits) + "."
+        return report
+
     async def build(self, target_key: str, created_by: uuid.UUID | None) -> MlDataset:
         from app.modules.settings.service import setting_value
 
@@ -211,11 +319,20 @@ class DatasetBuilder:
             rows.append({"studentId": str(ctx.student.id), "outcome": int(bool(outcome)),
                          "cutoff": cutoff.isoformat(), "features": feats})
 
+        # ---- Auto-clean pass -------------------------------------------------
+        # Institutional-scale hygiene: dedupe, impute low-missingness features
+        # with the training median, drop features that are constant or almost
+        # entirely missing, and winsorise extreme numeric outliers at the
+        # 1st/99th percentiles so a single miskeyed value can't dominate.
+        clean_report = self._auto_clean(rows, active)
+        # ---------------------------------------------------------------------
+
         completeness = {
             f.key: (round(sum(1 for r in rows if r["features"].get(f.key) is not None)
                           / len(rows), 3) if rows else 0.0)
-            for f in active
+            for f in active if f.key not in clean_report["removed_keys"]
         }
+        active = [f for f in active if f.key not in clean_report["removed_keys"]]
         eligible, negatives = len(rows), len(rows) - positives
         sufficient = (eligible >= t.min_eligible
                       and min(positives, negatives) >= t.min_minority)
@@ -238,6 +355,13 @@ class DatasetBuilder:
                     {"key": f.key, "group": f.group, "label": f.label,
                      "description": f.description} for f in active],
                 "predictionPoint": t.prediction_point,
+                "cleaning": {
+                    "duplicatesRemoved": clean_report["duplicates_removed"],
+                    "imputed": clean_report["imputed"],
+                    "removedFeatures": clean_report["removed_features"],
+                    "outliersCapped": clean_report["outliers_capped"],
+                    "summary": clean_report["summary"],
+                },
             },
             matrix=rows, created_by_user_id=created_by,
         )

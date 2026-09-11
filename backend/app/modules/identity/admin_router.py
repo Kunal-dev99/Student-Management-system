@@ -16,6 +16,7 @@ import uuid
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import require_permission
@@ -168,6 +169,52 @@ async def update_user(
     return _user_out(user)
 
 
+@admin_router.delete(
+    "/users/{user_id}",
+    summary="Delete an invited-but-never-used user (safe cleanup for mistyped invites)",
+)
+async def delete_user(
+    user_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_permission("admin.configure")),
+) -> dict:
+    """Hard-delete allowed only when the user has never signed in.
+
+    A user with no `password_hash` has never completed the invite flow — they
+    have taken no action in the system, so nothing references them and deletion
+    is safe. Everyone else must be deactivated (audit trail integrity).
+    """
+    user = (await session.execute(
+        select(User).where(User.id == user_id)
+    )).scalar_one_or_none()
+    if user is None:
+        raise NotFoundError("User not found")
+
+    if user.id == principal.user_id:
+        raise ConflictError("You cannot delete your own account")
+
+    if user.password_hash is not None:
+        raise ConflictError(
+            "This user has signed in and taken actions. "
+            "Deactivate them instead — deleting would break the audit trail."
+        )
+
+    # Detach roles first so the join-table rows go with the delete.
+    await session.refresh(user, ["roles"])
+    user.roles = []
+    await session.delete(user)
+    try:
+        await session.commit()
+    except IntegrityError as e:
+        # A stray FK we didn't expect — refuse gracefully rather than 500.
+        await session.rollback()
+        raise ConflictError(
+            "This user is still referenced elsewhere and cannot be deleted. "
+            "Deactivate them instead."
+        ) from e
+    return {"deleted": True}
+
+
 @admin_router.post("/users/{user_id}/send-reset", summary="Send a password-reset email")
 async def send_reset(
     user_id: uuid.UUID,
@@ -181,3 +228,27 @@ async def send_reset(
         raise NotFoundError("User not found")
     await IdentityService(IdentityRepository(session)).request_password_reset(user.email)
     return {"sent": True}
+
+
+# ---------- Data hygiene: duplicate finder + safe deletes -------------------
+
+@admin_router.get("/duplicates",
+                  summary="Scan the domain for likely duplicate persons, opportunities, awards, projects")
+async def scan_duplicates(
+    session: AsyncSession = Depends(get_read_session),
+    _=Depends(require_permission("admin.configure")),
+) -> dict:
+    from app.modules.identity.dedupe import find_duplicates
+    return await find_duplicates(session)
+
+
+@admin_router.delete("/duplicates/{kind}/{row_id}",
+                     summary="Delete an unreferenced opportunity, award, or project")
+async def delete_duplicate(
+    kind: str,
+    row_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("admin.configure")),
+) -> dict:
+    from app.modules.identity.dedupe import delete_if_unused
+    return await delete_if_unused(session, kind=kind, row_id=row_id)

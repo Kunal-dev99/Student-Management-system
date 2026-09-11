@@ -11,7 +11,7 @@ export default function StudentsPage() {
   const { data, isLoading, isError, error } = useStudents()
   return (
     <>
-      <PageHeader title="Students" description="The core PGR student record." />
+      <PageHeader title="Students" />
       <div className="px-6 pb-6 space-y-4">
         <div className="card-elevated overflow-hidden">
           <Table>

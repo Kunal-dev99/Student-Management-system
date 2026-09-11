@@ -6,6 +6,7 @@ from fastapi import APIRouter
 from app.modules.admissions.router import app_scoped as admissions_app_router
 from app.modules.admissions.router import offer_router
 from app.modules.identity.router import auth_router, me_router
+from app.modules.tenant.router import router as tenant_router
 from app.modules.person.router import router as person_router
 from app.modules.recruitment.router import app_router as application_router
 from app.modules.recruitment.router import opp_router, pipeline_router
@@ -51,12 +52,19 @@ from app.modules.workflow.router import (
 from app.modules.integration.router import router as integration_router
 from app.modules.scheduler.router import router as scheduler_router
 from app.modules.portal.router import router as portal_router
+from app.modules.portal.writes import router as portal_writes_router
+from app.modules.supervision.my_students import router as my_students_router
+from app.modules.supervision.messages_router import router as sup_messages_router
+from app.modules.relationship.router import router as relationship_router
 from app.modules.exports.router import router as exports_router
 from app.modules.exports.router import profiles_router as report_profiles_router
 from app.modules.documents.router import router as documents_router
 from app.modules.notifications.router import router as notification_prefs_router
 from app.modules.audit.router import router as audit_router
 from app.modules.assistant.router import router as assistant_router
+from app.modules.composer.router import router as composer_router
+from app.modules.reviews.router import router as reviews_router
+from app.modules.meeting_brief.router import router as meeting_brief_router
 from app.modules.icr.router import router as icr_router
 from app.modules.icr.gaps_router import router as icr_gaps_router
 from app.modules.identity.admin_router import admin_router
@@ -75,6 +83,7 @@ api_router = APIRouter()
 # Identity / auth
 api_router.include_router(auth_router)
 api_router.include_router(me_router)
+api_router.include_router(tenant_router)
 
 # Person
 api_router.include_router(person_router)
@@ -148,6 +157,10 @@ api_router.include_router(scheduler_router)
 
 # Student portal
 api_router.include_router(portal_router)
+api_router.include_router(portal_writes_router)
+api_router.include_router(my_students_router)
+api_router.include_router(sup_messages_router)
+api_router.include_router(relationship_router)
 
 # Exports (statutory)
 api_router.include_router(exports_router)
@@ -160,6 +173,12 @@ api_router.include_router(audit_router)
 
 # Phase 5 — "Ask PGR" assistant (read-only, admin pilot)
 api_router.include_router(assistant_router)
+
+# Composer — LLM-composed dashboards over a fixed data-function catalogue.
+api_router.include_router(composer_router)
+# Weekly review queue — the first AI-as-a-layer feature.
+api_router.include_router(reviews_router)
+api_router.include_router(meeting_brief_router)
 
 # ICR module — additive views over the existing lifecycle data
 api_router.include_router(icr_router)

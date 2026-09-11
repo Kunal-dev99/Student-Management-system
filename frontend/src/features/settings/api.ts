@@ -115,11 +115,21 @@ export function useDeleteLovRow() {
   })
 }
 
-/** Platform-fixed enums (read-only by design — each value has code attached). */
+/** One enum member with the institution's overrides merged in. The `code` is fixed by the
+ *  platform (used by FKs and business logic); label, description and hidden are editable. */
+export interface ValueSetValue {
+  code: string
+  label: string
+  description: string | null
+  hidden: boolean
+  overridden: boolean
+  updatedAt: string | null
+}
+
 export interface ValueSet {
   area: string
   name: string
-  values: string[]
+  values: ValueSetValue[]
 }
 
 export const useValueSets = (enabled = true) =>
@@ -128,6 +138,26 @@ export const useValueSets = (enabled = true) =>
     queryFn: () => api.get<ValueSet[]>('/reference/value-sets'),
     enabled,
   })
+
+export function useUpsertValueSet() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ enumName, code, body }: {
+      enumName: string; code: string
+      body: { label: string | null; description: string | null; hidden: boolean }
+    }) => api.put(`/reference/value-sets/${enumName}/${encodeURIComponent(code)}`, body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['reference', 'value-sets'] }),
+  })
+}
+
+export function useResetValueSet() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ enumName, code }: { enumName: string; code: string }) =>
+      api.del(`/reference/value-sets/${enumName}/${encodeURIComponent(code)}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['reference', 'value-sets'] }),
+  })
+}
 
 /* ------------------------------------------------------------------ *
  * Users & roles — /admin/users, /admin/roles. No password ever passes
@@ -185,5 +215,18 @@ export function useUpdateUser() {
 export function useSendPasswordReset() {
   return useMutation({
     mutationFn: (id: string) => api.post<{ sent: boolean }>(`/admin/users/${id}/send-reset`),
+  })
+}
+
+/** Hard-delete an invited-but-never-used user. Backend refuses (409) if they
+ *  have ever signed in — those must be deactivated instead. */
+export function useDeleteUser() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => api.del<{ deleted: boolean }>(`/admin/users/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'users'] })
+      qc.invalidateQueries({ queryKey: ['admin', 'roles'] })
+    },
   })
 }

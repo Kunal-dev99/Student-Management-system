@@ -1,11 +1,20 @@
 'use client'
 
-import { Activity, GraduationCap, Milestone, Wallet, BookOpenCheck, UsersRound } from 'lucide-react'
+import { useRef, useState } from 'react'
+import { Activity, GraduationCap, Milestone, Wallet, BookOpenCheck, UsersRound, Check, Send, Upload } from 'lucide-react'
 import { PageHeader } from '@/components/common/PageHeader'
 import { PageSection } from '@/components/common/PageSection'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
-import { useMyJourney } from '@/features/portal/api'
+import { useToast } from '@/components/ui/use-toast'
+import {
+  useConfirmMeeting,
+  useDeclareIntentToSubmit,
+  useMyJourney,
+  useSubmitMilestone,
+} from '@/features/portal/api'
 
 function money(a: string | null, c: string | null) {
   return a ? `${c ?? ''} ${Number(a).toLocaleString()}`.trim() : '—'
@@ -28,13 +37,47 @@ function roleLabel(role: string) {
 
 export default function PortalPage() {
   const { data, isLoading } = useMyJourney()
+  const confirm = useConfirmMeeting()
+  const declareIntent = useDeclareIntentToSubmit()
+  const submitMilestone = useSubmitMilestone()
+  const milestoneFileInputs = useRef<Record<string, HTMLInputElement | null>>({})
+  const { toast } = useToast()
+  const [intentTitle, setIntentTitle] = useState('')
 
-  if (isLoading) return <><PageHeader title="My journey" description="Your research lifecycle." /><div className="px-6"><Skeleton className="h-40 w-full" /></div></>
+  const handleMilestoneSubmit = async (milestoneId: string, file: File) => {
+    try {
+      await submitMilestone.mutateAsync({ milestoneId, file })
+      toast({ title: 'Submitted', description: `${file.name} attached. Your supervisor's been notified.` })
+    } catch {
+      toast({ title: 'Submit failed', description: 'Please try again.', variant: 'destructive' })
+    }
+  }
+
+  const handleConfirm = async (meetingId: string) => {
+    try {
+      await confirm.mutateAsync(meetingId)
+      toast({ title: 'Meeting confirmed', description: 'Thanks — the record is updated.' })
+    } catch {
+      toast({ title: 'Could not confirm', description: 'Please try again.', variant: 'destructive' })
+    }
+  }
+
+  const handleDeclareIntent = async () => {
+    try {
+      await declareIntent.mutateAsync(intentTitle.trim() || null)
+      setIntentTitle('')
+      toast({ title: 'Intent recorded', description: 'Your supervision team will be notified.' })
+    } catch {
+      toast({ title: 'Could not record intent', description: 'Please try again.', variant: 'destructive' })
+    }
+  }
+
+  if (isLoading) return <><PageHeader title="My journey" /><div className="px-6"><Skeleton className="h-40 w-full" /></div></>
 
   if (!data?.linked) {
     return (
       <>
-        <PageHeader title="My journey" description="Your research lifecycle." />
+        <PageHeader title="My journey" />
         <div className="px-6 pb-6">
           <PageSection icon={Activity} title="Not linked" accent="primary">
             <p className="text-helper">Your account isn’t linked to a person record yet, so there’s no journey to show.</p>
@@ -48,7 +91,7 @@ export default function PortalPage() {
 
   return (
     <>
-      <PageHeader title={person?.name ?? 'My journey'} description="Your research lifecycle." />
+      <PageHeader title={person?.name ?? 'My journey'} />
       <div className="px-6 pb-6 space-y-4">
         {student && (
           <PageSection icon={GraduationCap} title="My record" accent="primary">
@@ -79,6 +122,7 @@ export default function PortalPage() {
           <PageSection icon={Milestone} title="My milestones" accent="primary">
             {milestones.length ? milestones.map((m) => {
               const flag = dueness(m.dueDate, m.status)
+              const canSubmit = ['not_started', 'due', 'overdue'].includes(m.status)
               return (
                 <div key={m.id} className="flex items-center justify-between gap-3 border-b border-border/60 last:border-0 py-1.5">
                   <div className="min-w-0">
@@ -93,6 +137,30 @@ export default function PortalPage() {
                     {flag === 'overdue' && <Badge variant="destructive">Overdue</Badge>}
                     {flag === 'due-soon' && <Badge variant="warning">Due soon</Badge>}
                     <Badge variant={m.status === 'decided' ? 'success' : 'secondary'}>{m.status.replace(/_/g, ' ')}</Badge>
+                    {canSubmit && (
+                      <>
+                        <input
+                          ref={(el) => { milestoneFileInputs.current[m.id] = el }}
+                          type="file"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0]
+                            if (file) handleMilestoneSubmit(m.id, file)
+                            if (milestoneFileInputs.current[m.id]) milestoneFileInputs.current[m.id]!.value = ''
+                          }}
+                        />
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          className="h-7"
+                          onClick={() => milestoneFileInputs.current[m.id]?.click()}
+                          disabled={submitMilestone.isPending}
+                        >
+                          <Upload className="h-3 w-3 mr-1" />
+                          Submit
+                        </Button>
+                      </>
+                    )}
                   </div>
                 </div>
               )
@@ -134,9 +202,19 @@ export default function PortalPage() {
                       {mt.supervisorName && <span className="text-muted-foreground"> · {mt.supervisorName}</span>}
                       {mt.durationMinutes != null && <span className="text-muted-foreground num"> · {mt.durationMinutes} min</span>}
                     </span>
-                    <Badge variant={mt.studentConfirmed ? 'success' : 'outline'}>
-                      {mt.studentConfirmed ? 'Confirmed' : 'Unconfirmed'}
-                    </Badge>
+                    {mt.studentConfirmed ? (
+                      <Badge variant="success">Confirmed</Badge>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => handleConfirm(mt.id)}
+                        disabled={confirm.isPending}
+                      >
+                        <Check className="h-3.5 w-3.5 mr-1" />
+                        Confirm
+                      </Button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -146,13 +224,59 @@ export default function PortalPage() {
 
         <PageSection icon={BookOpenCheck} title="My thesis" accent="accent">
           {thesis ? (
-            <div className="flex items-center gap-3 text-sm">
-              <span>{thesis.title ?? 'Thesis'}</span>
-              <Badge variant={thesis.status === 'approved' ? 'success' : 'secondary'}>{thesis.status.replace(/_/g, ' ')}</Badge>
-              {thesis.outcome && <Badge variant="outline">{thesis.outcome.replace(/_/g, ' ')}</Badge>}
+            <div className="space-y-3">
+              <div className="flex items-center gap-3 text-sm">
+                <span className="font-medium">{thesis.title ?? 'Thesis'}</span>
+                <Badge variant={thesis.status === 'approved' ? 'success' : 'secondary'}>{thesis.status.replace(/_/g, ' ')}</Badge>
+                {thesis.outcome && <Badge variant="outline">{thesis.outcome.replace(/_/g, ' ')}</Badge>}
+              </div>
+              {thesis.status === 'draft' && (
+                <div className="rounded-md border border-primary/30 bg-primary/[0.03] px-4 py-3">
+                  <p className="text-sm font-medium mb-1">Ready to signal you're preparing to submit?</p>
+                  <p className="text-helper text-xs mb-3">
+                    Recording intent starts the examiner-nomination workflow. Your supervision
+                    team will be notified. You can leave the title blank if it's still evolving.
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      className="max-w-sm"
+                      placeholder="Working title (optional)"
+                      value={intentTitle}
+                      onChange={(e) => setIntentTitle(e.target.value)}
+                    />
+                    <Button size="sm" onClick={handleDeclareIntent} disabled={declareIntent.isPending}>
+                      <Send className="h-3.5 w-3.5 mr-1" />
+                      Record intent to submit
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
-          ) : <p className="text-helper">No thesis record yet.</p>}
+          ) : (
+            <div className="space-y-3">
+              <p className="text-helper">No thesis record yet.</p>
+              <div className="rounded-md border border-primary/30 bg-primary/[0.03] px-4 py-3">
+                <p className="text-sm font-medium mb-1">Getting close to submission?</p>
+                <p className="text-helper text-xs mb-3">
+                  Signal intent and we'll open a thesis record and start the examiner workflow.
+                </p>
+                <div className="flex items-center gap-2">
+                  <Input
+                    className="max-w-sm"
+                    placeholder="Working title (optional)"
+                    value={intentTitle}
+                    onChange={(e) => setIntentTitle(e.target.value)}
+                  />
+                  <Button size="sm" onClick={handleDeclareIntent} disabled={declareIntent.isPending}>
+                    <Send className="h-3.5 w-3.5 mr-1" />
+                    Record intent to submit
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
         </PageSection>
+
       </div>
     </>
   )

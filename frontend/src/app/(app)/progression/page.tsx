@@ -32,7 +32,7 @@ export default function ProgressionPage() {
   const { data: programmes, isLoading } = useProgrammes()
   return (
     <>
-      <PageHeader title="Progression" description="Configurable milestone flows per programme." />
+      <PageHeader title="Progression" />
       <div className="px-6 pb-6 space-y-4">
         <p className="text-helper">
           These are the milestone definitions each programme runs. A student’s milestones are

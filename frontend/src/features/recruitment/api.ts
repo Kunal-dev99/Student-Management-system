@@ -44,6 +44,7 @@ export interface Assessment {
 export interface Application {
   id: string
   personId: string
+  personName?: string | null
   route: 'opportunity_led' | 'student_led'
   researchOpportunityId: string | null
   currentStage: CandidateStage
@@ -51,6 +52,10 @@ export interface Application {
   createdAt: string
   history: StageHistory[]
   assessments: Assessment[]
+  // F3 — fee status + visa gate
+  feeStatus?: string | null
+  visaRequired?: boolean
+  visaCheckCompletedAt?: string | null
 }
 export interface Offer {
   id: string
@@ -85,6 +90,17 @@ export const usePipeline = () =>
   useQuery({ queryKey: ['pipeline'], queryFn: () => api.get<Pipeline>('/recruitment/pipeline') })
 
 // --- Mutations ---
+export function useUpdateOpportunity() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, body }: {
+      id: string
+      body: Partial<{ title: string; stipendAmount: string; eligibility: string; positionsAvailable: number }>
+    }) => api.patch<Opportunity>(`/opportunities/${id}`, body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['opportunities'] }),
+  })
+}
+
 export function useCreateOpportunity() {
   const qc = useQueryClient()
   return useMutation({
@@ -167,6 +183,57 @@ export function useDeclineOffer(applicationId: string) {
     onSuccess: () => invalidateOffer(qc, applicationId),
   })
 }
+/** Create a Person (used by the New Application dialog for candidates who
+ *  don't exist yet as a Person). */
+export function useCreatePersonQuick() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: { givenName: string; familyName: string; email?: string | null; nationality?: string | null }) =>
+      api.post<{ id: string; givenName: string; familyName: string; email: string | null }>('/persons', body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['persons'] }),
+  })
+}
+
+/** Create an Application (opportunity-led or student-led). */
+export function useCreateApplication() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: {
+      personId: string
+      route: 'opportunity_led' | 'student_led'
+      researchOpportunityId?: string | null
+      researchAreaId?: string | null
+      proposalDocumentRef?: string | null
+    }) => api.post<Application>('/applications', body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['applications'] })
+      qc.invalidateQueries({ queryKey: ['pipeline'] })
+    },
+  })
+}
+
+/** F3 — update fee status / visa flag / complete the visa check. */
+export function useVisaCheck(applicationId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: {
+      feeStatus?: string | null
+      visaRequired?: boolean
+      completeVisaCheck?: boolean
+    }) =>
+      api.patch<{
+        applicationId: string
+        feeStatus: string | null
+        visaRequired: boolean
+        visaCheckCompletedAt: string | null
+      }>(`/applications/${applicationId}/visa-check`, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['application', applicationId] })
+      qc.invalidateQueries({ queryKey: ['applications'] })
+    },
+  })
+}
+
 export function useAcceptOffer(applicationId: string) {
   const qc = useQueryClient()
   return useMutation({

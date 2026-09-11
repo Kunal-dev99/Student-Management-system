@@ -63,6 +63,36 @@ async def funding_cashflow(
     )
 
 
+@reports_router.get("/completion-pipeline", summary="Completion pipeline — award / graduation queue")
+async def completion_pipeline(
+    windowDays: int = 60,
+    session: AsyncSession = Depends(get_read_session),
+    principal: Principal = Depends(require_permission("student.read")),
+) -> dict:
+    from app.modules.completion.pipeline import CompletionPipelineService
+    from app.modules.student_record.router import scoped_ids
+
+    allowed = await scoped_ids(principal, session)
+    return await CompletionPipelineService(session).snapshot(
+        allowed_ids=allowed, recent_window_days=max(1, min(365, windowDays)),
+    )
+
+
+@reports_router.get("/thesis-pipeline", summary="Thesis pipeline — stage counts + actionable lists")
+async def thesis_pipeline(
+    vivaWindowDays: int = 45,
+    session: AsyncSession = Depends(get_read_session),
+    principal: Principal = Depends(require_permission("student.read")),
+) -> dict:
+    from app.modules.thesis.pipeline import ThesisPipelineService
+    from app.modules.student_record.router import scoped_ids
+
+    allowed = await scoped_ids(principal, session)
+    return await ThesisPipelineService(session).snapshot(
+        allowed_ids=allowed, viva_window_days=max(1, min(365, vivaWindowDays)),
+    )
+
+
 @reports_router.get("/supervisor-workforce", summary="Workforce lens — supervisor capacity institution-wide (W5)")
 async def supervisor_workforce(
     session: AsyncSession = Depends(get_read_session),

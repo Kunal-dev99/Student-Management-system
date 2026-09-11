@@ -40,7 +40,7 @@ export default function AnalyticsPage() {
 
   return (
     <>
-      <PageHeader title="Analytics" description="PGR Enterprise 360, risk, and forecasting." />
+      <PageHeader title="Analytics" />
       <div className="px-6 pb-6 space-y-4">
         <PageSection icon={AlertTriangle} title="Risk & completion" accent="accent">
           {analytics.isLoading ? <Skeleton className="h-20 w-full" /> : (

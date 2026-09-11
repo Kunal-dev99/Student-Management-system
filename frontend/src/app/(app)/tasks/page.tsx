@@ -39,10 +39,10 @@ export default function TasksPage() {
 
   return (
     <>
-      <PageHeader title="Tasks & notifications" description="Work assigned to you and your roles." />
+      <PageHeader title="Tasks" />
       <div className="px-6 pb-6 space-y-4">
         {sla.data && sla.data.total > 0 && (
-          <PageSection icon={Timer} title="SLA snapshot (F5)" accent="primary"
+          <PageSection icon={Timer} title="SLA snapshot" accent="primary"
             description="Turnaround against institutional service levels — the platform's own promise back to the department.">
             <div className="flex flex-wrap items-center gap-4">
               <div><div className="text-label">Tasks with SLA</div>

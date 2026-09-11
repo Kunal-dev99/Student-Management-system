@@ -53,40 +53,55 @@ export function ExaminersSection({ studentId, thesisId }: { studentId: string; t
                 </p>
               </div>
               {!n.approved && (
-                <Button size="sm" variant="ghost" disabled={approve.isPending}
+                <Button size="sm" variant="secondary"
+                  className="ml-3 shrink-0 border border-primary/40 text-primary hover:bg-primary hover:text-primary-foreground"
+                  disabled={approve.isPending}
                   onClick={async () => { try { await approve.mutateAsync(n.id); toast({ title: 'Examiner approved' }) } catch (e) { err(e) } }}>
-                  Approve
+                  Approve nomination
                 </Button>
               )}
             </div>
           )) : <p className="text-helper">No examiners nominated yet.</p>}
         </div>
       )}
-      <div className="flex flex-wrap items-end gap-2">
-        <div className="min-w-[180px]">
-          <Select value={personId} onValueChange={setPersonId}>
-            <SelectTrigger className="h-8"><SelectValue placeholder="Choose examiner…" /></SelectTrigger>
-            <SelectContent>
-              {people.data?.data.map((p) => <SelectItem key={p.id} value={p.id}>{p.givenName} {p.familyName}</SelectItem>)}
-            </SelectContent>
-          </Select>
+      <div className="mt-4 pt-3 border-t border-border/60 space-y-2">
+        <div className="text-sm font-medium">Nominate an examiner</div>
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="space-y-1 min-w-[200px]">
+            <label className="text-xs text-muted-foreground">Examiner</label>
+            <Select value={personId} onValueChange={setPersonId}>
+              <SelectTrigger className="h-8"><SelectValue placeholder="Choose examiner…" /></SelectTrigger>
+              <SelectContent>
+                {people.data?.data.map((p) => <SelectItem key={p.id} value={p.id}>{p.givenName} {p.familyName}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs text-muted-foreground">Role</label>
+            <Select value={type} onValueChange={(v) => setType(v as ExaminerType)}>
+              <SelectTrigger className="w-44 h-8"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {EXAMINER_TYPES.map((t) => <SelectItem key={t} value={t}>{t.replace(/_/g, ' ')}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs text-muted-foreground">Affiliation</label>
+            <Input className="w-56 h-8" placeholder="e.g. Imperial College" value={affiliation}
+              onChange={(e) => setAffiliation(e.target.value)} />
+          </div>
+          <label className="flex items-center gap-2 text-sm h-8 pb-0.5">
+            <Checkbox checked={coi} onCheckedChange={(v) => setCoi(v === true)} />
+            <span>Conflict of interest</span>
+          </label>
+          {coi && (
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">Nature of conflict</label>
+              <Input className="w-56 h-8" placeholder="e.g. co-authored a paper in 2024" value={coiNote}
+                onChange={(e) => setCoiNote(e.target.value)} />
+            </div>
+          )}
         </div>
-        <Select value={type} onValueChange={(v) => setType(v as ExaminerType)}>
-          <SelectTrigger className="w-44 h-8"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            {EXAMINER_TYPES.map((t) => <SelectItem key={t} value={t}>{t.replace(/_/g, ' ')}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Input className="w-52 h-8" placeholder="Affiliation (institution)" value={affiliation}
-          onChange={(e) => setAffiliation(e.target.value)} />
-        <label className="flex items-center gap-2 text-sm h-8">
-          <Checkbox checked={coi} onCheckedChange={(v) => setCoi(v === true)} />
-          Conflict of interest
-        </label>
-        {coi && (
-          <Input className="w-56 h-8" placeholder="Nature of the conflict" value={coiNote}
-            onChange={(e) => setCoiNote(e.target.value)} />
-        )}
         <Button size="sm" disabled={!personId || nominate.isPending}
           onClick={async () => {
             try {

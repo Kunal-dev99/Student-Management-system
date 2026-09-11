@@ -11,9 +11,9 @@
  * is evidence rather than a snapshot of a random seed.
  */
 
-import { useId, useMemo, useState } from 'react'
+import { useCallback, useId, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { AlertTriangle, ChevronDown, ChevronRight, Network } from 'lucide-react'
+import { AlertTriangle, ArrowUpRight, ChevronDown, ChevronRight, Network, X } from 'lucide-react'
 import { PageSection } from '@/components/common/PageSection'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -30,12 +30,13 @@ import {
 
 /** Column order, left to right. Money flows in, people come out. */
 const COLUMN_ORDER: GraphNodeKind[] = [
-  'funder', 'award', 'funding', 'project', 'student', 'supervisor',
+  'funder', 'award', 'opportunity', 'funding', 'project', 'student', 'supervisor',
 ]
 
 const KIND_LABEL: Record<GraphNodeKind, string> = {
   funder: 'Funder',
   award: 'Award',
+  opportunity: 'Opportunity',
   funding: 'Funding',
   project: 'Project',
   student: 'Student',
@@ -46,8 +47,9 @@ const KIND_LABEL: Record<GraphNodeKind, string> = {
 const KIND_VAR: Record<GraphNodeKind, string> = {
   funder: '--warning',
   award: '--accent',
+  opportunity: '--info',
   funding: '--success',
-  project: '--info',
+  project: '--primary',
   student: '--primary',
   supervisor: '--muted-foreground',
 }
@@ -131,31 +133,54 @@ function truncate(text: string, max: number) {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text
 }
 
-function NodeBox({ node, onOpen }: { node: Placed; onOpen: (link: string) => void }) {
+function NodeBox({
+  node, onSelect, selectedId, inLineage, dimmed,
+}: {
+  node: Placed
+  onSelect: (id: string) => void
+  selectedId: string | null
+  inLineage: boolean
+  dimmed: boolean
+}) {
   const color = `hsl(var(${KIND_VAR[node.kind]}))`
-  const clickable = !!node.link
   const sub = [node.sub, node.status?.replace(/_/g, ' ')].filter(Boolean).join(' · ')
+  const isSelected = selectedId === node.id
+  // While a selection exists, non-lineage nodes fade; the selected node itself gets a ring.
+  const opacity = dimmed ? 0.18 : 1
+  const strokeOpacity = isSelected ? 1 : inLineage ? 0.85 : 0.45
+  const strokeWidth = isSelected ? 2.5 : inLineage ? 1.5 : 1
   return (
     <g
       transform={`translate(${node.x}, ${node.y})`}
-      className={clickable ? 'cursor-pointer' : undefined}
-      role={clickable ? 'link' : undefined}
-      tabIndex={clickable ? 0 : undefined}
-      onClick={clickable ? () => onOpen(node.link!) : undefined}
-      onKeyDown={
-        clickable
-          ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(node.link!) } }
-          : undefined
-      }
+      className="cursor-pointer transition-opacity"
+      style={{ opacity }}
+      role="button"
+      tabIndex={0}
+      onClick={(e) => { e.stopPropagation(); onSelect(node.id) }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(node.id) }
+      }}
     >
       <title>{`${KIND_LABEL[node.kind]}: ${node.label}${sub ? ` (${sub})` : ''}`}</title>
+      {isSelected && (
+        <rect
+          x={-3} y={-3}
+          width={NODE_W + 6} height={NODE_H + 6}
+          rx={9}
+          style={{ fill: 'none', stroke: color, strokeWidth: 2, strokeOpacity: 0.35 }}
+        />
+      )}
       <rect
         width={NODE_W}
         height={NODE_H}
         rx={6}
-        style={{ fill: 'hsl(var(--surface-1))', stroke: color, strokeOpacity: 0.45 }}
+        style={{
+          fill: 'hsl(var(--surface-1))',
+          stroke: color,
+          strokeOpacity,
+          strokeWidth,
+        }}
       />
-      {/* Kind rail — the same colour as the legend swatch. */}
       <path
         d={`M 6 0 H 3 A 3 3 0 0 0 0 3 V ${NODE_H - 3} A 3 3 0 0 0 3 ${NODE_H} H 6 Z`}
         style={{ fill: color }}
@@ -164,7 +189,6 @@ function NodeBox({ node, onOpen }: { node: Placed; onOpen: (link: string) => voi
         x={14}
         y={sub ? 20 : 27}
         style={{ fill: 'hsl(var(--foreground))', fontSize: 11.5, fontWeight: 500 }}
-        className={clickable ? 'underline-offset-2 group-hover:underline' : undefined}
       >
         {truncate(node.label, 24)}
       </text>
@@ -178,18 +202,29 @@ function NodeBox({ node, onOpen }: { node: Placed; onOpen: (link: string) => voi
 }
 
 function EdgePath({
-  edge, from, to, markerId,
-}: { edge: GraphEdge; from: Placed; to: Placed; markerId: string }) {
+  edge, from, to, markerId, markerHighlightId, highlighted, dimmed,
+}: {
+  edge: GraphEdge
+  from: Placed
+  to: Placed
+  markerId: string
+  markerHighlightId: string
+  highlighted: boolean
+  dimmed: boolean
+}) {
   const { d, labelX, labelY } = edgeGeometry(from, to)
   const label = edge.label.replace(/_/g, ' ')
   const w = label.length * 5.2 + 8
+  const opacity = dimmed ? 0.15 : 1
+  const strokeColor = highlighted ? 'hsl(var(--primary))' : 'hsl(var(--border))'
+  const strokeWidth = highlighted ? 2 : 1.25
   return (
-    <g>
+    <g style={{ opacity }} className="transition-opacity">
       <path
         d={d}
         fill="none"
-        markerEnd={`url(#${markerId})`}
-        style={{ stroke: 'hsl(var(--border))', strokeWidth: 1.25 }}
+        markerEnd={`url(#${highlighted ? markerHighlightId : markerId})`}
+        style={{ stroke: strokeColor, strokeWidth }}
       />
       <rect
         x={labelX - w / 2}
@@ -203,7 +238,11 @@ function EdgePath({
         x={labelX}
         y={labelY + 3.5}
         textAnchor="middle"
-        style={{ fill: 'hsl(var(--muted-foreground))', fontSize: 9 }}
+        style={{
+          fill: highlighted ? 'hsl(var(--primary))' : 'hsl(var(--muted-foreground))',
+          fontSize: 9,
+          fontWeight: highlighted ? 500 : 400,
+        }}
       >
         {label}
       </text>
@@ -245,8 +284,11 @@ export function RelationshipGraph({
   defaultOpen = true,
 }: RelationshipGraphProps) {
   const router = useRouter()
-  const markerId = `rg-arrow-${useId().replace(/:/g, '')}`
+  const idBase = useId().replace(/:/g, '')
+  const markerId = `rg-arrow-${idBase}`
+  const markerHighlightId = `rg-arrow-hl-${idBase}`
   const [open, setOpen] = useState(defaultOpen)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
   // Nothing is fetched while the panel is folded away, and never without the
   // student.read the graph endpoint requires.
   const canRead = useCan('student.read')
@@ -258,9 +300,63 @@ export function RelationshipGraph({
   const view = useMemo(() => layout(nodes), [nodes])
 
   const forbidden = (error as ApiError | null)?.status === 403
-  const edges = (data?.edges ?? []).filter(
-    (e) => view.byId.has(e.source) && view.byId.has(e.target),
+  const edges = useMemo(
+    () => (data?.edges ?? []).filter(
+      (e) => view.byId.has(e.source) && view.byId.has(e.target),
+    ),
+    [data, view.byId],
   )
+
+  // Lineage = the DIRECTED chain the selected node sits on:
+  //   • downstream = every node reachable by following edges source → target
+  //   • upstream   = every node reachable by following edges target → source
+  // The union is exactly the ancestry + descendants of the selection, NOT the whole
+  // connected component. That's the difference between "here is Alice's specific funding
+  // lineage" and "here is everyone in Alice's blob".
+  const lineageIds = useMemo(() => {
+    if (!selectedId) return new Set<string>()
+    const forward = new Map<string, string[]>()
+    const backward = new Map<string, string[]>()
+    for (const e of edges) {
+      if (!forward.has(e.source)) forward.set(e.source, [])
+      if (!backward.has(e.target)) backward.set(e.target, [])
+      forward.get(e.source)!.push(e.target)
+      backward.get(e.target)!.push(e.source)
+    }
+    const walk = (adj: Map<string, string[]>) => {
+      const seen = new Set<string>([selectedId])
+      const queue = [selectedId]
+      while (queue.length) {
+        const id = queue.shift()!
+        for (const n of adj.get(id) ?? []) {
+          if (!seen.has(n)) { seen.add(n); queue.push(n) }
+        }
+      }
+      return seen
+    }
+    const down = walk(forward)
+    const up = walk(backward)
+    return new Set<string>([...down, ...up])
+  }, [selectedId, edges])
+
+  // Edges are highlighted only if BOTH endpoints are in the lineage AND at least one
+  // of them is on the actual path — i.e., the edge participates in the chain.
+  const lineageEdgeKey = useMemo(() => {
+    const s = new Set<string>()
+    if (!selectedId) return s
+    for (const e of edges) {
+      if (lineageIds.has(e.source) && lineageIds.has(e.target)) {
+        s.add(`${e.source}->${e.target}`)
+      }
+    }
+    return s
+  }, [edges, lineageIds, selectedId])
+
+  const handleSelect = useCallback((id: string) => {
+    setSelectedId((prev) => (prev === id ? null : id))
+  }, [])
+
+  const selectedNode = selectedId ? view.byId.get(selectedId) : undefined
 
   return (
     <PageSection
@@ -315,8 +411,33 @@ export function RelationshipGraph({
         </div>
       ) : (
         <div className="space-y-3">
-          <Legend kinds={view.columns} />
-          <div className="overflow-x-auto rounded-md border border-border bg-surface-2/40">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <Legend kinds={view.columns} />
+            {selectedNode ? (
+              <div className="flex items-center gap-2 text-xs">
+                <span className="text-muted-foreground">Lineage:</span>
+                <span className="font-medium">{selectedNode.label}</span>
+                <span className="text-muted-foreground">
+                  · {lineageIds.size} connected node{lineageIds.size === 1 ? '' : 's'}
+                </span>
+                {selectedNode.link && (
+                  <Button size="sm" variant="secondary"
+                          onClick={() => router.push(selectedNode.link!)}>
+                    Open record <ArrowUpRight className="ml-1 h-3 w-3" />
+                  </Button>
+                )}
+                <Button size="sm" variant="ghost" onClick={() => setSelectedId(null)}>
+                  <X className="h-3 w-3 mr-1" /> Clear
+                </Button>
+              </div>
+            ) : (
+              <span className="text-helper">Click a node to trace its full lineage.</span>
+            )}
+          </div>
+          <div
+            className="overflow-x-auto rounded-md border border-border bg-surface-2/40"
+            onClick={() => setSelectedId(null)}
+          >
             <svg
               width={view.width}
               height={view.height}
@@ -324,6 +445,7 @@ export function RelationshipGraph({
               role="img"
               aria-label="Research relationship map"
               className="block"
+              onClick={(e) => e.stopPropagation()}
             >
               <defs>
                 <marker
@@ -337,28 +459,56 @@ export function RelationshipGraph({
                 >
                   <path d="M 0 1 L 7 4 L 0 7 z" style={{ fill: 'hsl(var(--border))' }} />
                 </marker>
+                <marker
+                  id={markerHighlightId}
+                  viewBox="0 0 8 8"
+                  refX={7}
+                  refY={4}
+                  markerWidth={6}
+                  markerHeight={6}
+                  orient="auto-start-reverse"
+                >
+                  <path d="M 0 1 L 7 4 L 0 7 z" style={{ fill: 'hsl(var(--primary))' }} />
+                </marker>
               </defs>
               {/* Edges first so nodes always sit on top of them. */}
-              {edges.map((e, i) => (
-                <EdgePath
-                  key={`${e.source}->${e.target}:${e.label}:${i}`}
-                  edge={e}
-                  from={view.byId.get(e.source)!}
-                  to={view.byId.get(e.target)!}
-                  markerId={markerId}
-                />
-              ))}
-              {view.placed.map((n) => (
-                <NodeBox key={n.id} node={n} onOpen={(link) => router.push(link)} />
-              ))}
+              {edges.map((e, i) => {
+                const inLineage = lineageEdgeKey.has(`${e.source}->${e.target}`)
+                return (
+                  <EdgePath
+                    key={`${e.source}->${e.target}:${e.label}:${i}`}
+                    edge={e}
+                    from={view.byId.get(e.source)!}
+                    to={view.byId.get(e.target)!}
+                    markerId={markerId}
+                    markerHighlightId={markerHighlightId}
+                    highlighted={inLineage}
+                    dimmed={!!selectedId && !inLineage}
+                  />
+                )
+              })}
+              {view.placed.map((n) => {
+                const inLineage = lineageIds.has(n.id)
+                return (
+                  <NodeBox
+                    key={n.id}
+                    node={n}
+                    onSelect={handleSelect}
+                    selectedId={selectedId}
+                    inLineage={inLineage}
+                    dimmed={!!selectedId && !inLineage}
+                  />
+                )
+              })}
             </svg>
           </div>
           <p className="text-helper num">
             {data?.counts
               ? `${data.counts.nodes} node${data.counts.nodes === 1 ? '' : 's'} · ${data.counts.edges} connection${data.counts.edges === 1 ? '' : 's'} · ${data.counts.students} student${data.counts.students === 1 ? '' : 's'} in scope`
               : `${nodes.length} nodes · ${edges.length} connections`}
-            . Layered layout — a node&apos;s position is fixed by its kind, so the picture does not
-            move between refreshes. Nodes with a record open it when clicked.
+            . Layered layout — a node&apos;s position is fixed by its kind, so the picture does
+            not move between refreshes. Click any node to trace its lineage; click again or
+            outside to clear.
           </p>
         </div>
       )}

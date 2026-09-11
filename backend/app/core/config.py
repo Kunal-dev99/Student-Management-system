@@ -67,6 +67,22 @@ class Settings(BaseSettings):
     # CB-A/CB-C — the assistant is fully deterministic (fuzzy + bag-of-words). The LLM path
     # was retired in CB-C; no anthropic_api_key or assistant_llm_enabled setting is consumed.
 
+    # Composer — the LLM composes render specs from a fixed catalog (app/modules/composer).
+    # Infrastructure only: whether a tenant may *use* it is an institution setting, not env.
+    # With no key the provider resolves to the mock and the composer degrades rather than
+    # erroring, so a deployment without a model still boots and serves every other feature.
+    llm_provider: Literal["groq", "mock"] = "groq"
+    # Groq's catalogue moves; check /v1/models for what an account can actually reach
+    # before changing this. A model the key cannot see fails at request time, not startup.
+    llm_model: str = "openai/gpt-oss-120b"
+    # Planning is a much easier job than composing — pick functions from a list, versus
+    # design a dashboard. A smaller model halves the latency of the phase that runs two or
+    # three times per question, and costs a fraction of the tokens. Set equal to llm_model
+    # to use one model for both.
+    llm_planner_model: str = "openai/gpt-oss-20b"
+    llm_timeout_seconds: float = 45.0
+    groq_api_key: str | None = None
+
     sentry_dsn: str | None = None
     otel_exporter_endpoint: str | None = None
     log_level: Literal["info", "debug", "warning"] = "info"

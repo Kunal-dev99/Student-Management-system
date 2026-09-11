@@ -56,6 +56,9 @@ def _principal_from_user(user: User) -> Principal:
         person_id=user.person_id,
         roles=sorted(r.name for r in user.roles),
         permissions=_permissions_for(user),
+        # MT-1 — carry tenant into the principal so downstream middleware / RLS
+        # can scope queries. `tenant_id` is nullable during Phase 1.
+        tenant_id=getattr(user, "tenant_id", None),
     )
 
 
@@ -65,6 +68,8 @@ def _claims_for(principal: Principal) -> dict:
         "personId": str(principal.person_id) if principal.person_id else None,
         "roles": principal.roles,
         "permissions": principal.permissions,
+        # MT-1 — new claim. Older tokens without it decode fine (see the decoder).
+        "tenantId": str(principal.tenant_id) if principal.tenant_id else None,
     }
 
 
@@ -151,10 +156,46 @@ class IdentityService:
         self.repo.add_reset_token(user.id, hash_opaque(raw), expires)
         await self.repo.session.commit()
         link = f"{settings.app_base_url}/reset-password?token={raw}"
+        minutes = settings.password_reset_ttl_seconds // 60
+        text_body = (
+            f"You have been invited to the PGR Platform.\n\n"
+            f"Set your password using this link (valid for {minutes} minutes):\n\n"
+            f"{link}\n\n"
+            f"If you did not expect this email, you can ignore it."
+        )
+        html_body = f"""\
+<!doctype html>
+<html><body style="margin:0;padding:24px;background:#f5f5f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;color:#111;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;margin:0 auto;background:#fff;border:1px solid #e5e5e5;border-radius:8px;">
+    <tr><td style="padding:32px 32px 8px 32px;">
+      <h1 style="margin:0 0 16px 0;font-size:20px;font-weight:600;">Welcome to the PGR Platform</h1>
+      <p style="margin:0 0 16px 0;font-size:14px;line-height:1.5;color:#333;">
+        An administrator has invited you. Use the button below to set your password and sign in.
+      </p>
+    </td></tr>
+    <tr><td style="padding:8px 32px 24px 32px;">
+      <a href="{link}" style="display:inline-block;background:#0f172a;color:#fff;text-decoration:none;padding:12px 20px;border-radius:6px;font-size:14px;font-weight:500;">
+        Set your password
+      </a>
+      <p style="margin:20px 0 0 0;font-size:12px;color:#666;line-height:1.5;">
+        This link is valid for {minutes} minutes. If the button does not work, copy this URL into your browser:
+      </p>
+      <p style="margin:8px 0 0 0;font-size:12px;color:#0f172a;word-break:break-all;">
+        {link}
+      </p>
+    </td></tr>
+    <tr><td style="padding:16px 32px 24px 32px;border-top:1px solid #eee;">
+      <p style="margin:0;font-size:11px;color:#999;">
+        If you did not expect this email, you can safely ignore it.
+      </p>
+    </td></tr>
+  </table>
+</body></html>"""
         await send_email(
             to=user.email,
-            subject="Reset your PGR Platform password",
-            body=f"Use this link to set a new password (valid {settings.password_reset_ttl_seconds // 60} min):\n\n{link}",
+            subject="Set your PGR Platform password",
+            body=text_body,
+            html=html_body,
         )
 
     async def confirm_password_reset(self, token: str, new_password: str) -> None:
@@ -183,12 +224,14 @@ class IdentityService:
         # Fast path: build the principal from token claims — no DB round-trip (arch §16).
         if "roles" in claims:
             pid = claims.get("personId")
+            tid = claims.get("tenantId")
             return Principal(
                 user_id=uuid.UUID(claims["sub"]),
                 email=claims.get("email") or "",
                 person_id=uuid.UUID(pid) if pid else None,
                 roles=claims.get("roles", []),
                 permissions=claims.get("permissions", []),
+                tenant_id=uuid.UUID(tid) if tid else None,
             )
         # Fallback for tokens without embedded claims.
         user = await self.repo.get_user_by_id(uuid.UUID(claims["sub"]))

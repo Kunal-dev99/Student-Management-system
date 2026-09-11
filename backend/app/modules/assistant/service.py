@@ -145,13 +145,20 @@ class AssistantService:
 
         plan = await write_registry.stage(intent.write_action, self.session, self.principal, d)
         if plan is None:
-            # Couldn't identify the target — degrade to clarify with a chip prompting the user
-            # to name the entity explicitly.
+            # Distinguish the three real reasons staging failed, so the message actually helps.
+            needs_person = "person" in intent.optional_slots
+            if needs_person and not d.entities:
+                msg = (f"To {intent.description.lower()} I need the student's name or ref. "
+                       "Try adding it, e.g. 'approve Alice Khan's payment'.")
+            elif intent.write_action == "assign_supervisor" and self.principal.person_id is None:
+                msg = ("Your account isn't linked to a person record, so I can't assign you "
+                       "as a supervisor. Ask an administrator to link the two under Settings → "
+                       "Users & roles, or invoke this from a supervisor's account.")
+            else:
+                msg = (f"Nothing to do — there's no matching record for "
+                       f"'{intent.description.lower().rstrip('.')}' right now.")
             return self._envelope(
-                kind="clarify", decision=d,
-                text=(f"To {intent.description.lower()} I need the student's name or ref. "
-                       "Try adding it, e.g. 'approve Alice Khan's payment'."),
-                chips=[],
+                kind="clarify", decision=d, text=msg, chips=[],
             )
 
         pending = pending_write.stage(
@@ -309,10 +316,52 @@ class AssistantService:
             return f"{risk.get('atRiskCount', 0)} of {risk.get('activeStudents', 0)} active students at risk."
         if intent.tool == "cohort_query":
             n = data.get("count", 0)
-            return f"{n} student{'s' if n != 1 else ''} match."
+            # Describe the filter that ran so the answer isn't identically bland for every
+            # cohort query. Prefer explicit filter args; fall back to the intent's own
+            # description so preset filters (funding_gap, milestones_overdue, …) still
+            # get named in the readback.
+            desc_bits = []
+            if args.get("noSupervisionMeetingInDays"):
+                desc_bits.append(f"no supervision meeting in {args['noSupervisionMeetingInDays']} days")
+            if args.get("fundingExpiringWithinDays"):
+                desc_bits.append(f"funding expiring in {args['fundingExpiringWithinDays']} days")
+            if args.get("noActiveFunding"):
+                desc_bits.append("no active funding")
+            if args.get("milestoneOverdue"):
+                desc_bits.append("milestone overdue")
+            if args.get("thesisStatus"):
+                desc_bits.append(f"thesis {args['thesisStatus']}")
+            if args.get("status"):
+                desc_bits.append(f"status {args['status']}")
+            if not desc_bits and intent.description:
+                # Trim the trailing period for a clean readback.
+                desc_bits.append(intent.description.rstrip(".").lower())
+            tail = f" · {' AND '.join(desc_bits)}" if desc_bits else ""
+            return f"{n} student{'s' if n != 1 else ''} match{tail}."
         if intent.tool == "get_student_overview":
             st = data.get("student", {}) or {}
-            return f"{st.get('personName', '?')} ({st.get('studentRef', '?')}) — {st.get('status', '?')}."
+            # `status` can arrive as a raw Enum object (whose str() reads "StudentStatus.active");
+            # coerce to its value so the readback is plain English.
+            status = st.get("status", "?")
+            if hasattr(status, "value"):
+                status = status.value
+            supervisors = st.get("supervisors") or []
+            funding = st.get("funding") or []
+            fund_bit = ""
+            if funding:
+                types = ", ".join(
+                    (f.get("fundingType") or "").replace("_", " ") for f in funding[:2]
+                )
+                if types:
+                    fund_bit = f", funded by {types}"
+            sup_bit = ""
+            if supervisors:
+                names = ", ".join(str(s.get("personName") or "") for s in supervisors[:2]
+                                   if s.get("personName"))
+                if names:
+                    sup_bit = f", supervised by {names}"
+            return (f"{st.get('personName', '?')} — {status}"
+                    f"{sup_bit}{fund_bit}. Ref {st.get('studentRef', '?')}.")
         return "Done."
 
     def _chip_label(self, intent) -> str:

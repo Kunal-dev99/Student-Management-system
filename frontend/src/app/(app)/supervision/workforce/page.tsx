@@ -50,7 +50,7 @@ export default function WorkforcePage() {
     <>
       <PageHeader
         title="Supervisor workforce"
-        description="W5 — institution-wide capacity, availability, and assignment backlog across every supervisor we manage."
+        description="Institution-wide supervisor capacity, availability, and backlog."
       />
       <div className="px-6 pb-6 space-y-4">
         {isLoading ? <Skeleton className="h-32 w-full" />

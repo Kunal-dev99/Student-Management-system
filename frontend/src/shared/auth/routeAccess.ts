@@ -27,7 +27,12 @@ export const ROUTE_ACCESS: RouteAccess[] = [
   // Main
   { href: '/dashboard', perms: ['reporting.read'] },
   { href: '/analytics', perms: ['reporting.read'] },
-  { href: '/portal', perms: [], roles: [...ADMIN_ROLES, 'Supervisor', 'Student'] },
+  // "My journey" is the student's own portal — an admin has no lifecycle to look at.
+  // Same for the supervisor: they're personally-scoped surfaces. If an admin needs to
+  // see what a student sees, they log in as one.
+  { href: '/portal', perms: [], roles: ['Student'] },
+  { href: '/documents', perms: [], roles: ['Student'] },
+  { href: '/messages', perms: [], roles: ['Student', 'Supervisor'] },
   { href: '/tasks', perms: [], roles: [...ADMIN_ROLES, 'Supervisor', 'Student'] },
   { href: '/persons', perms: ['person.read'] },
   { href: '/research', perms: ['recruitment.read'] },
@@ -42,12 +47,7 @@ export const ROUTE_ACCESS: RouteAccess[] = [
   { href: '/thesis', perms: ['student.read'], roles: [...ADMIN_ROLES, 'Supervisor'] },
   { href: '/completion', perms: ['student.read'], roles: ADMIN_ROLES },
   // ICR module — institution-specific group, additive to the core workspace.
-  { href: '/icr', perms: ['student.read'], roles: [...ADMIN_ROLES, 'Supervisor'] },
-  { href: '/icr/transfer-viva', perms: ['progression.read'], roles: [...ADMIN_ROLES, 'Supervisor'] },
-  { href: '/icr/pathways', perms: ['student.read'], roles: [...ADMIN_ROLES, 'Supervisor'] },
-  { href: '/icr/funding', perms: ['funding.read'], roles: ADMIN_ROLES },
-  { href: '/icr/model', perms: [], roles: [...ADMIN_ROLES, 'Supervisor'] },
-  { href: '/icr/students', perms: ['student.read'], roles: [...ADMIN_ROLES, 'Supervisor'] },
+  { href: '/progression/transfer-viva', perms: ['progression.read'], roles: [...ADMIN_ROLES, 'Supervisor'] },
   // Administration
   { href: '/funding-integrity', perms: ['funding.read'], roles: ADMIN_ROLES },
   { href: '/statutory', perms: ['reporting.read'], roles: ADMIN_ROLES },
@@ -58,6 +58,14 @@ export const ROUTE_ACCESS: RouteAccess[] = [
   { href: '/audit', perms: ['audit.read'], roles: ADMIN_ROLES },
   // Advanced
   { href: '/pattern-lab', perms: ['ml.read'], roles: ADMIN_ROLES },
+  // The composer reads whatever the caller may read — its own function catalogue is
+  // permission-filtered server-side, so student.read is the right floor.
+  { href: '/composer', perms: ['student.read'], roles: [...ADMIN_ROLES, 'Supervisor'] },
+  // AI-as-a-layer surface — same permission floor as any risk view.
+  { href: '/reviews', perms: ['student.read'], roles: [...ADMIN_ROLES, 'Supervisor'] },
+  // Supervisor's own caseload — the "who needs me today?" landing. Personally scoped,
+  // so admins don't see it either — they use /students and /supervision/workforce.
+  { href: '/my-students', perms: [], roles: ['Supervisor'] },
 ]
 
 /** Longest-prefix match so detail routes (/students/{id}) inherit their list route's rules. */

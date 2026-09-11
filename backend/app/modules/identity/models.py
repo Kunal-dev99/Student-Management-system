@@ -12,6 +12,10 @@ from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Table, Co
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin, UUIDMixin
+# MT-1 — ensure the Tenant model is registered in Base.metadata whenever User is
+# imported (User carries a FK to tenant.id). Without this, tests that build the
+# schema via `Base.metadata.create_all` fail to resolve the reference.
+from app.modules.tenant import models as _tenant_models  # noqa: F401
 
 role_permission = Table(
     "role_permission",
@@ -45,6 +49,11 @@ class Role(UUIDMixin, TimestampMixin, Base):
 
 class User(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "users"
+    # MT-1 — nullable during Phase 1 (skeleton). Backfilled to the default tenant
+    # by mt1_tenant_skeleton migration; will become NOT NULL in Phase 2.
+    tenant_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("tenant.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
     person_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("person.id", ondelete="SET NULL"), nullable=True
     )

@@ -12,6 +12,7 @@ import {
   Search,
   ShieldCheck,
   Sparkles,
+  Zap,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -76,11 +77,12 @@ function ConfirmWriteCard({
   const changedKeys = Array.from(new Set([...Object.keys(before), ...Object.keys(after)]))
 
   return (
-    <div className="mt-4 rounded-lg bg-surface-2 p-4">
+    <div className="mt-4 rounded-lg border border-[hsl(var(--warning)/0.4)] bg-[hsl(var(--warning)/0.06)] p-4">
       <div className="mb-3 flex items-center gap-2">
-        <ShieldCheck className="h-4 w-4 text-[hsl(var(--warning))]" />
-        <p className="text-sm font-medium">{data.target.label}</p>
+        <Zap className="h-4 w-4 text-[hsl(var(--warning))]" />
+        <p className="text-[11px] uppercase tracking-wider text-[hsl(var(--warning))]">Action ready</p>
       </div>
+      <p className="mb-3 text-sm font-medium">{data.target.label}</p>
 
       {changedKeys.length > 0 && (
         <div className="rounded-md border border-border/50 bg-surface-1 px-3 py-2">
@@ -103,11 +105,13 @@ function ConfirmWriteCard({
         </p>
       )}
 
-      <div className="mt-4 flex items-center gap-3">
+      <div className="mt-4 flex items-center gap-2">
         <Button size="sm" onClick={() => onConfirm(data.pendingId)} disabled={pending}>
-          {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Confirm'}
+          {pending
+            ? <><Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> Working…</>
+            : <><ShieldCheck className="h-3.5 w-3.5 mr-1" /> Confirm &amp; run</>}
         </Button>
-        <p className="text-xs text-muted-foreground">
+        <p className="ml-1 text-xs text-muted-foreground">
           Nothing has changed yet
           {typeof data.expiresInSeconds === 'number' && ` · expires in ${Math.round(data.expiresInSeconds / 60)}m`}
         </p>
@@ -120,7 +124,9 @@ function ConfirmWriteCard({
 
 function InlineTrace({ trace }: { trace: AssistantTrace }) {
   const [open, setOpen] = useState(false)
-  const top = trace.intents[0]
+  // Confirm-write responses carry a leaner trace ({executed, pendingId}) with no intents
+  // array — defend against that shape rather than crashing the whole palette.
+  const top = trace.intents?.[0]
   if (!top) return null
   return (
     <div className="mt-3 text-xs">
@@ -147,17 +153,112 @@ function InlineTrace({ trace }: { trace: AssistantTrace }) {
               {top.entityAnchor && <span className="ml-1 text-primary">+ entity</span>}
             </p>
           )}
-          {trace.entities.length > 0 && (
+          {trace.entities && trace.entities.length > 0 && (
             <p>resolved {trace.entities.map((e) => e.name).join(', ')}</p>
           )}
           {trace.timeSlot && (
             <p>window <span className="num">{trace.timeSlot.from} → {trace.timeSlot.to}</span></p>
           )}
-          {trace.intents.length > 1 && (
+          {trace.intents && trace.intents.length > 1 && (
             <p>alternatives {trace.intents.slice(1).map((i) => `${i.name}·${i.score.toFixed(2)}`).join(' · ')}</p>
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+// -------- Follow-up suggestions --------------------------------------------
+
+/** Contextual "you might also ask…" chips shown under every answer so the flow keeps
+ *  going. Reads the last answer's intent + resolved entity, and picks 2–4 next hops. */
+function followupSuggestions(answer: AssistantAnswer): string[] {
+  const intentName = answer.trace?.intents?.[0]?.name
+  const entity = answer.trace?.entities?.[0]
+  const person = entity?.name
+  void person
+  // Confirm-write and other minimal-trace answers — offer a couple of safe next hops.
+  if (answer.trace?.executed) {
+    return ['my tasks', 'who is at risk', 'mark all notifications as read']
+  }
+  const bySlot = (s: string) => `${person ? `${person}'s ` : ''}${s}`
+
+  if (person && intentName === 'student_summary') {
+    return [
+      bySlot('funding'),
+      bySlot('milestones'),
+      bySlot('supervisors'),
+      `how is ${person} progressing?`,
+    ]
+  }
+  if (intentName === 'funding_gap' || intentName === 'held_payments'
+      || intentName === 'overdue_payments' || intentName === 'funding_cashflow') {
+    return [
+      'unfunded students',
+      'who is at risk',
+      'students with funding expiring in 6 months',
+      'held payments this quarter',
+    ]
+  }
+  if (intentName === 'at_risk_students') {
+    return [
+      'unfunded students',
+      'students with an overdue milestone',
+      'students with no supervision meeting in 90 days',
+      'who has funding expiring in 6 months',
+    ]
+  }
+  if (intentName === 'milestones_overdue' || intentName === 'milestones_due') {
+    return [
+      'supervision meetings overdue',
+      'who is at risk',
+      'students with funding expiring in 6 months',
+    ]
+  }
+  if (intentName === 'my_tasks') {
+    return ['complete my next task', 'mark all notifications as read']
+  }
+  if (intentName === 'supervisor_workforce') {
+    return [
+      'supervision meetings overdue',
+      'who is at risk',
+      'assignment requests pending',
+    ]
+  }
+  if (intentName === 'navigate') {
+    return []
+  }
+  // Generic fall-through — always give SOMETHING so the thread never dead-ends.
+  return [
+    'who is at risk',
+    'my tasks',
+    'unfunded students',
+  ]
+}
+
+function FollowupRow({ answer, onSuggest }: {
+  answer: AssistantAnswer
+  onSuggest: (q: string) => void
+}) {
+  const items = followupSuggestions(answer)
+  if (items.length === 0) return null
+  return (
+    <div className="mt-4 border-t border-border/40 pt-3">
+      <p className="mb-1.5 text-[11px] uppercase tracking-wider text-muted-foreground">
+        You might also ask
+      </p>
+      <div className="flex flex-wrap gap-1.5">
+        {items.map((q) => (
+          <button
+            key={q}
+            type="button"
+            onClick={() => onSuggest(q)}
+            className="rounded-full border border-border/60 bg-surface-2 px-3 py-1 text-xs text-muted-foreground transition-all hover:border-primary/50 hover:bg-primary/5 hover:text-foreground"
+          >
+            {q}
+          </button>
+        ))}
+      </div>
     </div>
   )
 }
@@ -251,6 +352,12 @@ function AnswerBlock({
             )}
 
             {answer.trace && <InlineTrace trace={answer.trace} />}
+
+            {/* Contextual follow-ups so the conversation keeps rolling. Skip on write
+             *  confirmations (the primary action is Confirm, not another question). */}
+            {answer.kind !== 'confirm_write' && (
+              <FollowupRow answer={answer} onSuggest={onSuggest} />
+            )}
           </div>
         </div>
       )}
@@ -265,19 +372,73 @@ const GROUP_LABEL: Record<string, string> = {
   recruitment: 'Recruitment', admin: 'Admin', meta: 'Meta',
 }
 
+/** A doer chip. Distinct look so users can spot actions vs questions at a glance. */
+function DoerChip({ label, description, onClick }: {
+  label: string; description?: string; onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={description}
+      className="inline-flex items-center gap-1.5 rounded-full border border-[hsl(var(--warning)/0.4)] bg-[hsl(var(--warning)/0.08)] px-3 py-1.5 text-sm text-foreground transition-all hover:border-[hsl(var(--warning))] hover:bg-[hsl(var(--warning)/0.14)]"
+    >
+      <Zap className="h-3 w-3 text-[hsl(var(--warning))]" />
+      {label}
+    </button>
+  )
+}
+
+/** Intent name → true if it's a write action (heuristic; the intent library also carries
+ *  a `writeAction` flag but the /help endpoint doesn't return it yet). */
+const DOER_NAMES = new Set([
+  'approve_payment', 'hold_payment', 'submit_signoff',
+  'complete_task', 'mark_notifications_read', 'transition_opportunity',
+  'add_supervision_meeting', 'assign_supervisor',
+])
+
 function EmptyState({ onSuggest }: { onSuggest: (q: string) => void }) {
   const help = useAssistantHelp()
   const groups = help.data?.groups ?? []
   const [showAll, setShowAll] = useState(false)
 
+  // Peel doers off into their own top section so users see there ARE actions, not
+  // just questions.
+  const doerExamples: { name: string; example: string; description: string }[] = []
+  for (const g of groups) {
+    for (const i of g.intents) {
+      if (DOER_NAMES.has(i.name) && i.examples.length) {
+        doerExamples.push({ name: i.name, example: i.examples[0], description: i.description })
+      }
+    }
+  }
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-7">
       <div>
-        <p className="text-lg font-medium text-foreground">Ask anything.</p>
+        <p className="text-lg font-medium text-foreground">Ask, or tell me what to do.</p>
         <p className="mt-1 text-sm text-muted-foreground">
-          Students, funding, supervision, progression, recruitment. Deterministic — nothing leaves the server.
+          Answers come with the reasoning behind them. Actions stage a confirmation first —
+          nothing changes until you click Confirm. Deterministic; nothing leaves the server.
         </p>
       </div>
+
+      {doerExamples.length > 0 && (
+        <div>
+          <p className="mb-2 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-[hsl(var(--warning))]">
+            <Zap className="h-3 w-3" /> Do — actions the assistant can perform for you
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {doerExamples.map((d) => (
+              <DoerChip key={d.name} label={d.example} description={d.description}
+                onClick={() => onSuggest(d.example)} />
+            ))}
+          </div>
+          <p className="mt-2 text-[11px] text-muted-foreground">
+            Each will show a confirm card with a before/after diff. Nothing runs without your click.
+          </p>
+        </div>
+      )}
 
       {groups.length === 0 ? (
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -286,11 +447,16 @@ function EmptyState({ onSuggest }: { onSuggest: (q: string) => void }) {
         </div>
       ) : (
         <div className="space-y-5">
+          <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+            Ask — questions the assistant can answer
+          </p>
           {groups.map((g) => {
-            const items = showAll ? g.intents : g.intents.slice(0, 4)
+            const askIntents = g.intents.filter((i) => !DOER_NAMES.has(i.name))
+            const items = showAll ? askIntents : askIntents.slice(0, 4)
+            if (items.length === 0) return null
             return (
               <div key={g.name}>
-                <p className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                <p className="mb-2 text-[11px] uppercase tracking-wider text-muted-foreground/80">
                   {GROUP_LABEL[g.name] ?? g.name}
                 </p>
                 <div className="flex flex-wrap gap-2">
@@ -367,7 +533,17 @@ export function AskPgrPalette({
   }, [turns, ask.isPending])
 
   useEffect(() => {
-    if (open) setTimeout(() => inputRef.current?.focus(), 50)
+    if (open) {
+      // Each open = a fresh session: new slot-memory bucket on the server, empty transcript
+      // client-side. Prevents accidental context leak from a previous conversation.
+      sessionIdRef.current =
+        typeof crypto !== 'undefined' && 'randomUUID' in crypto
+          ? crypto.randomUUID()
+          : Math.random().toString(36).slice(2)
+      setTurns([])
+      setValue('')
+      setTimeout(() => inputRef.current?.focus(), 50)
+    }
   }, [open])
 
   const submit = useCallback(
@@ -386,6 +562,9 @@ export function AskPgrPalette({
             : (e as Error).message
         setTurns((prev) => prev.map((t, i) => (i === prev.length - 1 ? { ...t, error: message } : t)))
       }
+      // Keep the input ready for the next question — the conversation should
+      // never dead-end at "you asked one thing, now click somewhere else".
+      setTimeout(() => inputRef.current?.focus(), 50)
     },
     [ask],
   )
@@ -410,7 +589,7 @@ export function AskPgrPalette({
 
   return (
     <Dialog open onOpenChange={onOpenChange}>
-      <DialogContent className="flex h-[92vh] w-[95vw] max-w-[1400px] flex-col gap-0 overflow-hidden p-0 sm:rounded-xl">
+      <DialogContent className="flex h-[97vh] w-[98vw] max-w-none flex-col gap-0 overflow-hidden p-0 sm:rounded-xl">
         {/* Header */}
         <DialogHeader className="border-b border-border/60 px-6 py-3">
           <DialogTitle className="flex items-center justify-between gap-3 text-base font-medium">
@@ -455,7 +634,7 @@ export function AskPgrPalette({
 
             {/* Message thread — content centred + capped for readability at the wide dialog */}
             <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-8 md:px-10 md:py-10">
-              <div className="mx-auto w-full max-w-3xl space-y-10">
+              <div className="mx-auto w-full max-w-4xl space-y-10">
                 {turns.length === 0 && <EmptyState onSuggest={(q) => void submit(q)} />}
 
                 {turns.map((t, i) => (

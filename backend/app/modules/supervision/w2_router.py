@@ -86,6 +86,61 @@ async def upsert_profile(
     )
 
 
+# ---------------------------- Pool (people the institution treats as supervisors)
+
+@sup_profile_router.get("/pool",
+                        summary="Supervisor-capable persons — dedup'd, name-sorted")
+async def supervisor_pool(
+    session: AsyncSession = Depends(get_read_session),
+    _=Depends(require_permission("student.read")),
+) -> dict:
+    """The population that should appear in a 'Choose a supervisor…' dropdown.
+
+    Population = union of persons who have a SupervisorProfile, are currently
+    supervising, or hold an employee/researcher person_relationship. Deduped by
+    person_id; sorted by name. Solves 'the picker shows students and duplicates'.
+    """
+    from sqlalchemy import select
+    from app.modules.person.constants import PersonRelationshipType
+    from app.modules.person.models import Person, PersonRelationship
+    from app.modules.supervision.models import SupervisorRelationship
+    from app.modules.supervision.w2_models import SupervisorProfile
+
+    profile_ids = {r for (r,) in (await session.execute(
+        select(SupervisorProfile.person_id)
+    )).all()}
+
+    supervising_ids = {r for (r,) in (await session.execute(
+        select(SupervisorRelationship.supervisor_person_id)
+    )).all()}
+
+    employee_ids = {r for (r,) in (await session.execute(
+        select(PersonRelationship.person_id).where(
+            PersonRelationship.relationship_type.in_((
+                PersonRelationshipType.employee,
+                PersonRelationshipType.researcher,
+            )),
+            PersonRelationship.valid_to.is_(None),
+        )
+    )).all()}
+
+    pool_ids = profile_ids | supervising_ids | employee_ids
+    if not pool_ids:
+        return {"pool": []}
+
+    rows = (await session.execute(
+        select(Person.id, Person.given_name, Person.family_name, Person.email)
+        .where(Person.id.in_(pool_ids))
+        .order_by(Person.family_name, Person.given_name)
+    )).all()
+    return {"pool": [
+        {"id": str(pid), "givenName": gn, "familyName": fn, "email": em,
+         "hasProfile": pid in profile_ids,
+         "currentlySupervising": pid in supervising_ids}
+        for pid, gn, fn, em in rows
+    ]}
+
+
 # ---------------------------- Recommend
 
 @sup_profile_router.get("/recommend",
@@ -158,7 +213,37 @@ async def list_all(
     _=Depends(require_permission("student.read")),
 ) -> dict:
     rows = await SupervisorAssignmentService(session).list_by_state(state)
-    return {"requests": [_request_out(r) for r in rows]}
+    # Enrich with human-readable names so the FE queue doesn't render UUIDs.
+    from sqlalchemy import select as _select
+    from app.modules.person.models import Person
+    from app.modules.student_record.models import Student
+    student_ids = list({r.student_id for r in rows})
+    supervisor_ids = list({r.proposed_supervisor_person_id for r in rows})
+    students = {}
+    if student_ids:
+        srows = (await session.execute(
+            _select(Student.id, Student.student_ref, Person.given_name, Person.family_name)
+            .join(Person, Person.id == Student.person_id)
+            .where(Student.id.in_(student_ids))
+        )).all()
+        students = {str(sid): {"studentRef": ref, "personName": f"{gn} {fn}"}
+                    for sid, ref, gn, fn in srows}
+    supervisors = {}
+    if supervisor_ids:
+        prows = (await session.execute(
+            _select(Person.id, Person.given_name, Person.family_name)
+            .where(Person.id.in_(supervisor_ids))
+        )).all()
+        supervisors = {str(pid): f"{gn} {fn}" for pid, gn, fn in prows}
+    out = []
+    for r in rows:
+        d = _request_out(r)
+        s = students.get(d["studentId"], {})
+        d["studentRef"] = s.get("studentRef")
+        d["studentName"] = s.get("personName")
+        d["proposedSupervisorName"] = supervisors.get(d["proposedSupervisorPersonId"])
+        out.append(d)
+    return {"requests": out}
 
 
 @sup_requests_router.post("/{request_id}/review",

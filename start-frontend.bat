@@ -15,7 +15,17 @@ if not exist "node_modules" (
 if not exist ".next\BUILD_ID" (
     echo No production build found - building now ^(one-time, ~1 min^)...
     call npm run build
-    if errorlevel 1 ( echo Build failed. & pause & exit /b 1 )
+    if errorlevel 1 (
+        echo.
+        echo ============================================================
+        echo BUILD FAILED. Frontend will not start.
+        echo Scroll up for the error. Common fixes:
+        echo   - Type errors: run 'npx tsc --noEmit' in the frontend folder
+        echo   - Missing deps: run setup.bat again
+        echo ============================================================
+        pause
+        exit /b 1
+    )
 )
 
 echo Starting PGR frontend on http://localhost:3000

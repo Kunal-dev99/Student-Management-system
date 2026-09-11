@@ -18,10 +18,9 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import { useToast } from '@/components/ui/use-toast'
-import { ApiError } from '@/shared/api/client'
+import { ApiError, downloadFile } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthContext'
 import {
-  certificateUrl,
   useClassification, useConfirmClassification, useProposeClassification, usePublishClassification,
   type ClassificationState,
 } from '@/features/completion/api'
@@ -49,7 +48,7 @@ export function ClassificationCard({ studentId }: { studentId: string }) {
   const [choice, setChoice] = useState('PhD')
 
   return (
-    <PageSection icon={AwardIcon} title="Award classification (F4)" accent="primary"
+    <PageSection icon={AwardIcon} title="Award classification" accent="primary"
       description="Chair proposes → exam board confirms → Registry publishes. Only a published award can graduate.">
       {q.isLoading ? <Skeleton className="h-16 w-full" /> : q.isError ? (
         <ErrorState error={q.error} />
@@ -138,12 +137,23 @@ export function ClassificationCard({ studentId }: { studentId: string }) {
               <Lock className="h-4 w-4 text-muted-foreground" />
               <span className="text-sm">Classification is locked. Graduation is unlocked.</span>
               {q.data.certificateDocumentId && (
-                <a
-                  className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
-                  href={certificateUrl(studentId)} target="_blank" rel="noreferrer"
-                >
-                  <Download className="h-4 w-4" /> Download certificate
-                </a>
+                <Button size="sm" variant="ghost" className="h-7"
+                  onClick={async () => {
+                    try {
+                      await downloadFile(
+                        `/students/${studentId}/certificate`,
+                        `certificate-${studentId.slice(0, 8)}.pdf`,
+                      )
+                    } catch (e) {
+                      toast({
+                        title: 'Download failed',
+                        description: (e as ApiError).message,
+                        variant: 'destructive',
+                      })
+                    }
+                  }}>
+                  <Download className="h-4 w-4 mr-1" /> Download certificate
+                </Button>
               )}
               <GraduationCap className="h-4 w-4 text-muted-foreground ml-2" />
             </div>

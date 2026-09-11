@@ -191,17 +191,66 @@ function StudentSummary({ data, onNavigate }: { data: CardData; onNavigate: () =
   const st = (data.student ?? {}) as Record<string, unknown>
   const comp = (data.supervisionCompliance ?? {}) as Record<string, unknown>
   const link = typeof st.link === 'string' ? st.link : '#'
+  const supervisors = Array.isArray(st.supervisors)
+    ? (st.supervisors as Array<{ personName?: string; role?: string; link?: string }>)
+    : []
+  const funding = Array.isArray(st.funding)
+    ? (st.funding as Array<{ fundingType?: string; stipendAmount?: string; currency?: string; source?: string }>)
+    : []
+  const milestones = Array.isArray(data.milestones)
+    ? (data.milestones as Array<{ name: string; status: string; dueDate?: string | null }>)
+    : []
+  const nextMilestone = milestones.find((m) => ['not_started', 'due', 'submitted', 'under_review', 'overdue'].includes(m.status))
+
   return (
-    <div className="mt-2 rounded-lg bg-surface-2/40 p-3 space-y-2">
+    <div className="mt-2 rounded-lg bg-surface-2/40 p-3 space-y-3">
       <div className="flex items-center justify-between gap-2">
         <PersonLink href={link} name={String(st.personName ?? 'Unknown')} sub={String(st.studentRef ?? '')} onNavigate={onNavigate} />
         <Badge variant="secondary">{String(st.status ?? '').replace(/_/g, ' ')}</Badge>
       </div>
-      {Array.isArray(st.supervisors) && (
-        <p className="text-helper">
-          {st.supervisors.length} supervisor{st.supervisors.length === 1 ? '' : 's'}
-        </p>
+
+      {supervisors.length > 0 && (
+        <div className="text-xs">
+          <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Supervisors</p>
+          <div className="flex flex-wrap gap-1.5">
+            {supervisors.slice(0, 3).map((s, i) => (
+              <span key={i} className="rounded-sm border border-border bg-card px-2 py-0.5">
+                {s.personName ?? 'Unknown'}
+                {s.role && <span className="text-muted-foreground ml-1">· {String(s.role).replace(/_/g, ' ')}</span>}
+              </span>
+            ))}
+          </div>
+        </div>
       )}
+
+      {funding.length > 0 && (
+        <div className="text-xs">
+          <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Funding</p>
+          {funding.slice(0, 2).map((f, i) => (
+            <p key={i} className="text-foreground">
+              {String(f.fundingType ?? '').replace(/_/g, ' ')}
+              {f.stipendAmount && <span className="text-muted-foreground ml-2 num">{money(f.stipendAmount, f.currency)}/yr</span>}
+              {f.source && <span className="text-muted-foreground ml-2">· {f.source}</span>}
+            </p>
+          ))}
+        </div>
+      )}
+
+      {nextMilestone && (
+        <div className="text-xs">
+          <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Next milestone</p>
+          <p>
+            {nextMilestone.name}
+            {nextMilestone.dueDate && (
+              <span className="text-muted-foreground ml-2 num">· due {nextMilestone.dueDate}</span>
+            )}
+            <Badge variant={nextMilestone.status === 'overdue' ? 'destructive' : 'secondary'} className="ml-2 text-[10px]">
+              {String(nextMilestone.status).replace(/_/g, ' ')}
+            </Badge>
+          </p>
+        </div>
+      )}
+
       {comp.overdue ? (
         <Badge variant="warning">supervision overdue (last: {String(comp.lastMeetingOn ?? 'never')})</Badge>
       ) : null}
@@ -235,6 +284,81 @@ function HelpSurface({ data, onSuggest }: { data: CardData; onSuggest: (q: strin
           </div>
         </div>
       ))}
+    </div>
+  )
+}
+
+// ---------- Cohort list — generic renderer for any tool that returns `students` ----------
+
+/** A row shape common to cohort_query results — every student list intent lands here. */
+interface CohortRow {
+  studentId?: string
+  personName?: string
+  studentRef?: string
+  status?: string
+  link?: string
+  // Optional signals that different tools attach to their rows.
+  fundingEndsOn?: string | null
+  dueDate?: string | null
+  daysSinceLast?: number | null
+  daysOverdue?: number | null
+  reasonSummary?: string | null
+}
+
+function CohortList({ data, onNavigate, onSuggest }: {
+  data: CardData
+  onNavigate: () => void
+  onSuggest: (q: string) => void
+}) {
+  const rows = ((data.students as CohortRow[]) ?? (data.candidates as CohortRow[]) ?? [])
+    .filter((r) => r && r.personName)
+  const total = typeof data.count === 'number' ? data.count : rows.length
+  if (rows.length === 0) return null
+
+  return (
+    <div className="mt-2 space-y-2">
+      <ul className="divide-y divide-border/40 rounded-lg bg-surface-2/40 border border-border/40">
+        {rows.slice(0, 5).map((r) => {
+          const href = r.link ?? (r.studentId ? `/students/${r.studentId}` : '#')
+          // Prefer whatever signal the tool attached — different filters attach different fields.
+          const badge = r.fundingEndsOn
+            ? `funding ends ${r.fundingEndsOn}`
+            : r.dueDate
+              ? `milestone due ${r.dueDate}`
+              : r.daysSinceLast != null
+                ? `last seen ${r.daysSinceLast}d ago`
+                : r.daysOverdue != null
+                  ? `${r.daysOverdue}d overdue`
+                  : r.status
+                    ? String(r.status).replace(/_/g, ' ')
+                    : null
+          return (
+            <li key={r.studentId ?? r.personName} className="flex items-center justify-between gap-3 px-3 py-2">
+              <div className="min-w-0 flex-1">
+                <PersonLink href={href} name={r.personName!} sub={r.studentRef}
+                  onNavigate={onNavigate} />
+                {r.reasonSummary && (
+                  <p className="text-helper truncate mt-0.5">{r.reasonSummary}</p>
+                )}
+              </div>
+              {badge && <span className="text-[11px] text-muted-foreground shrink-0">{badge}</span>}
+            </li>
+          )
+        })}
+      </ul>
+      {total > 5 && (
+        <p className="text-helper text-xs">
+          Showing 5 of <span className="num font-medium">{total}</span>.
+          {' '}
+          <button
+            type="button"
+            onClick={() => onSuggest('list all of them')}
+            className="text-primary hover:underline"
+          >
+            See more
+          </button>
+        </p>
+      )}
     </div>
   )
 }
@@ -315,6 +439,13 @@ export function AssistantCard({
     case 'nav_target':
       body = <NavTargetCard data={data} />
       break
+  }
+
+  // Fallback: any answer that carries a students / candidates array (cohort_query, at-risk,
+  // funding-gap, milestones-overdue, etc.) gets the generic cohort list — so numbers always
+  // resolve into names the reader can click through to.
+  if (!body && (Array.isArray(data.students) || Array.isArray(data.candidates))) {
+    body = <CohortList data={data} onNavigate={onNavigate} onSuggest={onSuggest} />
   }
 
   if (!body) return null

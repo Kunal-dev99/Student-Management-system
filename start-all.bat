@@ -15,6 +15,17 @@ if not exist "frontend\node_modules" (
 )
 
 echo.
+echo Freeing ports 8000 (backend) and 3000 (frontend) if anything is holding them...
+for %%P in (8000 3000) do (
+    for /f "tokens=5" %%A in ('netstat -ano ^| findstr ":%%P " ^| findstr LISTENING') do (
+        echo   port %%P busy - killing PID %%A
+        taskkill /F /PID %%A >nul 2>&1
+    )
+)
+REM Give Windows a moment to release the sockets before uvicorn/next bind.
+ping -n 3 127.0.0.1 >nul
+
+echo.
 echo Ensuring PostgreSQL is running...
 set "PG_SERVICE=postgresql-x64-18"
 sc query "%PG_SERVICE%" | find "RUNNING" >nul

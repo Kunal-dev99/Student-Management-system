@@ -66,7 +66,16 @@ export interface ListResponse<T> {
 async function raw(path: string, init: RequestInit, token: string | null): Promise<Response> {
   const headers = new Headers(init.headers)
   headers.set('Accept', 'application/json')
-  if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
+  // Only default to JSON when the body is a string (or empty). FormData / Blob / URLSearchParams
+  // set their own Content-Type with the right boundary; overriding it here silently breaks the
+  // multipart parser on the server. This bit us on the student document upload — the endpoint
+  // was refusing because Content-Type said JSON but the payload was multipart.
+  const isMultipart = init.body instanceof FormData ||
+    (typeof Blob !== 'undefined' && init.body instanceof Blob) ||
+    (typeof URLSearchParams !== 'undefined' && init.body instanceof URLSearchParams)
+  if (init.body && !headers.has('Content-Type') && !isMultipart) {
+    headers.set('Content-Type', 'application/json')
+  }
   if (token) headers.set('Authorization', `Bearer ${token}`)
   return fetch(`${API_BASE}${path}`, { ...init, headers })
 }
@@ -98,7 +107,25 @@ async function request<T>(path: string, init: RequestInit = {}, _retried = false
   return payload as T
 }
 
+/**
+ * Authenticated fetch that returns the raw `Response` so the caller can read a stream.
+ *
+ * `request` parses the whole body as JSON, which defeats streaming. This keeps the same
+ * auth behaviour — bearer token plus one silent refresh on 401 — and hands back the
+ * response untouched.
+ */
+async function stream(path: string, init: RequestInit = {}): Promise<Response> {
+  let res = await raw(path, init, accessToken)
+  if (res.status === 401 && refreshHandler) {
+    const newToken = await refreshHandler()
+    if (newToken) res = await raw(path, init, newToken)
+  }
+  if (res.status === 401 && onAuthFailure) onAuthFailure()
+  return res
+}
+
 export const api = {
+  raw: stream,
   get: <T>(path: string) => request<T>(path),
   post: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: 'POST', body: body ? JSON.stringify(body) : undefined }),

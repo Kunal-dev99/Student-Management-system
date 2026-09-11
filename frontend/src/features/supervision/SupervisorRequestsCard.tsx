@@ -53,7 +53,7 @@ export function SupervisorRequestsCard({ studentId }: { studentId: string }) {
   const [rejectReason, setRejectReason] = useState('')
 
   return (
-    <PageSection icon={UserPlus} title="Supervisor assignment (W2)" accent="primary"
+    <PageSection icon={UserPlus} title="Supervisor assignment" accent="primary"
       description="Recommend → request → academic review → approve. Every decision is on the record.">
       {q.isLoading ? <Skeleton className="h-16 w-full" /> : (
         <div className="space-y-3">

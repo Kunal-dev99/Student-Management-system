@@ -10,8 +10,8 @@
  * that message verbatim — the error teaches the rule better than a hidden button.
  */
 
-import { useState } from 'react'
-import { ChevronRight, Lock, Pencil, Plus, Trash2 } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { ChevronRight, Eye, EyeOff, Pencil, Plus, RotateCcw, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -28,9 +28,12 @@ import {
 } from '@/components/ui/select'
 import { useToast } from '@/components/ui/use-toast'
 import { ApiError } from '@/shared/api/client'
+import { Textarea } from '@/components/ui/textarea'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
-  useCreateLovRow, useDeleteLovRow, useLovKinds, useLovList, useUpdateLovRow, useValueSets,
-  type LovKind, type LovRow,
+  useCreateLovRow, useDeleteLovRow, useLovKinds, useLovList, useResetValueSet,
+  useUpdateLovRow, useUpsertValueSet, useValueSets,
+  type LovKind, type LovRow, type ValueSetValue,
 } from '@/features/settings/api'
 
 const FIELD_LABELS: Record<string, string> = {
@@ -41,6 +44,19 @@ const FIELD_LABELS: Record<string, string> = {
 }
 
 const NONE = '__none__'
+
+// Canonical funder types (mirrors backend FundingType enum). Kept here as a
+// static list so the dropdown renders instantly without an extra fetch — if a
+// new type is added to the enum server-side, add it here too.
+const FUNDER_TYPE_OPTIONS: { value: string; label: string }[] = [
+  { value: 'research_council',      label: 'Research council' },
+  { value: 'university_scholarship', label: 'University scholarship' },
+  { value: 'scholarship',           label: 'Scholarship (charity / trust)' },
+  { value: 'employer',              label: 'Employer-sponsored' },
+  { value: 'external',              label: 'External' },
+  { value: 'self_funded',           label: 'Self-funded' },
+  { value: 'mixed',                 label: 'Mixed' },
+]
 
 /* ------------------------------------------------------------------ *
  * Add / edit dialog — generic over the kind's field list from the API.
@@ -63,8 +79,16 @@ function LovFormDialog({ kind, row, departments }: {
   )
   const set = (f: string, v: string) => setValues((prev) => ({ ...prev, [f]: v }))
 
-  const textFields = kind.fields.filter((f) => f !== 'departmentId')
+  // Seed the form immediately for the Edit case so the first render already
+  // shows the row's current values (not the defaults from an empty state).
+  useEffect(() => {
+    if (isEdit) setValues(initial())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [row?.id])
+
   const hasDepartment = kind.fields.includes('departmentId')
+  const hasFunderType = kind.fields.includes('funderType')
+  const textFields = kind.fields.filter((f) => f !== 'departmentId' && f !== 'funderType')
   const valid = textFields.every((f) => (values[f] ?? '').trim().length > 0)
   const pending = create.isPending || update.isPending
 
@@ -72,6 +96,7 @@ function LovFormDialog({ kind, row, departments }: {
     const body: Record<string, string | null> = {}
     for (const f of textFields) body[f] = (values[f] ?? '').trim()
     if (hasDepartment) body.departmentId = values.departmentId && values.departmentId !== NONE ? values.departmentId : null
+    if (hasFunderType) body.funderType = values.funderType && values.funderType !== NONE ? values.funderType : null
     try {
       if (isEdit && row) {
         await update.mutateAsync({ kind: kind.kind, id: row.id, body })
@@ -117,6 +142,29 @@ function LovFormDialog({ kind, row, departments }: {
               />
             </div>
           ))}
+          {hasFunderType && (() => {
+            const current = values.funderType
+            const known = FUNDER_TYPE_OPTIONS.some((o) => o.value === current)
+            // Preserve legacy values (older seed rows) so the current selection
+            // is visible even if the enum has since been renamed.
+            const options = current && !known
+              ? [...FUNDER_TYPE_OPTIONS, { value: current, label: `${current} (legacy)` }]
+              : FUNDER_TYPE_OPTIONS
+            return (
+              <div className="space-y-1.5">
+                <Label>Funder type</Label>
+                <Select value={current || NONE} onValueChange={(v) => set('funderType', v)}>
+                  <SelectTrigger><SelectValue placeholder="Select a funder type" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NONE}>— Unspecified —</SelectItem>
+                    {options.map((o) => (
+                      <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )
+          })()}
           {hasDepartment && (
             <div className="space-y-1.5">
               <Label>Department</Label>
@@ -197,12 +245,17 @@ function LovTable({ kind }: { kind: LovKind }) {
                   <TableCell
                     key={f}
                     className={cn(
+                      'capitalize',
                       f === 'name' && 'font-medium',
                       f === 'code' && 'font-mono text-xs',
                       f !== 'name' && f !== 'code' && 'text-muted-foreground',
                     )}
                   >
-                    {f === 'departmentId' ? departmentName(row[f]) : String(row[f] ?? '—')}
+                    {f === 'departmentId'
+                      ? departmentName(row[f])
+                      : f === 'funderType'
+                        ? (FUNDER_TYPE_OPTIONS.find((o) => o.value === row[f])?.label ?? String(row[f] ?? '—'))
+                        : String(row[f] ?? '—')}
                   </TableCell>
                 ))}
                 <TableCell>
@@ -241,12 +294,118 @@ function LovTable({ kind }: { kind: LovKind }) {
 }
 
 /* ------------------------------------------------------------------ *
- * Platform-fixed value sets — read-only, collapsed by default.
+ * Platform value sets — every enum is configurable per institution.
+ * The value CODE is stable (used by FKs / business logic), the LABEL,
+ * DESCRIPTION and HIDDEN flag can be overridden.
  * ------------------------------------------------------------------ */
+
+function ValueEditorDialog({
+  enumName, value, open, onClose,
+}: { enumName: string; value: ValueSetValue | null; open: boolean; onClose: () => void }) {
+  const { toast } = useToast()
+  const upsert = useUpsertValueSet()
+  const reset = useResetValueSet()
+  const [label, setLabel] = useState('')
+  const [description, setDescription] = useState('')
+  const [hidden, setHidden] = useState(false)
+
+  useEffect(() => {
+    if (value) {
+      setLabel(value.label ?? '')
+      setDescription(value.description ?? '')
+      setHidden(value.hidden)
+    }
+  }, [value])
+
+  if (!value) return null
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Configure &ldquo;{value.code}&rdquo;</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="rounded-md border border-border bg-surface-1 p-3 space-y-1">
+            <p className="text-label">Value code (fixed)</p>
+            <code className="text-xs font-mono">{enumName} / {value.code}</code>
+            <p className="text-helper text-xs">
+              The code is what the database and business logic use. It cannot be changed
+              without a migration. The label, description and availability below are yours
+              to configure.
+            </p>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="vs-label">Display label</Label>
+            <Input id="vs-label" value={label} onChange={(e) => setLabel(e.target.value)}
+              placeholder={value.code} />
+            <p className="text-helper text-xs">Shown to users wherever this value appears. Leave blank to use the shipped default.</p>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="vs-desc">Description</Label>
+            <Textarea id="vs-desc" value={description} rows={3}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="What this value means in this institution's process." />
+          </div>
+          <label className="flex items-start gap-2 rounded-md border border-border p-3 cursor-pointer">
+            <Checkbox checked={hidden} onCheckedChange={(v) => setHidden(!!v)} />
+            <div>
+              <p className="text-sm font-medium">Hide from new selectors</p>
+              <p className="text-helper text-xs">
+                Existing records keep this value; new pickers won&rsquo;t offer it. Use this to
+                retire an option without breaking historical data.
+              </p>
+            </div>
+          </label>
+        </div>
+        <DialogFooter className="justify-between">
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={!value.overridden || reset.isPending}
+            onClick={async () => {
+              try {
+                await reset.mutateAsync({ enumName, code: value.code })
+                toast({ title: 'Reset to the shipped default' })
+                onClose()
+              } catch (e) {
+                toast({ title: 'Reset failed', description: (e as ApiError).message, variant: 'destructive' })
+              }
+            }}
+          >
+            <RotateCcw className="h-3.5 w-3.5 mr-1" /> Reset to default
+          </Button>
+          <Button
+            disabled={upsert.isPending}
+            onClick={async () => {
+              try {
+                await upsert.mutateAsync({
+                  enumName, code: value.code,
+                  body: {
+                    label: label.trim() || null,
+                    description: description.trim() || null,
+                    hidden,
+                  },
+                })
+                toast({ title: 'Saved' })
+                onClose()
+              } catch (e) {
+                toast({ title: 'Save failed', description: (e as ApiError).message, variant: 'destructive' })
+              }
+            }}
+          >
+            {upsert.isPending ? 'Saving…' : 'Save changes'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
 
 function ValueSetsSection() {
   const [open, setOpen] = useState(false)
   const valueSets = useValueSets(open) // fetch lazily on first expand
+  const [editing, setEditing] = useState<{ enumName: string; value: ValueSetValue } | null>(null)
 
   const areas: string[] = []
   for (const vs of valueSets.data ?? []) {
@@ -258,28 +417,49 @@ function ValueSetsSection() {
       <CollapsibleTrigger asChild>
         <button className="flex w-full items-center gap-2 text-left">
           <ChevronRight className={cn('h-4 w-4 text-muted-foreground transition-transform', open && 'rotate-90')} />
-          <Lock className="h-3.5 w-3.5 text-muted-foreground" />
-          <span className="text-sm font-medium">Platform-fixed value sets</span>
-          <span className="text-helper ml-1">read-only</span>
+          <span className="text-sm font-medium">Platform value sets</span>
+          <Badge variant="outline" className="ml-1">configurable</Badge>
         </button>
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="pt-3 space-y-4">
           <p className="text-helper">
-            These value sets carry code behind each value and are fixed by the platform; the
-            editable lists live above.
+            Every value here can be renamed, described and hidden per institution. The
+            underlying code stays stable so data and business logic keep working.
           </p>
           {valueSets.isLoading && <Skeleton className="h-24 w-full" />}
           {areas.map((area) => (
             <div key={area} className="space-y-2">
               <p className="text-label">{area}</p>
-              <div className="space-y-1.5">
+              <div className="space-y-3">
                 {valueSets.data?.filter((vs) => vs.area === area).map((vs) => (
-                  <div key={vs.name} className="flex flex-wrap items-baseline gap-1.5">
-                    <span className="text-xs font-mono text-muted-foreground w-56 shrink-0">{vs.name}</span>
-                    {vs.values.map((v) => (
-                      <Badge key={v} variant="secondary" className="font-normal text-muted-foreground">{v}</Badge>
-                    ))}
+                  <div key={vs.name} className="rounded-md border border-border p-3">
+                    <p className="text-xs font-mono text-muted-foreground mb-2">{vs.name}</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {vs.values.map((v) => (
+                        <button
+                          key={v.code}
+                          type="button"
+                          onClick={() => setEditing({ enumName: vs.name, value: v })}
+                          className={cn(
+                            'group inline-flex items-center gap-1 rounded-sm border px-2 py-0.5 text-xs transition-colors',
+                            v.hidden
+                              ? 'border-dashed border-warning/50 bg-warning/5 text-muted-foreground line-through'
+                              : v.overridden
+                                ? 'border-primary/40 bg-primary/5 text-foreground hover:border-primary'
+                                : 'border-border bg-surface-2 text-muted-foreground hover:border-primary/40',
+                          )}
+                          title={v.description ?? undefined}
+                        >
+                          {v.hidden
+                            ? <EyeOff className="h-3 w-3" />
+                            : <Eye className="h-3 w-3 opacity-0 group-hover:opacity-60" />}
+                          <span>{v.label}</span>
+                          <span className="text-muted-foreground/60 font-mono">·{v.code}</span>
+                          <Pencil className="h-3 w-3 opacity-0 group-hover:opacity-60" />
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -287,6 +467,14 @@ function ValueSetsSection() {
           ))}
         </div>
       </CollapsibleContent>
+      {editing && (
+        <ValueEditorDialog
+          enumName={editing.enumName}
+          value={editing.value}
+          open
+          onClose={() => setEditing(null)}
+        />
+      )}
     </Collapsible>
   )
 }
@@ -312,6 +500,7 @@ export function LovTab() {
                 size="sm"
                 variant={active === k.kind ? 'default' : 'outline'}
                 onClick={() => setActive(k.kind)}
+                className="uppercase tracking-wide"
               >
                 {k.label}s
               </Button>

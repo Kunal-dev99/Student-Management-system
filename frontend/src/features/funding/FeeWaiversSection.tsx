@@ -69,8 +69,21 @@ export function FeeWaiversSection({ studentId }: { studentId: string }) {
           onChange={(e) => setAmount(e.target.value)} />
         <Input type="number" className="w-28 h-8" placeholder="%" value={percentage}
           onChange={(e) => setPercentage(e.target.value)} />
-        <Input className="w-32 h-8" placeholder="2025/26" value={academicYear}
-          onChange={(e) => setAcademicYear(e.target.value)} />
+        <Select value={academicYear} onValueChange={setAcademicYear}>
+          <SelectTrigger className="w-32 h-8"><SelectValue placeholder="Year" /></SelectTrigger>
+          <SelectContent>
+            {(() => {
+              // UK academic year runs August → July; the "current" year to default to
+              // depends on today's month.
+              const now = new Date()
+              const startYear = now.getMonth() >= 7 ? now.getFullYear() : now.getFullYear() - 1
+              return Array.from({ length: 7 }, (_, i) => {
+                const y = startYear - 2 + i          // 2 prior → 4 ahead
+                return `${y}/${String((y + 1) % 100).padStart(2, '0')}`
+              })
+            })().map((y) => <SelectItem key={y} value={y}>{y}</SelectItem>)}
+          </SelectContent>
+        </Select>
         <Input className="w-44 h-8" placeholder="Note" value={note} onChange={(e) => setNote(e.target.value)} />
         <Button size="sm" disabled={create.isPending}
           onClick={async () => {

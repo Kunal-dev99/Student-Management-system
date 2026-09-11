@@ -23,6 +23,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.person.models import Person
 from app.modules.supervision.constants import SupervisionStatus, SupervisorRole
+
+
+# "In-flight" supervision — anything before `ended`/`changed` counts as a current
+# supervisory relationship for capacity/workload purposes.
+CURRENT_STATUSES = (
+    SupervisionStatus.assigned,
+    SupervisionStatus.accepted,
+    SupervisionStatus.active,
+)
 from app.modules.supervision.models import SupervisorRelationship
 from app.modules.supervision.w2_models import (
     AssignmentRequestState,
@@ -55,7 +64,7 @@ class WorkforceLensService:
         active_rels = (await self.session.execute(
             select(SupervisorRelationship).where(
                 SupervisorRelationship.valid_to.is_(None),
-                SupervisorRelationship.status == SupervisionStatus.assigned,
+                SupervisorRelationship.status.in_(CURRENT_STATUSES),
             )
         )).scalars().all()
         by_supervisor: dict[uuid.UUID, dict[str, int]] = {}

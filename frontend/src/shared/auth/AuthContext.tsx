@@ -5,6 +5,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -118,11 +119,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [principal],
   )
 
-  return (
-    <AuthCtx.Provider value={{ principal, loading, login, logout, hasPermission }}>
-      {children}
-    </AuthCtx.Provider>
+  // Memoise the context value so every `useAuth()` consumer isn't invalidated on every
+  // parent render. Without this, AppShell's auth read cascades a full sidebar re-render
+  // on every route change — the perceptible click delay users noticed.
+  const value = useMemo(
+    () => ({ principal, loading, login, logout, hasPermission }),
+    [principal, loading, login, logout, hasPermission],
   )
+
+  return <AuthCtx.Provider value={value}>{children}</AuthCtx.Provider>
 }
 
 export function useAuth(): AuthState {

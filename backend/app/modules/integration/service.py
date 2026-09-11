@@ -53,7 +53,7 @@ class IntegrationService:
                 continue
             try:
                 for adapter in adapters:
-                    message = await deliver(adapter, ev.event_type, ev.payload or {})
+                    message = await deliver(adapter, ev.event_type, ev.payload or {}, session=self.session)
                     self.repo.add(IntegrationLog(
                         direction=Direction.outbound, system=adapter.system, event_type=ev.event_type,
                         aggregate_type=ev.aggregate_type, aggregate_id=ev.aggregate_id,

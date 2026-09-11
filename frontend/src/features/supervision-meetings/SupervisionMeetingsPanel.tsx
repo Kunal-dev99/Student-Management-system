@@ -125,9 +125,13 @@ export function SupervisionMeetingsPanel({ studentId }: { studentId: string }) {
       {/* Record a meeting */}
       <div className="pt-3 border-t border-border space-y-2">
         <div className="text-sm font-medium">Record a meeting</div>
-        <div className="flex flex-wrap items-end gap-2">
-          <Input type="date" className="w-40 h-8" value={metOn} onChange={(e) => setMetOn(e.target.value)} />
-          <div className="min-w-[180px]">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="space-y-1">
+            <label className="text-xs text-muted-foreground">This meeting on</label>
+            <Input type="date" className="w-40 h-8" value={metOn} onChange={(e) => setMetOn(e.target.value)} />
+          </div>
+          <div className="space-y-1 min-w-[180px]">
+            <label className="text-xs text-muted-foreground">Supervisor</label>
             <Select value={supervisorPersonId} onValueChange={setSupervisorPersonId}>
               <SelectTrigger className="h-8"><SelectValue placeholder="Supervisor (optional)" /></SelectTrigger>
               <SelectContent>
@@ -137,16 +141,25 @@ export function SupervisionMeetingsPanel({ studentId }: { studentId: string }) {
               </SelectContent>
             </Select>
           </div>
-          <Select value={format} onValueChange={(v) => setFormat(v as MeetingFormat)}>
-            <SelectTrigger className="w-36 h-8"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {FORMATS.map((f) => <SelectItem key={f} value={f}>{f.replace(/_/g, ' ')}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          <Input type="number" className="w-32 h-8" placeholder="Minutes" value={duration}
-            onChange={(e) => setDuration(e.target.value)} />
-          <Input type="date" className="w-40 h-8" value={nextMeetingOn}
-            onChange={(e) => setNextMeetingOn(e.target.value)} title="Next meeting" />
+          <div className="space-y-1">
+            <label className="text-xs text-muted-foreground">Format</label>
+            <Select value={format} onValueChange={(v) => setFormat(v as MeetingFormat)}>
+              <SelectTrigger className="w-36 h-8"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {FORMATS.map((f) => <SelectItem key={f} value={f}>{f.replace(/_/g, ' ')}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs text-muted-foreground">Duration (min)</label>
+            <Input type="number" className="w-28 h-8" placeholder="e.g. 45" value={duration}
+              onChange={(e) => setDuration(e.target.value)} />
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs text-muted-foreground">Next meeting on (optional)</label>
+            <Input type="date" className="w-40 h-8" value={nextMeetingOn}
+              onChange={(e) => setNextMeetingOn(e.target.value)} />
+          </div>
         </div>
         <div className="grid gap-2 md:grid-cols-2">
           <Textarea className="min-h-[64px]" placeholder="Discussion notes" value={notes}

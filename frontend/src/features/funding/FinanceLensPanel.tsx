@@ -72,7 +72,7 @@ export function FinanceLensPanel() {
         title={`Finance held ${data.counts.held ? `(${data.counts.held})` : ''}`}
         accent={data.counts.held ? 'danger' : 'primary'}
         attention={data.counts.held > 0}
-        description="Payments Finance rejected. The note carries the reason so someone can triage."
+        description="Payments Finance rejected. Reason on the note."
       >
         {data.held.length === 0 ? <p className="text-helper">Nothing held.</p> : (
           <ul className="space-y-2">
@@ -97,7 +97,7 @@ export function FinanceLensPanel() {
         title={`Approved but overdue ${data.counts.overdueApproved ? `(${data.counts.overdueApproved})` : ''}`}
         accent={data.counts.overdueApproved ? 'warning' : 'primary'}
         attention={data.counts.overdueApproved > 0}
-        description="Approved by us, not yet paid by Finance — chase up with the finance reference or expedite."
+        description="Approved but not yet paid by Finance."
       >
         {data.overdueApproved.length === 0 ? <p className="text-helper">Nothing overdue.</p> : (
           <ul className="space-y-2">
@@ -121,7 +121,7 @@ export function FinanceLensPanel() {
         icon={FileWarning}
         title={`Paid without a Finance reference ${data.counts.paidWithoutFinanceReference ? `(${data.counts.paidWithoutFinanceReference})` : ''}`}
         accent={data.counts.paidWithoutFinanceReference ? 'warning' : 'primary'}
-        description="Reconciliation drift — the row is paid on our side but nothing ties it back to a Finance transaction."
+        description="Paid on our side but no matching Finance reference."
       >
         {data.paidWithoutFinanceReference.length === 0 ? <p className="text-helper">Nothing drifting.</p> : (
           <ul className="space-y-2">

@@ -28,6 +28,16 @@ class SupervisionRepository:
             )
         ).scalar_one_or_none()
 
+    async def active_for_student(self, student_id: uuid.UUID) -> list[SupervisorRelationship]:
+        """All current (valid_to is null) supervisors of a student."""
+        rows = await self.session.execute(
+            select(SupervisorRelationship).where(
+                SupervisorRelationship.student_id == student_id,
+                SupervisorRelationship.valid_to.is_(None),
+            )
+        )
+        return list(rows.scalars().all())
+
     async def active_for_supervisor(self, person_id: uuid.UUID) -> list[SupervisorRelationship]:
         rows = await self.session.execute(
             select(SupervisorRelationship).where(

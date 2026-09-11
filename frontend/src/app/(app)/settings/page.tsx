@@ -10,7 +10,7 @@
  */
 
 import { useEffect, useState } from 'react'
-import { Bell, ListChecks, ShieldAlert, SlidersHorizontal, Users } from 'lucide-react'
+import { Bell, ListChecks, ShieldAlert, SlidersHorizontal, Sparkles, Users } from 'lucide-react'
 import { PageHeader } from '@/components/common/PageHeader'
 import { PageSection } from '@/components/common/PageSection'
 import { Button } from '@/components/ui/button'
@@ -27,6 +27,7 @@ import {
 import { LovTab } from '@/features/settings/LovTab'
 import { InstitutionPolicyTab } from '@/features/settings/InstitutionPolicyTab'
 import { UsersRolesTab } from '@/features/settings/UsersRolesTab'
+import { DataHygieneTab } from '@/features/settings/DataHygieneTab'
 
 /* ------------------------------------------------------------------ *
  * Shown in place of an admin tab when the signed-in user lacks
@@ -200,7 +201,10 @@ export default function SettingsPage() {
   const admin = hasPermission('admin.configure')
 
   return (
-    <>
+    // Settings deliberately stays in English — a user who picked a language they can't
+    // read must still be able to find the switcher back. The DOM translator honours
+    // this flag and skips the whole subtree.
+    <div data-i18n-skip="true">
       <PageHeader
         title="Settings"
         description="Institution configuration, reference data, user administration and your personal preferences."
@@ -213,6 +217,7 @@ export default function SettingsPage() {
             {admin && <TabsTrigger value="lov"><ListChecks className="h-4 w-4 mr-1.5" /> List of values</TabsTrigger>}
             {admin && <TabsTrigger value="policy"><SlidersHorizontal className="h-4 w-4 mr-1.5" /> Institution policy</TabsTrigger>}
             {admin && <TabsTrigger value="users"><Users className="h-4 w-4 mr-1.5" /> Users &amp; roles</TabsTrigger>}
+            {admin && <TabsTrigger value="hygiene"><Sparkles className="h-4 w-4 mr-1.5" /> Data hygiene</TabsTrigger>}
             <TabsTrigger value="preferences"><Bell className="h-4 w-4 mr-1.5" /> My preferences</TabsTrigger>
           </TabsList>
           {admin && (
@@ -230,11 +235,16 @@ export default function SettingsPage() {
               <UsersRolesTab />
             </TabsContent>
           )}
+          {admin && (
+            <TabsContent value="hygiene" className="mt-4">
+              <DataHygieneTab />
+            </TabsContent>
+          )}
           <TabsContent value="preferences" className="mt-4">
             <MyPreferencesTab />
           </TabsContent>
         </Tabs>
       </div>
-    </>
+    </div>
   )
 }

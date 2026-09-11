@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -32,6 +32,15 @@ export function VivaSection({
   const err = (e: unknown) => toast({ title: 'Action failed', description: (e as Error).message, variant: 'destructive' })
   const scheduled = !!examination?.vivaDate
 
+  // Pre-fill the form with the currently scheduled values on load / when the
+  // examination row changes — a blank form for a Reschedule action is confusing.
+  useEffect(() => {
+    if (examination?.vivaDate) setVivaDate(examination.vivaDate)
+    if (examination?.vivaFormat) setFormat(examination.vivaFormat as VivaFormat)
+    if (examination?.vivaLocation) setLocation(examination.vivaLocation)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [examination?.vivaDate, examination?.vivaFormat, examination?.vivaLocation])
+
   return (
     <div className="pt-3 border-t border-border space-y-3">
       <div>
@@ -48,28 +57,39 @@ export function VivaSection({
             {examination?.vivaScheduledAt ? ` · booked ${examination.vivaScheduledAt.replace('T', ' ').slice(0, 16)}` : ''}
           </p>
         )}
-        <div className="flex flex-wrap items-end gap-2">
-          <Input type="date" className="w-40 h-8" value={vivaDate} onChange={(e) => setVivaDate(e.target.value)} />
-          <Select value={format} onValueChange={(v) => setFormat(v as VivaFormat)}>
-            <SelectTrigger className="w-36 h-8"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {FORMATS.map((f) => <SelectItem key={f} value={f}>{f.replace(/_/g, ' ')}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          <Input className="w-52 h-8" placeholder="Location / joining link" value={location}
-            onChange={(e) => setLocation(e.target.value)} />
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="space-y-1">
+            <label className="text-xs text-muted-foreground">Viva date</label>
+            <Input type="date" className="w-40 h-8" value={vivaDate}
+              onChange={(e) => setVivaDate(e.target.value)} />
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs text-muted-foreground">Format</label>
+            <Select value={format} onValueChange={(v) => setFormat(v as VivaFormat)}>
+              <SelectTrigger className="w-36 h-8"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {FORMATS.map((f) => <SelectItem key={f} value={f}>{f.replace(/_/g, ' ')}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs text-muted-foreground">Location / joining link</label>
+            <Input className="w-64 h-8" placeholder="Room 3.04, or a Teams URL" value={location}
+              onChange={(e) => setLocation(e.target.value)} />
+          </div>
           <Button size="sm" disabled={!vivaDate || schedule.isPending}
             onClick={async () => {
               try {
                 await schedule.mutateAsync({ vivaDate, vivaFormat: format, location: location || undefined })
                 toast({ title: scheduled ? 'Viva rescheduled' : 'Viva scheduled' })
-                setVivaDate(''); setLocation('')
               } catch (e) { err(e) }
             }}>
             {scheduled ? 'Reschedule viva' : 'Schedule viva'}
           </Button>
-          <span className="text-helper">An approved examiner is required before a viva can be booked.</span>
         </div>
+        <p className="text-helper mt-1">
+          An approved examiner is required before a viva can be booked.
+        </p>
       </div>
 
       {corrections.isLoading ? <Skeleton className="h-10 w-full" /> : (

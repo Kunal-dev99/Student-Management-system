@@ -17,8 +17,40 @@ import { FeeWaiversSection } from './FeeWaiversSection'
 import { PaymentsSection } from './PaymentsSection'
 import {
   useChangeFunding, useCreateFunding, useEndFunding, useFunding, useFundingSources,
-  usePaymentSummary, type FundingStatus, type FundingType,
+  useFundingVocab, usePaymentSummary, type FundingStatus, type FundingType,
 } from './api'
+
+/** Native combobox — accepts any typed value, but suggests everything already in use.
+ *  Zero deps, keyboard + screen-reader friendly, and grows automatically as admins
+ *  add new codes. */
+function ComboInput({
+  id, value, onChange, placeholder, options, className, type = 'text',
+}: {
+  id: string
+  value: string
+  onChange: (v: string) => void
+  placeholder: string
+  options: string[]
+  className?: string
+  type?: string
+}) {
+  const listId = `${id}-opts`
+  return (
+    <>
+      <Input
+        type={type}
+        list={listId}
+        placeholder={placeholder}
+        className={className}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      <datalist id={listId}>
+        {options.map((v) => <option key={v} value={v} />)}
+      </datalist>
+    </>
+  )
+}
 
 const STATUS_VARIANT: Record<FundingStatus, 'secondary' | 'success' | 'info' | 'outline'> = {
   planned: 'secondary', active: 'success', changed: 'info', ended: 'outline',
@@ -49,6 +81,10 @@ export function FundingPanel({ studentId }: { studentId: string }) {
   const { data, isLoading } = useFunding(studentId)
   const sources = useFundingSources()
   const awards = useAwards({ enabled: canPickAwards && canChange })
+  const vocab = useFundingVocab()
+  const cc = vocab.data?.costCentres ?? []      // [{code, name}]
+  const pc = vocab.data?.projectCodes ?? []     // [{code, name}]
+  const fr = vocab.data?.funderReferences ?? []  // string[]
   const summary = usePaymentSummary(studentId)
   const create = useCreateFunding(studentId)
   const end = useEndFunding(studentId)
@@ -156,9 +192,24 @@ export function FundingPanel({ studentId }: { studentId: string }) {
                     <SelectContent>{TYPES.map((t) => <SelectItem key={t} value={t}>{t.replace(/_/g, ' ')}</SelectItem>)}</SelectContent>
                   </Select>
                   <Input type="number" placeholder="New stipend" className="w-36 h-8" value={changeAmount} onChange={(e) => setChangeAmount(e.target.value)} />
-                  <Input placeholder="Cost centre" className="w-32 h-8" value={changeCostCentre} onChange={(e) => setChangeCostCentre(e.target.value)} />
-                  <Input placeholder="Project code" className="w-32 h-8" value={changeProjectCode} onChange={(e) => setChangeProjectCode(e.target.value)} />
-                  <Input placeholder="Funder reference" className="w-40 h-8" value={changeFunderRef} onChange={(e) => setChangeFunderRef(e.target.value)} />
+                  <Select value={changeCostCentre} onValueChange={setChangeCostCentre}>
+                    <SelectTrigger className="w-40 h-8"><SelectValue placeholder="Cost centre" /></SelectTrigger>
+                    <SelectContent>
+                      {cc.length === 0
+                        ? <SelectItem value="_none" disabled>Add in Settings → List of values</SelectItem>
+                        : cc.map((x) => <SelectItem key={x.code} value={x.code}>{x.code} — {x.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <Select value={changeProjectCode} onValueChange={setChangeProjectCode}>
+                    <SelectTrigger className="w-40 h-8"><SelectValue placeholder="Project code" /></SelectTrigger>
+                    <SelectContent>
+                      {pc.length === 0
+                        ? <SelectItem value="_none" disabled>Add in Settings → List of values</SelectItem>
+                        : pc.map((x) => <SelectItem key={x.code} value={x.code}>{x.code} — {x.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <ComboInput id={`fr-${a.id}`} placeholder="Funder reference" className="w-40 h-8"
+                    value={changeFunderRef} onChange={setChangeFunderRef} options={fr} />
                   <Input type="number" placeholder="Contribution %" className="w-32 h-8" value={changeContribution} onChange={(e) => setChangeContribution(e.target.value)} />
                   {/* Linking the award is what makes the funding chain traceable (Phase 6.3). */}
                   <Select value={changeAwardId} onValueChange={setChangeAwardId}>
@@ -210,9 +261,24 @@ export function FundingPanel({ studentId }: { studentId: string }) {
           <SelectContent>{sources.data?.map((s2) => <SelectItem key={s2.id} value={s2.id}>{s2.name}</SelectItem>)}</SelectContent>
         </Select>
         <Input type="number" placeholder="Stipend (GBP)" className="w-40" value={amount} onChange={(e) => setAmount(e.target.value)} />
-        <Input placeholder="Cost centre" className="w-32 h-8" value={costCentre} onChange={(e) => setCostCentre(e.target.value)} />
-        <Input placeholder="Project code" className="w-32 h-8" value={projectCode} onChange={(e) => setProjectCode(e.target.value)} />
-        <Input placeholder="Funder reference" className="w-40 h-8" value={funderReference} onChange={(e) => setFunderReference(e.target.value)} />
+        <Select value={costCentre} onValueChange={setCostCentre}>
+          <SelectTrigger className="w-40 h-8"><SelectValue placeholder="Cost centre" /></SelectTrigger>
+          <SelectContent>
+            {cc.length === 0
+              ? <SelectItem value="_none" disabled>Add in Settings → List of values</SelectItem>
+              : cc.map((x) => <SelectItem key={x.code} value={x.code}>{x.code} — {x.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={projectCode} onValueChange={setProjectCode}>
+          <SelectTrigger className="w-40 h-8"><SelectValue placeholder="Project code" /></SelectTrigger>
+          <SelectContent>
+            {pc.length === 0
+              ? <SelectItem value="_none" disabled>Add in Settings → List of values</SelectItem>
+              : pc.map((x) => <SelectItem key={x.code} value={x.code}>{x.code} — {x.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <ComboInput id="fr-new" placeholder="Funder reference" className="w-40 h-8"
+          value={funderReference} onChange={setFunderReference} options={fr} />
         <Input type="number" placeholder="Contribution %" className="w-32 h-8" value={contributionPct} onChange={(e) => setContributionPct(e.target.value)} />
         {/* Optional, but without it the spend cannot be attributed to an award. */}
         <Select value={awardId} onValueChange={setAwardId}>

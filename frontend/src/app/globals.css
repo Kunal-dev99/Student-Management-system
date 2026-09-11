@@ -13,7 +13,7 @@
 
 @layer base {
   :root {
-    /* Surface elevations (0 = canvas, 3 = topmost) */
+    /* Surface elevations (0 = canvas, 3 = topmost) — Redwood Professional */
     --surface-0: 60 11% 98%;          /* #FAFAF7 — warm off-white canvas */
     --surface-1: 0 0% 100%;           /* #FFFFFF — cards, sidebar */
     --surface-2: 39 17% 94%;          /* #F3F1EC — hover/secondary */
@@ -27,24 +27,24 @@
     --popover: var(--surface-1);
     --popover-foreground: var(--foreground);
 
-    /* Action colors — navy primary, Oracle red as restrained accent */
-    --primary: 213 59% 26%;           /* #1B3A6B — deep navy */
+    /* Action colors — Oracle Redwood: RED is primary, navy the restrained accent. */
+    --primary: 8 60% 49%;             /* #C74634 — Oracle Redwood red, primary */
     --primary-foreground: 0 0% 100%;
     --secondary: 39 17% 94%;          /* same as surface-2 */
     --secondary-foreground: var(--foreground);
-    --accent: 8 60% 49%;              /* #C74634 — Oracle red, used sparingly */
+    --accent: 213 59% 26%;            /* #1B3A6B — deep navy, restrained accent */
     --accent-foreground: 0 0% 100%;
 
     /* Semantic */
-    --info: 213 59% 36%;
+    --info: 213 59% 36%;              /* navy for informational chips */
     --info-foreground: 0 0% 100%;
     --success: 124 46% 33%;           /* #2E7D32 — forest green */
     --success-foreground: 0 0% 100%;
     --warning: 36 100% 35%;           /* #B26A00 — amber-bronze */
     --warning-foreground: 0 0% 100%;
-    --danger: 8 60% 49%;
+    --danger: 6 68% 42%;              /* deeper red for destructive */
     --danger-foreground: 0 0% 100%;
-    --destructive: 8 60% 49%;         /* Oracle red */
+    --destructive: 6 68% 42%;
     --destructive-foreground: 0 0% 100%;
 
     /* Neutrals */
@@ -52,10 +52,10 @@
     --muted-foreground: 0 0% 42%;     /* #6B6B6B */
     --border: 41 13% 83%;             /* #D9D6CE */
     --input: 41 13% 83%;
-    --ring: 213 59% 36%;              /* navy at slightly higher lightness for visibility */
+    --ring: 8 60% 49%;                /* Oracle red focus ring */
 
-    /* Radius — tighter than default, more enterprise */
-    --radius: 0.375rem;               /* 6px */
+    /* Radius — Redwood uses softer 8px corners */
+    --radius: 0.5rem;                 /* 8px */
 
     /* Shadow tokens (used by tailwind boxShadow scale) */
     --shadow-color: 213 30% 15%;
@@ -78,11 +78,11 @@
     --popover: var(--surface-2);
     --popover-foreground: var(--foreground);
 
-    --primary: 213 41% 55%;           /* #5B83BD — lighter navy for dark surfaces */
-    --primary-foreground: 220 12% 9%;
+    --primary: 8 70% 60%;             /* #E5715F — Oracle Redwood red, brighter for dark */
+    --primary-foreground: 0 0% 100%;
     --secondary: var(--surface-2);
     --secondary-foreground: var(--foreground);
-    --accent: 8 70% 62%;              /* #E5675A — softer Oracle red */
+    --accent: 213 41% 60%;            /* navy accent in dark */
     --accent-foreground: 220 12% 9%;
 
     --info: 213 41% 60%;
@@ -100,7 +100,7 @@
     --muted-foreground: 220 5% 60%;   /* #9A9A95-ish */
     --border: 220 7% 23%;             /* #34383E */
     --input: 220 7% 23%;
-    --ring: 213 41% 60%;
+    --ring: 8 70% 60%;                /* Redwood red ring in dark */
 
     --shadow-color: 0 0% 0%;
     --shadow-strength-sm: 0.3;
@@ -263,6 +263,101 @@
   height: calc(100vh - 140px);
 }
 
+/* -------------------------------------------------------------------------------------
+ * Composer reveal animations.
+ *
+ * The whole feature reads better if the dashboard *arrives* — one block after another,
+ * numbers ticking up, SVG paths drawing themselves — rather than snapping into existence.
+ * Everything is CSS-driven so the runtime cost is essentially zero.
+ * ------------------------------------------------------------------------------------ */
+
+@keyframes composer-reveal {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.composer-reveal {
+  opacity: 0;
+  animation-name: composer-reveal;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  animation-fill-mode: forwards;
+  will-change: opacity, transform;
+}
+
+/* Edges of a graph draw themselves, so the structure builds up rather than appearing. */
+@keyframes composer-edge-draw {
+  from { stroke-dashoffset: 220; }
+  to   { stroke-dashoffset: 0; }
+}
+.composer-edge {
+  stroke-dasharray: 220;
+  stroke-dashoffset: 220;
+  animation: composer-edge-draw 700ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+/* Roadmap steps light up one after the other. */
+@keyframes composer-step-pop {
+  from { opacity: 0; transform: scale(0.6); }
+  60%  { opacity: 1; transform: scale(1.08); }
+  to   { opacity: 1; transform: scale(1); }
+}
+.composer-step {
+  animation: composer-step-pop 480ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* Table rows fade in as a soft wave. */
+@keyframes composer-row-in {
+  from { opacity: 0; transform: translateX(-6px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+.composer-row {
+  animation: composer-row-in 360ms ease-out both;
+}
+
+/* Heatmap cells shimmer in row-by-row. */
+@keyframes composer-cell-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.composer-cell {
+  animation: composer-cell-in 300ms ease-out both;
+}
+
+/* -------------------------------------------------------------------------------------
+ * Reasoning trace — the "thinking out loud" pane above AI-produced content.
+ *
+ * Each step should feel like the work naming itself: fade in from the left, the current
+ * step glows softly, completed steps subside so the reader's eye lands where the model
+ * actually is right now.
+ * ------------------------------------------------------------------------------------ */
+@keyframes reasoning-step-in {
+  from { opacity: 0; transform: translateX(-6px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+.reasoning-step {
+  opacity: 0;
+  animation: reasoning-step-in 340ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes reasoning-pulse-ring {
+  0%, 100% { box-shadow: 0 0 0 0 hsl(var(--primary) / 0.28); }
+  60%      { box-shadow: 0 0 0 8px hsl(var(--primary) / 0); }
+}
+.reasoning-pulse {
+  animation: reasoning-pulse-ring 1.6s ease-in-out infinite;
+}
+
+/* Tree nodes drop in. */
+@keyframes composer-node-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.composer-node {
+  animation: composer-node-in 380ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
 /* Respect reduced motion */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
@@ -270,4 +365,58 @@
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* -------------------------------------------------------------------------------------
+ * Document preview — styling for HTML converted from Office files (docx via mammoth,
+ * xlsx via SheetJS). No Tailwind typography plugin is installed, so every element that
+ * mammoth emits has to be styled explicitly or it lands as unreadable browser default.
+ * ------------------------------------------------------------------------------------ */
+.docx-preview-html { color: #241F1D; }
+.docx-preview-html h1,
+.docx-preview-html h2,
+.docx-preview-html h3,
+.docx-preview-html h4 {
+  color: #1B3A6B;
+  font-weight: 600;
+  margin: 1.4em 0 0.6em;
+  line-height: 1.25;
+}
+.docx-preview-html h1 { font-size: 20pt; }
+.docx-preview-html h2 { font-size: 16pt; }
+.docx-preview-html h3 { font-size: 13pt; }
+.docx-preview-html h4 { font-size: 11pt; text-transform: uppercase; letter-spacing: 0.04em; color: #6E6763; }
+.docx-preview-html p { margin: 0 0 0.9em; }
+.docx-preview-html strong { color: #241F1D; font-weight: 600; }
+.docx-preview-html em { font-style: italic; }
+.docx-preview-html a { color: #C74634; text-decoration: underline; }
+.docx-preview-html ul,
+.docx-preview-html ol { margin: 0 0 1em 1.5em; padding: 0; }
+.docx-preview-html li { margin: 0.2em 0; }
+.docx-preview-html table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1em 0;
+  font-size: 10.5pt;
+}
+.docx-preview-html table td,
+.docx-preview-html table th {
+  border: 1px solid #D8D0C1;
+  padding: 6px 10px;
+  vertical-align: top;
+}
+.docx-preview-html table th {
+  background: #F5F0E7;
+  font-weight: 600;
+  text-align: left;
+}
+.docx-preview-html img { max-width: 100%; height: auto; }
+.docx-preview-html hr { border: 0; border-top: 1px solid #D8D0C1; margin: 1.5em 0; }
+.docx-preview-html blockquote {
+  border-left: 3px solid #C74634;
+  padding: 0.4em 1em;
+  margin: 1em 0;
+  color: #4A403C;
+  font-style: italic;
+  background: #FAF7F1;
 }

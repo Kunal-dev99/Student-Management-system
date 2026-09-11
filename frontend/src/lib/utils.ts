@@ -1,6 +1,26 @@
 import { type ClassValue, clsx } from "clsx"
 import { twMerge } from "tailwind-merge"
 
+/**
+ * "under_assessment" → "Under Assessment".
+ * "pass_with_corrections" → "Pass With Corrections".
+ * Preserves acronyms of length 2-4 that are all-caps in the input (e.g. "PhD", "HR").
+ */
+export function titleCase(input: string | null | undefined): string {
+  if (input == null || input === '') return ''
+  return String(input)
+    .replace(/_/g, ' ')
+    .split(' ')
+    .filter(Boolean)
+    .map((w) => (
+      // Keep 2-4 letter ACRONYMS (PhD, HR, ICR) as-is.
+      /^[A-Z]{2,4}$/.test(w) || /^[A-Z][a-z]*[A-Z]/.test(w)
+        ? w
+        : w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()
+    ))
+    .join(' ')
+}
+
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }

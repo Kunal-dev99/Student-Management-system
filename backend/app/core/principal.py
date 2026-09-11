@@ -12,6 +12,10 @@ class Principal:
     person_id: uuid.UUID | None = None
     roles: list[str] = field(default_factory=list)
     permissions: list[str] = field(default_factory=list)
+    # MT-1 — tenant this principal belongs to. Nullable during Phase 1 skeleton
+    # so pre-migration tokens keep working. Once RLS is enabled per-table in Phase 2,
+    # a null tenant_id will be refused at the middleware boundary.
+    tenant_id: uuid.UUID | None = None
 
     def has_permission(self, code: str) -> bool:
         return code in self.permissions

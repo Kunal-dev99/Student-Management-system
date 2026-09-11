@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { ThemeToggle } from '@/components/layout/ThemeToggle'
 import { ChevronLeft, ChevronRight, LogOut } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useLanguage } from '@/shared/i18n/LanguageProvider'
 
 /**
  * Generic sidebar lifted from fp_reporting. To use in another app, pass
@@ -39,10 +40,6 @@ export interface SidebarProps {
   adminNav?: NavItem[]
   /** Optional "Advanced" group rendered after Administration (e.g. Pattern Lab). */
   advancedNav?: NavItem[]
-  /** Optional institution-specific group (e.g. ICR) rendered after Workspace. */
-  icrNav?: NavItem[]
-  /** Heading for the institution-specific group. */
-  icrLabel?: string
   /** Full brand name shown when expanded. */
   brandName?: string
   /** Tagline under the brand name (e.g. "Oracle Partner"). */
@@ -51,6 +48,10 @@ export interface SidebarProps {
   brandShort?: string
   /** Link target of the brand mark. */
   brandHref?: string
+  /** Colour for the tenant logo badge (defaults to primary). */
+  brandColor?: string
+  /** Short text inside the coloured badge (defaults to brandShort). */
+  brandBadge?: string
   user?: SidebarUser
   onLogout?: () => void
 }
@@ -69,17 +70,18 @@ export function Sidebar({
   mainNav,
   adminNav,
   advancedNav,
-  icrNav,
-  icrLabel = 'ICR',
   brandName = 'Brand',
   brandTagline,
   brandShort = 'BR',
   brandHref = '/',
+  brandColor,
+  brandBadge,
   user,
   onLogout,
 }: SidebarProps) {
   const pathname = usePathname() ?? ''
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(true)
+  const { t } = useLanguage()
 
   useEffect(() => {
     setSidebarOpen(readSidebarOpen())
@@ -108,13 +110,13 @@ export function Sidebar({
             ? 'bg-surface-2 text-primary font-medium'
             : 'text-muted-foreground hover:bg-surface-2 hover:text-foreground',
         )}
-        title={!sidebarOpen ? item.label : undefined}
+        title={!sidebarOpen ? t(item.label) : undefined}
       >
         {isActive && (
           <span className="absolute left-0 top-1 bottom-1 w-[3px] rounded-r-sm bg-primary" />
         )}
         <Icon className={cn('h-[18px] w-[18px] flex-shrink-0', isActive && 'text-primary')} />
-        {sidebarOpen && <span className="truncate">{item.label}</span>}
+        {sidebarOpen && <span className="truncate">{t(item.label)}</span>}
       </Link>
     )
   }
@@ -129,8 +131,17 @@ export function Sidebar({
       <div className="flex h-full flex-col">
         {/* Logo */}
         <div className="flex h-16 items-center justify-between gap-2 px-3 border-b border-border">
-          <Link href={brandHref} className="flex items-center min-w-0">
-            {sidebarOpen ? (
+          <Link href={brandHref} className="flex items-center gap-2 min-w-0">
+            {/* Tenant logo badge — always shown, both expanded and collapsed states.
+                Colour comes from the tenant's branding. */}
+            <span
+              className="h-8 w-8 shrink-0 rounded-md flex items-center justify-center text-xs font-bold text-white shadow-sm"
+              style={{ backgroundColor: brandColor ?? 'hsl(var(--primary))' }}
+              aria-hidden
+            >
+              {brandBadge ?? brandShort}
+            </span>
+            {sidebarOpen && (
               <div className="flex flex-col min-w-0 leading-tight">
                 <span className="text-sm font-semibold tracking-tight text-foreground truncate">
                   {brandName}
@@ -141,8 +152,6 @@ export function Sidebar({
                   </span>
                 )}
               </div>
-            ) : (
-              <span className="text-sm font-semibold tracking-tight text-primary">{brandShort}</span>
             )}
           </Link>
           <Button
@@ -166,20 +175,6 @@ export function Sidebar({
             </div>
           )}
           <nav className="space-y-0.5 px-2">{mainNav.map(renderItem)}</nav>
-
-          {icrNav && icrNav.length > 0 && (
-            <>
-              <Separator className="my-4 mx-2 bg-border" />
-              {sidebarOpen && (
-                <div className="px-4 mb-2">
-                  <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest">
-                    {icrLabel}
-                  </span>
-                </div>
-              )}
-              <nav className="space-y-0.5 px-2">{icrNav.map(renderItem)}</nav>
-            </>
-          )}
 
           {adminNav && adminNav.length > 0 && (
             <>

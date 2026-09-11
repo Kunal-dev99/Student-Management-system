@@ -50,20 +50,74 @@ ROUTES: dict[str, list[Adapter]] = {
 }
 
 
-async def deliver(adapter: Adapter, event_type: str, payload: dict) -> dict:
+# ---------------------------------------------------------------------------
+# Adapter registry — the source of truth for what the Integration Hub knows.
+# Adding an adapter here (or its metadata) is the only place a new external
+# system needs registering; the UI/CRUD/routing all read from this list.
+# ---------------------------------------------------------------------------
+
+ADAPTERS: dict[str, Adapter] = {
+    a.system: a for a in [FinanceAdapter(), HRAdapter(), ResearchAdapter()]
+}
+
+ADAPTER_META: dict[str, dict[str, str]] = {
+    "finance":  {"label": "Finance",        "description": "Stipend payments, invoice raising, funding-relationship events (Unit4 / Agresso / SAP)."},
+    "hr":       {"label": "HR",             "description": "Workforce-relevant lifecycle events (e.g. graduation) — iTrent / SAP HCM."},
+    "research": {"label": "Research office", "description": "Research context events (award changes, project links) — PURE / Worktribe."},
+}
+
+
+async def resolve_target(session, system: str) -> tuple[str | None, bool, str]:
+    """Return (url, active, source) for an adapter target.
+
+    Resolution order: institution_setting override → environment variable → None.
+    `source` is one of "db", "env", "none" so the UI can show where the value comes from.
+    """
+    from sqlalchemy import select
+
+    from app.core.config import get_settings
+    from app.modules.settings.models import InstitutionSetting
+
+    url_key = f"integration.{system}.url"
+    active_key = f"integration.{system}.active"
+
+    rows = (await session.execute(
+        select(InstitutionSetting).where(InstitutionSetting.key.in_([url_key, active_key]))
+    )).scalars().all()
+    by_key = {r.key: r.value for r in rows}
+
+    if url_key in by_key:
+        url = (by_key[url_key] or {}).get("value") or None
+        active = bool((by_key.get(active_key) or {"value": True}).get("value", True))
+        return (url, active, "db" if url else "none")
+
+    env_url = getattr(get_settings(), f"integration_{system}_url", None)
+    if env_url:
+        return (env_url, True, "env")
+    return (None, False, "none")
+
+
+async def deliver(adapter: Adapter, event_type: str, payload: dict, session=None) -> dict:
     """Translate, then deliver.
 
-    If a partner URL is configured for this adapter's system (INTEGRATION_<SYSTEM>_URL), POST the
-    translated message over HTTP and raise on a non-2xx / network error so the outbox can retry and
-    eventually dead-letter it. With no URL configured, delivery is a translate-only stand-in that
-    always succeeds (the Phase 1–3 behaviour).
+    If a partner URL is configured for this adapter's system (via the Integration Hub UI or the
+    matching env var), POST the translated message over HTTP and raise on a non-2xx / network error
+    so the outbox can retry and eventually dead-letter it. With no URL configured, delivery is a
+    translate-only stand-in that always succeeds — the message is still recorded so nothing is lost.
     """
     from app.core.config import get_settings
 
     message = adapter.translate(event_type, payload)
-    settings = get_settings()
-    url = getattr(settings, f"integration_{adapter.system}_url", None)
-    if not url:
+
+    # Prefer DB-configured target (set from the Integration Hub UI); fall back to env.
+    url: str | None = None
+    active = True
+    if session is not None:
+        url, active, _ = await resolve_target(session, adapter.system)
+    if url is None:
+        url = getattr(get_settings(), f"integration_{adapter.system}_url", None)
+
+    if not url or not active:
         return message
 
     import httpx

@@ -152,8 +152,14 @@ class ToolBox:
             sid, allowed_ids=allowed
         )
         thesis = await ThesisService(ThesisRepository(self.session)).get_for_student(sid, allowed_ids=allowed)
+        def _clean(v):
+            if isinstance(v, uuid.UUID):
+                return str(v)
+            if hasattr(v, "value"):        # Enum → its string value
+                return v.value
+            return v
         return {
-            "student": {k: (str(v) if isinstance(v, uuid.UUID) else v) for k, v in summary.items()},
+            "student": {k: _clean(v) for k, v in summary.items()},
             "supervisionCompliance": await sup.meeting_compliance(sid),
             "recentMeetings": (await sup.meetings_for_student(sid))[:5],
             "milestones": milestones[:MAX_TOOL_ROWS] if milestones else [],
