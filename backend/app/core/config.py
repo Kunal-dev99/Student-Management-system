@@ -71,7 +71,7 @@ class Settings(BaseSettings):
     # Infrastructure only: whether a tenant may *use* it is an institution setting, not env.
     # With no key the provider resolves to the mock and the composer degrades rather than
     # erroring, so a deployment without a model still boots and serves every other feature.
-    llm_provider: Literal["groq", "mock"] = "groq"
+    llm_provider: Literal["groq", "openrouter", "mock"] = "groq"
     # Groq's catalogue moves; check /v1/models for what an account can actually reach
     # before changing this. A model the key cannot see fails at request time, not startup.
     llm_model: str = "openai/gpt-oss-120b"
@@ -82,6 +82,26 @@ class Settings(BaseSettings):
     llm_planner_model: str = "openai/gpt-oss-20b"
     llm_timeout_seconds: float = 45.0
     groq_api_key: str | None = None
+
+    # OpenRouter — an alternative to Groq for deployments without a Groq key. Uses
+    # OpenRouter's free-tier model catalogue (":free" suffix), so this can run at
+    # zero API cost. Free models are rate-limited and occasionally retired by
+    # OpenRouter — check https://openrouter.ai/models?max_price=0 if the default
+    # model 404s. Selected via LLM_PROVIDER=openrouter; ignored otherwise.
+    openrouter_api_key: str | None = None
+    # Verified 2026-09-13 against OpenRouter's live free catalogue: llama-3.1-8b-instruct
+    # was retired from the free tier: OpenRouter now redirects it to a paid slug (404).
+    # The Google Gemma free models are rate-limited hard on the shared pool (429 on
+    # nearly every call). Nemotron's reasoning model was the one that reliably returned
+    # valid JSON across repeated calls — pick it, but check
+    # https://openrouter.ai/models?max_price=0 if this one also gets retired or
+    # rate-limited later; free-tier availability rotates.
+    openrouter_model: str = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
+    openrouter_planner_model: str = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
+    # OpenRouter asks integrations to identify themselves (used for their public
+    # rankings page, not required for the API to function).
+    openrouter_site_url: str = "https://pgr-platform.local"
+    openrouter_site_name: str = "PGR Platform"
 
     sentry_dsn: str | None = None
     otel_exporter_endpoint: str | None = None

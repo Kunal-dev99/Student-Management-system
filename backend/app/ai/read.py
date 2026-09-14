@@ -45,7 +45,10 @@ async def read(
         user_parts.insert(0, f"Hint: {hint}\n")
 
     try:
-        outcome = await call_json(system=_SYSTEM, user="\n".join(user_parts), max_tokens=700)
+        # Same chain-of-thought headroom issue as classify.py — 700 was marginal for
+        # multi-field schemas (Case Insights' 3-field, 2-4-item-list shape) and risked
+        # the same silent truncate-then-fallback failure mode under load.
+        outcome = await call_json(system=_SYSTEM, user="\n".join(user_parts), max_tokens=2000)
     except (LLMError, ShapeError) as exc:
         log.info("read: falling back — %s", exc)
         return _fallback(schema, reason=str(exc))

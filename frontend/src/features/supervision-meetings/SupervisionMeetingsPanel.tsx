@@ -1,7 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import { CalendarClock, Check } from 'lucide-react'
+import { CalendarClock, Check, Sparkles } from 'lucide-react'
+import { CommitmentReviewDrawer } from '@/features/intelligence/CommitmentReviewDrawer'
 import { PageSection } from '@/components/common/PageSection'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -52,6 +53,7 @@ export function SupervisionMeetingsPanel({ studentId }: { studentId: string }) {
   const [notes, setNotes] = useState('')
   const [actions, setActions] = useState('')
   const [nextMeetingOn, setNextMeetingOn] = useState('')
+  const [commitmentMeeting, setCommitmentMeeting] = useState<{ id: string; notes: string | null } | null>(null)
 
   const err = (e: unknown) => toast({ title: 'Action failed', description: (e as Error).message, variant: 'destructive' })
   const c = compliance.data
@@ -88,6 +90,7 @@ export function SupervisionMeetingsPanel({ studentId }: { studentId: string }) {
                   <TableHead>Actions agreed</TableHead>
                   <TableHead>Next</TableHead>
                   <TableHead>Confirmed</TableHead>
+                  <TableHead>Commitments</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -112,6 +115,16 @@ export function SupervisionMeetingsPanel({ studentId }: { studentId: string }) {
                         </Button>
                       ) : (
                         <span className="text-helper">awaiting student</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {m.notes ? (
+                        <Button size="sm" variant="ghost" className="h-7"
+                          onClick={() => setCommitmentMeeting({ id: m.id, notes: m.notes })}>
+                          <Sparkles className="h-3.5 w-3.5 mr-1.5 text-primary" /> Review
+                        </Button>
+                      ) : (
+                        <span className="text-helper">no notes</span>
                       )}
                     </TableCell>
                   </TableRow>
@@ -186,6 +199,16 @@ export function SupervisionMeetingsPanel({ studentId }: { studentId: string }) {
           Record meeting
         </Button>
       </div>
+
+      {commitmentMeeting ? (
+        <CommitmentReviewDrawer
+          open={!!commitmentMeeting}
+          onOpenChange={(o) => !o && setCommitmentMeeting(null)}
+          meetingId={commitmentMeeting.id}
+          studentId={studentId}
+          notes={commitmentMeeting.notes}
+        />
+      ) : null}
     </PageSection>
   )
 }

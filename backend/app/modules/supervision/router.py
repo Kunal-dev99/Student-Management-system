@@ -1,10 +1,14 @@
 """Supervision HTTP endpoints (arch §11.5 — supervision)."""
 from __future__ import annotations
 
+import logging
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
+
+log = logging.getLogger(__name__)
 
 from app.core.dependencies import require_permission
 from app.core.principal import Principal
@@ -114,6 +118,19 @@ async def record_meeting(
         actions=body.actions, next_meeting_on=body.next_meeting_on,
         recorded_by_user_id=principal.user_id,
     )
+    # Feed the intelligence layer's Engagement Trajectory so it has something real
+    # to compute from. Best-effort: a failure here must never fail meeting logging.
+    try:
+        from app.intelligence.engagement import EngagementService
+        occurred_at = datetime.combine(body.met_on, datetime.min.time(), tzinfo=timezone.utc)
+        await EngagementService(session).record_event(
+            student_id, "meeting_logged", occurred_at=occurred_at,
+            reason_code="supervision_meeting_recorded",
+        )
+        await session.commit()
+    except Exception:  # noqa: BLE001
+        log.exception("failed to record engagement event for meeting %s", row.get("id"))
+        await session.rollback()
     return MeetingOut.model_validate(row)
 
 

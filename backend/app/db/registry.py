@@ -30,3 +30,8 @@ from app.modules.research import models as research_models  # noqa: F401
 from app.modules.assistant import f6_models as assistant_f6_models  # noqa: F401
 from app.modules.assistant import telemetry_models as assistant_telemetry_models  # noqa: F401
 from app.modules.portal import models as portal_models  # noqa: F401
+# AI-P1 — intelligence foundations (evidence, prediction snapshots, telemetry).
+from app.intelligence import models as intelligence_models  # noqa: F401
+from app.intelligence import models_p2 as intelligence_models_p2  # noqa: F401
+from app.intelligence import models_p4 as intelligence_models_p4  # noqa: F401
+from app.intelligence import models_p6 as intelligence_models_p6  # noqa: F401

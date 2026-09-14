@@ -63,6 +63,15 @@ export const ROUTE_ACCESS: RouteAccess[] = [
   { href: '/composer', perms: ['student.read'], roles: [...ADMIN_ROLES, 'Supervisor'] },
   // AI-as-a-layer surface — same permission floor as any risk view.
   { href: '/reviews', perms: ['student.read'], roles: [...ADMIN_ROLES, 'Supervisor'] },
+  // Institutional Memory — comparable case explorer. Same floor as any student view;
+  // it never surfaces more than a supervisor or admin could already see per-case.
+  { href: '/case-explorer', perms: ['student.read'], roles: [...ADMIN_ROLES, 'Supervisor'] },
+  // Policy Compiler — governed configuration proposals. Same floor as /workflows,
+  // /integration and other admin.configure surfaces.
+  { href: '/policy-compiler', perms: ['admin.configure'], roles: ADMIN_ROLES },
+  // Research Change Radar — document comparison. Matches the backend's own
+  // require_permission("document.read") floor.
+  { href: '/change-radar', perms: ['document.read'], roles: [...ADMIN_ROLES, 'Supervisor'] },
   // Supervisor's own caseload — the "who needs me today?" landing. Personally scoped,
   // so admins don't see it either — they use /students and /supervision/workforce.
   { href: '/my-students', perms: [], roles: ['Supervisor'] },

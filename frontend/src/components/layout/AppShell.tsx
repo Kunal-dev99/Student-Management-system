@@ -27,6 +27,7 @@ import {
   Wand2,
   FileText,
   MessageSquare,
+  GitCompare,
 } from 'lucide-react'
 import { Sidebar, type NavItem } from '@/components/layout/sidebar'
 import { Header } from '@/components/layout/header'
@@ -120,6 +121,9 @@ export function AppShell({ children }: { children: ReactNode }) {
       advancedNav: visible([
         { href: '/composer', label: 'Composer', icon: Wand2 },
         { href: '/pattern-lab', label: 'Pattern Lab', icon: Sparkles },
+        { href: '/case-explorer', label: 'Case Explorer', icon: Compass },
+        { href: '/policy-compiler', label: 'Policy Compiler', icon: GitCompare },
+        { href: '/change-radar', label: 'Change Radar', icon: FileText },
       ]),
     }
     // `roles.join` gives a stable dep instead of the fresh array reference each render.

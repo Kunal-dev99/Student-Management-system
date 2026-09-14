@@ -27,6 +27,7 @@ import { DocumentsPanel } from '@/components/documents/DocumentsPanel'
 import { useAudit } from '@/features/audit/api'
 import { useAuth } from '@/shared/auth/AuthContext'
 import { JourneyTracker } from '@/features/students/JourneyTracker'
+import { IntelligenceStrip, EngagementPanel, TwinTimeline, RiskStoryline, InsightsPanel } from '@/features/intelligence'
 
 function Field({ label, value }: { label: string; value: string | null | undefined }) {
   return <div><p className="text-label">{label}</p><p className="text-sm mt-0.5">{value || '—'}</p></div>
@@ -89,6 +90,18 @@ export default function StudentDetailPage() {
 
         <JourneyTracker student={s} />
 
+        {/* PGR Intelligence strip — spec §4. Renders deterministically before narrative loads. */}
+        <IntelligenceStrip studentId={id} studentName={summary.data?.personName ?? undefined} />
+
+        {/* AI Case Insights — streaming reasoning + typewriter reveal. */}
+        <InsightsPanel studentId={id} />
+
+        {/* Digital Twin timeline — spec §5. Longitudinal cross-domain view. */}
+        <TwinTimeline studentId={id} />
+
+        {/* Pattern Lab risk storyline — spec §12-13. Trajectory + drivers + health. */}
+        <RiskStoryline studentId={id} />
+
         <PageSection icon={GraduationCap} title="Record" accent="primary">
           {student.isLoading ? <Skeleton className="h-20 w-full" /> : (
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
@@ -118,6 +131,8 @@ export default function StudentDetailPage() {
         <SupervisorsPanel studentId={id} />
 
         <SupervisionMeetingsPanel studentId={id} />
+
+        <EngagementPanel studentId={id} />
 
         <MilestonesPanel studentId={id} />
 

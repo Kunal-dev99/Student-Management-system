@@ -47,7 +47,13 @@ async def classify(
     user_parts.append(f"Input:\n{text}")
 
     try:
-        outcome = await call_json(system=_SYSTEM, user="\n\n".join(user_parts), max_tokens=200)
+        # Groq's `openai/gpt-oss-*` models are chain-of-thought reasoners — they burn
+        # hundreds of tokens on internal deliberation before emitting the (tiny)
+        # {label, reasoning} JSON. 200 was cutting the response off mid-reasoning,
+        # producing a ShapeError and a silent drop to the keyword-rule fallback on
+        # every call — narrate.py and rank.py already carry this exact fix; classify
+        # was the one shape module that had been missed.
+        outcome = await call_json(system=_SYSTEM, user="\n\n".join(user_parts), max_tokens=3000)
     except (LLMError, ShapeError) as exc:
         log.info("classify: falling back — %s", exc)
         return _fallback(text, labels, keyword_rules, fallback_label, reason=str(exc))

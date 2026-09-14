@@ -7,6 +7,11 @@ from app.modules.admissions.router import app_scoped as admissions_app_router
 from app.modules.admissions.router import offer_router
 from app.modules.identity.router import auth_router, me_router
 from app.modules.tenant.router import router as tenant_router
+from app.intelligence.router import router as intelligence_router
+from app.intelligence.router_p2 import router_p2 as intelligence_router_p2
+from app.intelligence.router_p3 import router_p3 as intelligence_router_p3
+from app.intelligence.router_p4 import router_p4 as intelligence_router_p4
+from app.intelligence.router_p5_p6 import router_p5_p6 as intelligence_router_p5_p6
 from app.modules.person.router import router as person_router
 from app.modules.recruitment.router import app_router as application_router
 from app.modules.recruitment.router import opp_router, pipeline_router
@@ -84,6 +89,11 @@ api_router = APIRouter()
 api_router.include_router(auth_router)
 api_router.include_router(me_router)
 api_router.include_router(tenant_router)
+api_router.include_router(intelligence_router)
+api_router.include_router(intelligence_router_p2)
+api_router.include_router(intelligence_router_p3)
+api_router.include_router(intelligence_router_p4)
+api_router.include_router(intelligence_router_p5_p6)
 
 # Person
 api_router.include_router(person_router)
