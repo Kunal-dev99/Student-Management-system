@@ -29,7 +29,8 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { api } from '@/shared/api/client'
+import { useToast } from '@/components/ui/use-toast'
+import { api, ApiError } from '@/shared/api/client'
 import { cn } from '@/lib/utils'
 import { AIStateBanner } from './AIStateBanner'
 import { ActionPlanDrawer } from './ActionPlanDrawer'
@@ -82,6 +83,7 @@ const OWNER_BADGE: Record<Owner, { icon: typeof UserIcon; label: string; tone: '
 const TOP_N = 12
 
 export function WeeklyInterventionQueue() {
+  const { toast } = useToast()
   const [payload, setPayload] = useState<WeeklyQueuePayload | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -145,7 +147,25 @@ export function WeeklyInterventionQueue() {
       })
       setOpenPlan(staged)
     } catch (e) {
-      setError((e as Error).message)
+      // A 409 here means a draft/confirmed plan for this exact signal already exists —
+      // that's the planner's idempotency guard working as intended, not an AI failure.
+      // "Prepare" should still show the reviewer *something* useful: open the existing
+      // plan instead of surfacing a raw conflict error (which previously rode the
+      // generic AIStateBanner and displayed the unrelated "AI narration failed" copy).
+      if (e instanceof ApiError && e.status === 409) {
+        try {
+          const existing = await intelligenceApi.listInterventionsForStudent(row.student_id)
+          const active = existing.find((p) => p.status === 'draft' || p.status === 'confirmed')
+          if (active) { setOpenPlan(active); return }
+        } catch {
+          // fall through to the generic error surface below
+        }
+      }
+      // A toast, not the AIStateBanner above — that banner's copy is reserved for the
+      // five AI-narration-degraded states (spec §22); staging a plan is a normal write
+      // that can fail for ordinary reasons (permissions, a stale record), and labelling
+      // that failure "AI narration failed" would be actively misleading.
+      toast({ title: 'Could not prepare this intervention', description: (e as Error).message, variant: 'destructive' })
     } finally {
       setPreparingId(null)
     }

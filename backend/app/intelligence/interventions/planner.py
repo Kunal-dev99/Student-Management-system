@@ -54,8 +54,14 @@ class InterventionPlanner:
         action_hash = _hash([(a.action_type, a.target_ref) for a in body.actions])
         plan_key = f"{body.case_ref}|{signal_hash}|{action_hash}"
 
+        # Only an ACTIVE plan blocks re-staging. A cancelled one must not — otherwise
+        # cancel() looks like a dead end: the same idempotency_key lives on forever on
+        # the cancelled row, and "cancel it first" in the message below would be a lie.
         existing = (await self.session.execute(
-            select(InterventionPlan).where(InterventionPlan.idempotency_key == plan_key)
+            select(InterventionPlan).where(
+                InterventionPlan.idempotency_key == plan_key,
+                InterventionPlan.status.in_(("draft", "confirmed")),
+            )
         )).scalar_one_or_none()
         if existing is not None:
             raise ConflictError(
@@ -136,5 +142,14 @@ class InterventionPlanner:
         # Note stored on source_signal for audit.
         plan.source_signal = {**(plan.source_signal or {}), "cancel_reason": reason,
                                 "cancelled_at": datetime.now(timezone.utc).isoformat()}
+        # Free the idempotency_key for reuse. The column has a hard DB-level unique
+        # constraint (not scoped to status), so leaving it untouched would make
+        # "cancel it first if you want a fresh one" a lie: stage() would still hit
+        # either the app-level duplicate check or, if that's relaxed, a raw
+        # IntegrityError on the next attempt to reuse the same key. Replaced outright
+        # (rather than suffixed) since case_ref can run up to 120 chars and the
+        # original key can already sit close to the column's 200-char limit;
+        # plan.id alone is short and guaranteed unique.
+        plan.idempotency_key = f"cancelled:{plan.id}"
         await self.session.flush()
         return plan
