@@ -24,9 +24,23 @@ aiosmtplib==3.0.2          # async SMTP email delivery (notifications)
 anthropic==0.40.0
 
 # Pattern Lab PL-3 — the [ml] extra (plan: docs/PGR_PATTERN_LAB_PLAN.md §4). OPTIONAL:
-# the platform runs fully without it; only model training/scoring needs it. Deliberately
-# sklearn-only — no pandas (plain lists suffice at institutional scale), no XGBoost/AutoML.
+# the platform runs fully without it; only model training/scoring needs it.
 scikit-learn==1.9.0
+# app/modules/pattern_lab/training.py imports both as optional boosters (try/except
+# ImportError around each) — training still runs sklearn-only without them, but a real
+# deployment wants the actual gradient-boosted models, not the silently degraded path.
+xgboost==3.4.1
+lightgbm==4.7.0
+
+# app/modules/completion/f4.py — award certificate PDF generation. NOT optional: the
+# import is unguarded at module load time, so without this package the entire backend
+# fails to start (ModuleNotFoundError crashes uvicorn before any route is registered).
+reportlab==5.0.0
+
+# app/modules/fuzzy/entities.py — token-set fuzzy matching for the deterministic "Ask
+# PGR" assistant path. Wrapped in try/except so the app still boots without it, but the
+# fallback is a much weaker plain lowercase substring match — install this for real use.
+rapidfuzz==3.14.1
 
 # Dev / test
 pytest==8.3.4
