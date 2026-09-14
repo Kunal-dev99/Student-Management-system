@@ -11,6 +11,7 @@
  * The staged plan is generated on the server; this drawer never invents new actions.
  */
 import { useMemo, useState } from 'react'
+import Link from 'next/link'
 import { Shield } from 'lucide-react'
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription,
@@ -26,6 +27,24 @@ const ACTION_LABEL: Record<ActionType, string> = {
   request_funding_review:     'Request funding review',
   open_review_evidence_check: 'Open evidence review',
   schedule_reassessment:      'Reassess',
+}
+
+const KIND_LABEL: Record<string, string> = {
+  student: 'Student', person: 'Person', supervisor: 'Supervisor', role: 'Role', user: 'User',
+}
+
+/** Target/owner refs are always {kind, id, label?} — never render that shape as raw JSON. */
+function describeRef(ref: Record<string, unknown> | null | undefined): { text: string; href?: string } {
+  if (!ref) return { text: 'Unresolved' }
+  const kind = typeof ref.kind === 'string' ? ref.kind : null
+  const id = typeof ref.id === 'string' ? ref.id : null
+  const label = typeof ref.label === 'string' ? ref.label : null
+  const kindLabel = kind ? (KIND_LABEL[kind] ?? kind) : 'Reference'
+  const name = label ?? (id ? `${id.slice(0, 8)}…` : null)
+  if (!name) return { text: kindLabel }
+  const text = `${kindLabel}: ${name}`
+  const href = kind === 'student' && id ? `/students/${id}` : undefined
+  return { text, href }
 }
 
 export interface ActionPlanDrawerProps {
@@ -97,6 +116,8 @@ export function ActionPlanDrawer({ open, onOpenChange, plan, onConfirmed }: Acti
               {plan.actions.map((a, idx) => {
                 const on = state[a.id] ?? true
                 const dueSource = a.dueAt ? 'user-selected' : 'not specified'
+                const target = describeRef(a.targetRef)
+                const owner = describeRef(a.ownerRef)
                 return (
                   <li key={a.id} className="flex items-start gap-3 rounded-md border p-3">
                     <Checkbox
@@ -111,10 +132,12 @@ export function ActionPlanDrawer({ open, onOpenChange, plan, onConfirmed }: Acti
                         <Badge variant="secondary">{a.status}</Badge>
                       </div>
                       <p className="mt-0.5 text-xs text-muted-foreground truncate">
-                        Target: {JSON.stringify(a.targetRef).slice(0, 80)}
+                        Target: {target.href
+                          ? <Link href={target.href} className="text-primary hover:underline">{target.text}</Link>
+                          : target.text}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        Owner: {a.ownerRef ? JSON.stringify(a.ownerRef).slice(0, 60) : 'unresolved'}
+                        Owner: {owner.text}
                         {' · '}
                         Due: {a.dueAt ?? 'Not specified'} <span className="opacity-60">({dueSource})</span>
                       </p>
