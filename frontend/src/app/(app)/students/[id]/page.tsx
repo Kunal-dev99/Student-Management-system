@@ -22,7 +22,6 @@ import { ThesisCompletionPanel } from '@/features/completion/ThesisCompletionPan
 import { ClassificationCard } from '@/features/completion/ClassificationCard'
 import { SupervisorRequestsCard } from '@/features/supervision/SupervisorRequestsCard'
 import { RelationshipGraph } from '@/features/research/RelationshipGraph'
-import { StudentPredictionsPanel } from '@/features/pattern-lab/StudentPredictionsPanel'
 import { DocumentsPanel } from '@/components/documents/DocumentsPanel'
 import { useAudit } from '@/features/audit/api'
 import { useAuth } from '@/shared/auth/AuthContext'
@@ -123,10 +122,6 @@ export default function StudentDetailPage() {
         </PageSection>
 
         <LifecyclePanel studentId={id} student={s} />
-
-        {/* PL-5 advisory predictions — renders nothing without ml.read, on a
-            403, or when no production model has scored this student. */}
-        <StudentPredictionsPanel studentId={id} />
 
         <SupervisorsPanel studentId={id} />
 
