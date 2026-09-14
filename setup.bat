@@ -13,11 +13,11 @@ if not exist ".env" (
     echo.
     echo ============================================================
     echo WARNING: backend\.env does not exist. ".env" is gitignored, so
-    echo a fresh clone/pull NEVER brings it across — you must create it
+    echo a fresh clone/pull NEVER brings it across - you must create it
     echo yourself on this machine, every time, on every machine.
     echo.
     echo Without it, DATABASE_URL falls back to a local SQLite file
-    echo (sqlite+aiosqlite:///./pgr_dev.db) — the app APPEARS to work,
+    echo (sqlite+aiosqlite:///./pgr_dev.db) - the app APPEARS to work,
     echo then breaks in confusing ways once Postgres-only assumptions
     echo (concurrent workers, real production data) don't hold.
     echo.
@@ -50,25 +50,25 @@ if errorlevel 1 (
     echo ERROR: backend pip install failed. Scroll up for which package.
     echo The app WILL start and then crash later with a confusing
     echo ModuleNotFoundError deep in a request/worker traceback if you
-    echo ignore this — fix the install error here, not there.
+    echo ignore this - fix the install error here, not there.
     echo ============================================================
     pause & exit /b 1
 )
 
 echo.
 echo === [3/5] Database migrations ===
-echo Target: check backend\.env DATABASE_URL — SQLite by default if unset.
+echo Target: check backend\.env DATABASE_URL - SQLite by default if unset.
 ".venv\Scripts\alembic.exe" upgrade head
 if errorlevel 1 (
     echo.
     echo ============================================================
     echo ERROR: alembic upgrade failed. STOPPING here on purpose.
     echo Continuing past this used to produce a silent half-migrated
-    echo database — the app would start fine, then crash at runtime
+    echo database - the app would start fine, then crash at runtime
     echo with "no such table: ..." the first time a background job or
     echo a rarely-hit endpoint touched the missing table.
     echo Common causes: DATABASE_URL wrong/unset in backend\.env, the
-    echo Postgres service not running, or a migration conflict — read
+    echo Postgres service not running, or a migration conflict - read
     echo the error above, fix it, then re-run setup.bat.
     echo ============================================================
     pause & exit /b 1
@@ -78,7 +78,7 @@ echo.
 echo === [4/5] Seed demo data (roles, admin user, sample persons) ===
 ".venv\Scripts\python.exe" -m app.db.seed
 if errorlevel 1 (
-    echo WARNING: seed failed — continuing, since a re-run or an
+    echo WARNING: seed failed - continuing, since a re-run or an
     echo already-seeded database is a common, harmless cause. If
     echo login then fails with no admin user, run this seed step
     echo manually and read its actual error.
