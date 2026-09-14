@@ -1,9 +1,10 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { GitBranch, Plus, Workflow } from 'lucide-react'
 import { PageHeader } from '@/components/common/PageHeader'
 import { PageSection } from '@/components/common/PageSection'
+import { FilterChips } from '@/components/common/FilterChips'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -26,6 +27,15 @@ export default function WorkflowsPage() {
   const dispatch = useDispatchEvent()
   const [builderOpen, setBuilderOpen] = useState(false)
   const [events, setEvents] = useState<Record<string, string>>({})
+  const [stateFilter, setStateFilter] = useState('all')
+
+  const stateOptions = useMemo(() => {
+    const states = Array.from(new Set((instances.data ?? []).map((i) => i.currentState))).sort()
+    return [{ value: 'all', label: 'All' }, ...states.map((s) => ({ value: s, label: s }))]
+  }, [instances.data])
+  const filteredInstances = (instances.data ?? []).filter(
+    (i) => stateFilter === 'all' || i.currentState === stateFilter,
+  )
 
   const err = (e: unknown) => toast({ title: 'Failed', description: (e as Error).message, variant: 'destructive' })
 
@@ -84,8 +94,12 @@ export default function WorkflowsPage() {
           description="Live workflow instances. Dispatch an event to advance one."
         >
           {instances.isLoading ? <Skeleton className="h-16 w-full" /> : (
-            <div className="space-y-2">
-              {instances.data?.map((i) => (
+            <div className="space-y-3">
+              {instances.data && instances.data.length > 0 && (
+                <FilterChips label="State:" options={stateOptions} value={stateFilter} onChange={setStateFilter} />
+              )}
+              <div className="space-y-2">
+              {filteredInstances.map((i) => (
                 <div key={i.id} className="flex items-center justify-between border-b border-border/60 last:border-0 pb-2 last:pb-0">
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-mono">{i.id.slice(0, 8)}</span>
@@ -100,6 +114,10 @@ export default function WorkflowsPage() {
                 </div>
               ))}
               {instances.data && instances.data.length === 0 && <p className="text-helper">No running instances. Start one from a definition above.</p>}
+              {instances.data && instances.data.length > 0 && filteredInstances.length === 0 && (
+                <p className="text-helper">No instances match this state filter.</p>
+              )}
+              </div>
             </div>
           )}
         </PageSection>

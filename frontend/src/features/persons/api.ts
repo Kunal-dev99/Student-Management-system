@@ -44,12 +44,16 @@ export interface Timeline {
   entries: TimelineEntry[]
 }
 
-export function usePersons(search: string, opts?: { enabled?: boolean }) {
+export function usePersons(
+  search: string, opts?: { enabled?: boolean; limit?: number; offset?: number },
+) {
+  const limit = opts?.limit ?? 50
+  const offset = opts?.offset ?? 0
   return useQuery({
-    queryKey: ['persons', search],
+    queryKey: ['persons', search, limit, offset],
     queryFn: () =>
       api.get<ListResponse<Person>>(
-        `/persons?limit=50${search ? `&search=${encodeURIComponent(search)}` : ''}`,
+        `/persons?limit=${limit}&offset=${offset}${search ? `&search=${encodeURIComponent(search)}` : ''}`,
       ),
     enabled: opts?.enabled ?? true,
   })

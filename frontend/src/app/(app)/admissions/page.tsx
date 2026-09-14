@@ -16,7 +16,7 @@ const ACTIONABLE = new Set([
 ])
 
 export default function AdmissionsPage() {
-  const { data, isLoading } = useApplications()
+  const { data, isLoading } = useApplications({ limit: 100 })
   const rows = (data?.data ?? []).filter((a) => ACTIONABLE.has(a.currentStage))
 
   return (

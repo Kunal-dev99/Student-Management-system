@@ -1,13 +1,26 @@
 'use client'
 
+import { useState } from 'react'
 import Link from 'next/link'
 import { ArrowUpRight, Award, FileCheck2, GraduationCap, Sparkles } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { PageHeader } from '@/components/common/PageHeader'
 import { PageSection } from '@/components/common/PageSection'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { api } from '@/shared/api/client'
+
+const SECTION_CAP = 12
+
+function ShowMoreButton({ total, expanded, onToggle }: { total: number; expanded: boolean; onToggle: () => void }) {
+  if (total <= SECTION_CAP) return null
+  return (
+    <Button size="sm" variant="ghost" className="mt-1.5" onClick={onToggle}>
+      {expanded ? 'Show fewer' : `Show all ${total}`}
+    </Button>
+  )
+}
 
 interface ReadyRow { studentId: string; studentRef: string; personName: string; classification: string | null; publishedAt: string | null; hasCertificate: boolean; link: string }
 interface PendingRow { studentId: string; studentRef: string; personName: string; classificationState: string; proposedClassification: string | null; link: string }
@@ -72,6 +85,9 @@ export default function CompletionPage() {
   })
   const data = q.data
   const t = data?.totals
+  const [expandReady, setExpandReady] = useState(false)
+  const [expandPending, setExpandPending] = useState(false)
+  const [expandRecent, setExpandRecent] = useState(false)
 
   return (
     <>
@@ -105,7 +121,7 @@ export default function CompletionPage() {
                 <p className="text-helper">Nobody waiting to graduate.</p>
               ) : (
                 <ul className="divide-y divide-border/40 rounded-md border border-border/40">
-                  {data.readyToGraduate.slice(0, 12).map((r) => (
+                  {data.readyToGraduate.slice(0, expandReady ? undefined : SECTION_CAP).map((r) => (
                     <li key={r.studentId} className="flex items-center justify-between gap-3 px-3 py-2">
                       <div>
                         <PersonLink href={r.link} name={r.personName} sub={r.studentRef} />
@@ -121,6 +137,8 @@ export default function CompletionPage() {
                   ))}
                 </ul>
               )}
+              <ShowMoreButton total={data.readyToGraduate.length} expanded={expandReady}
+                onToggle={() => setExpandReady((v) => !v)} />
             </PageSection>
 
             {/* Classification pending */}
@@ -135,7 +153,7 @@ export default function CompletionPage() {
                 <p className="text-helper">No thesis stuck at classification.</p>
               ) : (
                 <ul className="divide-y divide-border/40 rounded-md border border-border/40">
-                  {data.classificationPending.slice(0, 12).map((r) => (
+                  {data.classificationPending.slice(0, expandPending ? undefined : SECTION_CAP).map((r) => (
                     <li key={r.studentId} className="flex items-center justify-between gap-3 px-3 py-2">
                       <div>
                         <PersonLink href={r.link} name={r.personName} sub={r.studentRef} />
@@ -150,6 +168,8 @@ export default function CompletionPage() {
                   ))}
                 </ul>
               )}
+              <ShowMoreButton total={data.classificationPending.length} expanded={expandPending}
+                onToggle={() => setExpandPending((v) => !v)} />
             </PageSection>
 
             {/* Recently graduated */}
@@ -163,7 +183,7 @@ export default function CompletionPage() {
                 <p className="text-helper">No recent graduations.</p>
               ) : (
                 <ul className="divide-y divide-border/40 rounded-md border border-border/40">
-                  {data.recentlyGraduated.slice(0, 12).map((r) => (
+                  {data.recentlyGraduated.slice(0, expandRecent ? undefined : SECTION_CAP).map((r) => (
                     <li key={r.studentId} className="flex items-center justify-between gap-3 px-3 py-2">
                       <div>
                         <PersonLink href={r.link} name={r.personName} sub={r.studentRef} />
@@ -174,6 +194,8 @@ export default function CompletionPage() {
                   ))}
                 </ul>
               )}
+              <ShowMoreButton total={data.recentlyGraduated.length} expanded={expandRecent}
+                onToggle={() => setExpandRecent((v) => !v)} />
             </PageSection>
 
             {/* Award distribution */}

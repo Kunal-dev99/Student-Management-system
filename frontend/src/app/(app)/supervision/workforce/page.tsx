@@ -5,15 +5,38 @@
  * Admin surface, mounted separately from the supervisor's own caseload page (/supervision).
  */
 
+import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { ArrowUpRight, UsersRound } from 'lucide-react'
 import { PageHeader } from '@/components/common/PageHeader'
 import { PageSection } from '@/components/common/PageSection'
 import { ErrorState } from '@/components/common/ErrorState'
+import { SearchInput } from '@/components/common/SearchInput'
+import { FilterChips } from '@/components/common/FilterChips'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useSupervisorWorkforce, type WorkforceRow } from '@/features/supervision/w2_api'
+
+type StatusFilter = 'all' | 'over_cap' | 'sabbatical' | 'not_accepting' | 'on_leave'
+
+const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'over_cap', label: 'Over cap' },
+  { value: 'sabbatical', label: 'Sabbatical' },
+  { value: 'not_accepting', label: 'Not accepting' },
+  { value: 'on_leave', label: 'On leave' },
+]
+
+function matchesStatus(row: WorkforceRow, filter: StatusFilter): boolean {
+  switch (filter) {
+    case 'over_cap': return row.overCapacity
+    case 'sabbatical': return row.onSabbatical
+    case 'not_accepting': return !row.acceptingNew
+    case 'on_leave': return row.availability === 'on_leave'
+    default: return true
+  }
+}
 
 function Tile({ label, value, sub, tone }: { label: string; value: string | number; sub?: string; tone?: 'error' | 'warning' | 'success' }) {
   const toneClass =
@@ -45,6 +68,18 @@ function StatusBadges({ row }: { row: WorkforceRow }) {
 
 export default function WorkforcePage() {
   const { data, isLoading, isError, error } = useSupervisorWorkforce()
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
+
+  const filteredSupervisors = useMemo(() => {
+    if (!data) return []
+    const q = search.trim().toLowerCase()
+    return data.supervisors.filter((row) => {
+      if (!matchesStatus(row, statusFilter)) return false
+      if (!q) return true
+      return row.personName.toLowerCase().includes(q) || (row.email ?? '').toLowerCase().includes(q)
+    })
+  }, [data, search, statusFilter])
 
   return (
     <>
@@ -79,7 +114,9 @@ export default function WorkforcePage() {
 
               <PageSection
                 icon={UsersRound}
-                title={`Supervisors (${data.supervisors.length})`}
+                title={`Supervisors (${filteredSupervisors.length}${
+                  filteredSupervisors.length !== data.supervisors.length ? ` of ${data.supervisors.length}` : ''
+                })`}
                 accent={data.totals.overCapacity > 0 ? 'danger' : 'primary'}
                 attention={data.totals.overCapacity > 0}
                 description="Over-capacity rows are listed first, then alphabetical."
@@ -87,7 +124,15 @@ export default function WorkforcePage() {
                 {data.supervisors.length === 0 ? (
                   <p className="text-helper">Nobody supervises anyone yet — no profiles, no active relationships, no pending requests.</p>
                 ) : (
-                  <Table>
+                  <div className="space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <SearchInput value={search} onChange={setSearch} placeholder="Search by name or email…" />
+                      <FilterChips label="Status:" options={STATUS_FILTERS} value={statusFilter} onChange={setStatusFilter} />
+                    </div>
+                    {filteredSupervisors.length === 0 ? (
+                      <p className="text-helper">No supervisors match this search/filter.</p>
+                    ) : (
+                    <Table>
                     <TableHeader>
                       <TableRow>
                         <TableHead>Supervisor</TableHead>
@@ -98,7 +143,7 @@ export default function WorkforcePage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {data.supervisors.map((row) => (
+                      {filteredSupervisors.map((row) => (
                         <TableRow key={row.personId}>
                           <TableCell>
                             <div className="flex flex-col">
@@ -124,7 +169,9 @@ export default function WorkforcePage() {
                         </TableRow>
                       ))}
                     </TableBody>
-                  </Table>
+                    </Table>
+                    )}
+                  </div>
                 )}
               </PageSection>
             </>

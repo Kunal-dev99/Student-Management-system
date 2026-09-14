@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.recruitment.models import Application, ResearchOpportunity
@@ -31,12 +31,24 @@ class RecruitmentRepository:
         ).scalar_one_or_none()
 
     # Applications
-    async def list_applications(self, *, limit: int, offset: int, stage: str | None):
+    async def list_applications(
+        self, *, limit: int, offset: int, stage: str | None, search: str | None = None
+    ):
+        from app.modules.person.models import Person
+
         stmt = select(Application)
         count = select(func.count()).select_from(Application)
         if stage:
             stmt = stmt.where(Application.current_stage == stage)
             count = count.where(Application.current_stage == stage)
+        if search:
+            like = f"%{search.lower()}%"
+            cond = or_(
+                func.lower(Person.given_name).like(like),
+                func.lower(Person.family_name).like(like),
+            )
+            stmt = stmt.join(Person, Person.id == Application.person_id).where(cond)
+            count = count.join(Person, Person.id == Application.person_id).where(cond)
         stmt = stmt.order_by(Application.created_at.desc()).limit(limit).offset(offset)
         rows = (await self.session.execute(stmt)).scalars().unique().all()
         total = (await self.session.execute(count)).scalar_one()

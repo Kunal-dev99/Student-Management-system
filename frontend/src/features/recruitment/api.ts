@@ -74,11 +74,23 @@ export interface Pipeline {
 export const useOpportunities = () =>
   useQuery({ queryKey: ['opportunities'], queryFn: () => api.get<ListResponse<Opportunity>>('/opportunities?limit=100') })
 
-export const useApplications = (stage?: string) =>
-  useQuery({
-    queryKey: ['applications', stage ?? 'all'],
-    queryFn: () => api.get<ListResponse<Application>>(`/applications?limit=100${stage ? `&stage=${stage}` : ''}`),
+export interface UseApplicationsParams {
+  stage?: string
+  search?: string
+  limit?: number
+  offset?: number
+}
+
+export const useApplications = (params: UseApplicationsParams = {}) => {
+  const { stage, search, limit = 50, offset = 0 } = params
+  const qs = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+  if (stage) qs.set('stage', stage)
+  if (search) qs.set('search', search)
+  return useQuery({
+    queryKey: ['applications', stage ?? 'all', search ?? '', limit, offset],
+    queryFn: () => api.get<ListResponse<Application>>(`/applications?${qs.toString()}`),
   })
+}
 
 export const useApplication = (id: string) =>
   useQuery({ queryKey: ['application', id], queryFn: () => api.get<Application>(`/applications/${id}`), enabled: !!id })

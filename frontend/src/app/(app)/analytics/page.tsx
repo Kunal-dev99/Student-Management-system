@@ -1,13 +1,19 @@
 'use client'
 
+import { useMemo, useState } from 'react'
 import { AlertTriangle, Globe, TrendingUp } from 'lucide-react'
 import { PageHeader } from '@/components/common/PageHeader'
 import { PageSection } from '@/components/common/PageSection'
+import { SearchInput } from '@/components/common/SearchInput'
+import { FilterChips } from '@/components/common/FilterChips'
+import { Pagination } from '@/components/common/Pagination'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useAnalytics, useEnterprise360, type Enterprise360Row } from '@/features/analytics/api'
+
+const E360_PAGE_SIZE = 50
 
 function Tile({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
@@ -37,6 +43,30 @@ export default function AnalyticsPage() {
   const analytics = useAnalytics()
   const e360 = useEnterprise360()
   const a = analytics.data
+
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState('all')
+  const [offset, setOffset] = useState(0)
+
+  const statusOptions = useMemo(() => {
+    const statuses = Array.from(new Set((e360.data?.population ?? []).map((r) => r.student.status))).sort()
+    return [{ value: 'all', label: 'All' }, ...statuses.map((s) => ({ value: s, label: s.replace(/_/g, ' ') }))]
+  }, [e360.data])
+
+  const filteredPopulation = useMemo(() => {
+    const rows = e360.data?.population ?? []
+    const q = search.trim().toLowerCase()
+    return rows.filter((r) => {
+      if (statusFilter !== 'all' && r.student.status !== statusFilter) return false
+      if (!q) return true
+      return r.personName.toLowerCase().includes(q) || r.studentRef.toLowerCase().includes(q)
+    })
+  }, [e360.data, search, statusFilter])
+
+  const pagedPopulation = filteredPopulation.slice(offset, offset + E360_PAGE_SIZE)
+
+  const handleSearch = (v: string) => { setSearch(v); setOffset(0) }
+  const handleStatus = (v: string) => { setStatusFilter(v); setOffset(0) }
 
   return (
     <>
@@ -78,27 +108,39 @@ export default function AnalyticsPage() {
                 <Badge variant="success">{e360.data?.summary.funded ?? 0} funded</Badge>
                 <Badge variant="secondary">{e360.data?.summary.employees ?? 0} also employees</Badge>
               </div>
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+                <SearchInput value={search} onChange={handleSearch} placeholder="Search by name or student ref…" />
+                <FilterChips label="Status:" options={statusOptions} value={statusFilter} onChange={handleStatus} />
+              </div>
               <Tabs defaultValue="student">
                 <TabsList>
                   {LENSES.map((l) => <TabsTrigger key={l.key} value={l.key}>{l.label}</TabsTrigger>)}
                 </TabsList>
                 {LENSES.map((l) => (
-                  <TabsContent key={l.key} value={l.key} className="mt-3">
+                  <TabsContent key={l.key} value={l.key} className="mt-3 space-y-3">
                     <div className="card-elevated overflow-x-auto">
                       <Table>
                         <TableHeader><TableRow>{l.cols.map((c) => <TableHead key={c}>{c}</TableHead>)}</TableRow></TableHeader>
                         <TableBody>
-                          {e360.data?.population.map((r) => (
+                          {pagedPopulation.map((r) => (
                             <TableRow key={r.studentRef}>
                               {l.row(r).map((cell, i) => <TableCell key={i} className={i === 0 ? 'font-medium' : 'text-muted-foreground'}>{cell}</TableCell>)}
                             </TableRow>
                           ))}
-                          {e360.data && e360.data.population.length === 0 && (
-                            <TableRow><TableCell colSpan={l.cols.length} className="text-muted-foreground text-center py-6">No students.</TableCell></TableRow>
+                          {e360.data && filteredPopulation.length === 0 && (
+                            <TableRow><TableCell colSpan={l.cols.length} className="text-muted-foreground text-center py-6">
+                              {search || statusFilter !== 'all' ? 'No students match this search/filter.' : 'No students.'}
+                            </TableCell></TableRow>
                           )}
                         </TableBody>
                       </Table>
                     </div>
+                    <Pagination
+                      offset={offset}
+                      limit={E360_PAGE_SIZE}
+                      total={filteredPopulation.length}
+                      onOffsetChange={setOffset}
+                    />
                   </TabsContent>
                 ))}
               </Tabs>

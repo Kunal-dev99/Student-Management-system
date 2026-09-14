@@ -24,11 +24,15 @@ export default function AuditPage() {
   const [entityType, setEntityType] = useState('')
   const [entityId, setEntityId] = useState('')
   const [actorEmail, setActorEmail] = useState('')
+  const [fromDate, setFromDate] = useState('')
+  const [toDate, setToDate] = useState('')
 
   const { data, isLoading, isError, error } = useAudit({
     entityType: entityType || undefined,
     entityId: entityId || undefined,
     actorEmail: actorEmail || undefined,
+    fromDate: fromDate || undefined,
+    toDate: toDate || undefined,
     limit: 200,
   })
 
@@ -56,6 +60,9 @@ export default function AuditPage() {
             <Input placeholder="Entity type" className="w-44 h-9" value={entityType} onChange={(e) => setEntityType(e.target.value)} />
             <Input placeholder="Entity ID" className="w-64 h-9" value={entityId} onChange={(e) => setEntityId(e.target.value)} />
             <Input placeholder="Actor email" className="w-56 h-9" value={actorEmail} onChange={(e) => setActorEmail(e.target.value)} />
+            <Input type="date" aria-label="From date" className="w-40 h-9" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
+            <span className="text-helper">to</span>
+            <Input type="date" aria-label="To date" className="w-40 h-9" value={toDate} onChange={(e) => setToDate(e.target.value)} />
           </div>
         </PageSection>
 

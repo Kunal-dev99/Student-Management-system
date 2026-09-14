@@ -2,8 +2,11 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { GitMerge, Search } from 'lucide-react'
+import { GitMerge } from 'lucide-react'
 import { PageHeader } from '@/components/common/PageHeader'
+import { SearchInput } from '@/components/common/SearchInput'
+import { FilterChips } from '@/components/common/FilterChips'
+import { Pagination } from '@/components/common/Pagination'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -16,8 +19,15 @@ import {
 import { useToast } from '@/components/ui/use-toast'
 import { ApiError } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthContext'
-import { useMergePersons, usePersons } from '@/features/persons/api'
+import { useMergePersons, usePersons, RELATIONSHIP_TYPES, type RelationshipType } from '@/features/persons/api'
 import { RelationshipBadge } from '@/features/persons/RelationshipBadge'
+
+const PERSONS_PAGE_SIZE = 50
+type RelFilter = RelationshipType | 'all'
+const REL_FILTERS: { value: RelFilter; label: string }[] = [
+  { value: 'all', label: 'All' },
+  ...RELATIONSHIP_TYPES.map((t) => ({ value: t as RelFilter, label: t })),
+]
 
 function MergeDialog() {
   const { toast } = useToast()
@@ -85,7 +95,15 @@ function MergeDialog() {
 export default function PersonsPage() {
   const { hasPermission } = useAuth()
   const [search, setSearch] = useState('')
-  const { data, isLoading, isError, error } = usePersons(search)
+  const [relFilter, setRelFilter] = useState<RelFilter>('all')
+  const [offset, setOffset] = useState(0)
+  const handleSearch = (v: string) => { setSearch(v); setOffset(0) }
+  const handleRelFilter = (v: RelFilter) => { setRelFilter(v); setOffset(0) }
+  const { data, isLoading, isError, error } = usePersons(search, { limit: PERSONS_PAGE_SIZE, offset })
+
+  const rows = (data?.data ?? []).filter(
+    (p) => relFilter === 'all' || p.relationships.some((r) => r.relationshipType === relFilter && r.validTo === null),
+  )
 
   return (
     <>
@@ -94,14 +112,9 @@ export default function PersonsPage() {
         actions={hasPermission('person.gdpr') ? <MergeDialog /> : undefined}
       />
       <div className="px-6 pb-6 space-y-4">
-        <div className="relative max-w-sm">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search by name or email…"
-            className="pl-8"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <SearchInput value={search} onChange={handleSearch} placeholder="Search by name or email…" />
+          <FilterChips label="Currently:" options={REL_FILTERS} value={relFilter} onChange={handleRelFilter} />
         </div>
 
         <div className="card-elevated overflow-hidden">
@@ -130,7 +143,7 @@ export default function PersonsPage() {
                 </TableRow>
               )}
 
-              {data?.data.map((p) => {
+              {rows.map((p) => {
                 const current = p.relationships.filter((r) => r.validTo === null)
                 return (
                   <TableRow key={p.id} className="cursor-pointer">
@@ -156,19 +169,22 @@ export default function PersonsPage() {
                 )
               })}
 
-              {data && data.data.length === 0 && (
+              {data && rows.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={4} className="text-muted-foreground text-center py-8">
-                    No persons match “{search}”.
+                    No persons match this search/filter.
                   </TableCell>
                 </TableRow>
               )}
             </TableBody>
           </Table>
         </div>
-        {data?.page.total != null && (
-          <p className="text-helper">{data.page.total} total</p>
-        )}
+        <Pagination
+          offset={offset}
+          limit={PERSONS_PAGE_SIZE}
+          total={data?.page.total}
+          onOffsetChange={setOffset}
+        />
       </div>
     </>
   )

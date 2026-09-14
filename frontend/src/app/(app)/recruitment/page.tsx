@@ -4,6 +4,8 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { AlertTriangle, Check, GitBranch, Megaphone, Pencil, Plus, X } from 'lucide-react'
 import { PageHeader } from '@/components/common/PageHeader'
+import { SearchInput } from '@/components/common/SearchInput'
+import { Pagination } from '@/components/common/Pagination'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -579,12 +581,17 @@ function NewApplicationDialog() {
   )
 }
 
+const APPLICATIONS_PAGE_SIZE = 50
+
 function ApplicationsTab() {
   const pipeline = usePipeline()
-  const { data, isLoading } = useApplications()
+  const [search, setSearch] = useState('')
+  const [offset, setOffset] = useState(0)
+  const handleSearch = (v: string) => { setSearch(v); setOffset(0) }
+  const { data, isLoading } = useApplications({ search, limit: APPLICATIONS_PAGE_SIZE, offset })
   const counts = pipeline.data?.counts ?? {}
   // F3 — route filter chip. Server does not filter by route yet; client-side is enough at
-  // this scale (a few hundred applications per year).
+  // this scale (a few hundred applications per year) — it narrows within the current page.
   const [routeFilter, setRouteFilter] = useState<'all' | 'opportunity_led' | 'student_led'>('all')
   const filteredRows = (data?.data ?? []).filter(
     (a) => routeFilter === 'all' || a.route === routeFilter,
@@ -604,7 +611,8 @@ function ApplicationsTab() {
         )}
       </div>
 
-      <div className="flex items-center justify-end">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <SearchInput value={search} onChange={handleSearch} placeholder="Search by applicant name…" />
         <Can perm="recruitment.write"><NewApplicationDialog /></Can>
       </div>
 
@@ -658,12 +666,19 @@ function ApplicationsTab() {
             ))}
             {data && filteredRows.length === 0 && (
               <TableRow><TableCell colSpan={4} className="text-muted-foreground text-center py-8">
-                No applications match this route filter.
+                No applications match this search/filter.
               </TableCell></TableRow>
             )}
           </TableBody>
         </Table>
       </div>
+
+      <Pagination
+        offset={offset}
+        limit={APPLICATIONS_PAGE_SIZE}
+        total={data?.page.total}
+        onOffsetChange={setOffset}
+      />
     </div>
   )
 }

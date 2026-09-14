@@ -1,13 +1,26 @@
 'use client'
 
+import { useState } from 'react'
 import Link from 'next/link'
 import { AlertOctagon, ArrowUpRight, BookOpenCheck, CalendarClock, ClipboardCheck } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { PageHeader } from '@/components/common/PageHeader'
 import { PageSection } from '@/components/common/PageSection'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { api } from '@/shared/api/client'
+
+const SECTION_CAP = 10
+
+function ShowMoreButton({ total, expanded, onToggle }: { total: number; expanded: boolean; onToggle: () => void }) {
+  if (total <= SECTION_CAP) return null
+  return (
+    <Button size="sm" variant="ghost" className="mt-1.5" onClick={onToggle}>
+      {expanded ? 'Show fewer' : `Show all ${total}`}
+    </Button>
+  )
+}
 
 interface ByStatus { [k: string]: number }
 interface PendingNom { id: string; examinerName: string; type: string; conflictOfInterest: boolean; conflictNote: string | null }
@@ -79,6 +92,9 @@ export default function ThesisPage() {
   })
   const data = q.data
   const t = data?.totals
+  const [expandExaminer, setExpandExaminer] = useState(false)
+  const [expandVivas, setExpandVivas] = useState(false)
+  const [expandCorrections, setExpandCorrections] = useState(false)
 
   return (
     <>
@@ -118,7 +134,7 @@ export default function ThesisPage() {
                 <p className="text-helper">Nothing pending.</p>
               ) : (
                 <ul className="divide-y divide-border/40 rounded-md border border-border/40">
-                  {data.awaitingExaminerApproval.slice(0, 10).map((r) => (
+                  {data.awaitingExaminerApproval.slice(0, expandExaminer ? undefined : SECTION_CAP).map((r) => (
                     <li key={r.thesisId} className="px-3 py-2 space-y-1">
                       <div className="flex items-center justify-between gap-2">
                         <PersonLink href={r.link} name={r.personName} sub={r.studentRef} />
@@ -138,6 +154,8 @@ export default function ThesisPage() {
                   ))}
                 </ul>
               )}
+              <ShowMoreButton total={data.awaitingExaminerApproval.length} expanded={expandExaminer}
+                onToggle={() => setExpandExaminer((v) => !v)} />
             </PageSection>
 
             {/* Upcoming vivas */}
@@ -151,7 +169,7 @@ export default function ThesisPage() {
                 <p className="text-helper">No vivas in window.</p>
               ) : (
                 <ul className="divide-y divide-border/40 rounded-md border border-border/40">
-                  {data.upcomingVivas.slice(0, 10).map((v) => (
+                  {data.upcomingVivas.slice(0, expandVivas ? undefined : SECTION_CAP).map((v) => (
                     <li key={v.thesisId} className="flex items-center justify-between gap-3 px-3 py-2">
                       <div>
                         <PersonLink href={v.link} name={v.personName} sub={v.studentRef} />
@@ -171,6 +189,8 @@ export default function ThesisPage() {
                   ))}
                 </ul>
               )}
+              <ShowMoreButton total={data.upcomingVivas.length} expanded={expandVivas}
+                onToggle={() => setExpandVivas((v) => !v)} />
             </PageSection>
 
             {/* Corrections */}
@@ -187,7 +207,7 @@ export default function ThesisPage() {
                 <p className="text-helper">No corrections outstanding.</p>
               ) : (
                 <ul className="divide-y divide-border/40 rounded-md border border-border/40">
-                  {data.correctionsOpen.slice(0, 10).map((c) => (
+                  {data.correctionsOpen.slice(0, expandCorrections ? undefined : SECTION_CAP).map((c) => (
                     <li key={c.correctionId} className="flex items-center justify-between gap-3 px-3 py-2">
                       <div>
                         <PersonLink href={c.link} name={c.personName} sub={c.studentRef} />
@@ -205,6 +225,8 @@ export default function ThesisPage() {
                   ))}
                 </ul>
               )}
+              <ShowMoreButton total={data.correctionsOpen.length} expanded={expandCorrections}
+                onToggle={() => setExpandCorrections((v) => !v)} />
             </PageSection>
           </>
         )}

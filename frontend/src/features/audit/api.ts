@@ -20,6 +20,8 @@ export interface AuditParams {
   entityType?: string
   entityId?: string
   actorEmail?: string
+  fromDate?: string
+  toDate?: string
   limit?: number
 }
 
@@ -28,6 +30,8 @@ export const useAudit = (params: AuditParams) => {
   if (params.entityType) qs.set('entityType', params.entityType)
   if (params.entityId) qs.set('entityId', params.entityId)
   if (params.actorEmail) qs.set('actorEmail', params.actorEmail)
+  if (params.fromDate) qs.set('fromDate', params.fromDate)
+  if (params.toDate) qs.set('toDate', params.toDate)
   if (params.limit) qs.set('limit', String(params.limit))
   const query = qs.toString()
   return useQuery({

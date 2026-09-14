@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
@@ -19,6 +20,8 @@ async def list_audit(
     entityType: str | None = Query(None),
     entityId: uuid.UUID | None = Query(None),
     actorEmail: str | None = Query(None),
+    fromDate: date | None = Query(None, description="inclusive"),
+    toDate: date | None = Query(None, description="inclusive"),
     limit: int = Query(100, le=500),
     session: AsyncSession = Depends(get_read_session),
     _=Depends(require_permission("audit.read")),
@@ -30,6 +33,10 @@ async def list_audit(
         stmt = stmt.where(AuditLog.entity_id == entityId)
     if actorEmail:
         stmt = stmt.where(AuditLog.actor_email == actorEmail)
+    if fromDate:
+        stmt = stmt.where(AuditLog.created_at >= fromDate)
+    if toDate:
+        stmt = stmt.where(AuditLog.created_at < toDate + timedelta(days=1))
     rows = (await session.execute(stmt)).scalars().all()
     return [
         {

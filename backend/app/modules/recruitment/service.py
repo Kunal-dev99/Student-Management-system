@@ -77,8 +77,8 @@ class RecruitmentService:
         return opp
 
     # --- Applications ---
-    async def list_applications(self, *, limit, offset, stage):
-        return await self.repo.list_applications(limit=limit, offset=offset, stage=stage)
+    async def list_applications(self, *, limit, offset, stage, search=None):
+        return await self.repo.list_applications(limit=limit, offset=offset, stage=stage, search=search)
 
     async def get_application(self, aid: uuid.UUID) -> Application:
         app = await self.repo.get_application(aid)

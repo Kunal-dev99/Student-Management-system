@@ -104,10 +104,13 @@ async def transition_opportunity(
 async def list_applications(
     page: PageParams = Depends(page_params),
     stage: str | None = Query(None),
+    search: str | None = Query(None, description="match applicant name"),
     session: AsyncSession = Depends(get_session),
     _=Depends(require_permission("recruitment.read")),
 ) -> dict:
-    rows, total = await _svc(session).list_applications(limit=page.limit, offset=page.offset, stage=stage)
+    rows, total = await _svc(session).list_applications(
+        limit=page.limit, offset=page.offset, stage=stage, search=search
+    )
     names = await _person_names(session, [r.person_id for r in rows])
     data = []
     for r in rows:
