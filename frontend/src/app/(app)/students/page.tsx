@@ -1,18 +1,73 @@
 'use client'
 
+import { useState } from 'react'
 import Link from 'next/link'
 import { PageHeader } from '@/components/common/PageHeader'
-import { Badge } from '@/components/ui/badge'
+import { SearchInput } from '@/components/common/SearchInput'
+import { FilterChips } from '@/components/common/FilterChips'
+import { Pagination } from '@/components/common/Pagination'
+import { Badge, type BadgeProps } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Skeleton } from '@/components/ui/skeleton'
-import { useStudents } from '@/features/students/api'
+import { useStudents, type StudentStatus } from '@/features/students/api'
+
+const PAGE_SIZE = 50
+
+const STATUS_FILTERS: { value: StudentStatus | 'all'; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'active', label: 'Active' },
+  { value: 'registered', label: 'Registered' },
+  { value: 'prospective', label: 'Prospective' },
+  { value: 'on_leave', label: 'On leave' },
+  { value: 'suspended', label: 'Suspended' },
+  { value: 'completed', label: 'Completed' },
+  { value: 'withdrawn', label: 'Withdrawn' },
+  { value: 'terminated', label: 'Terminated' },
+]
+
+const STATUS_TONE: Record<StudentStatus, BadgeProps['variant']> = {
+  prospective: 'secondary',
+  registered: 'info',
+  active: 'success',
+  on_leave: 'warning',
+  suspended: 'warning',
+  completed: 'success',
+  withdrawn: 'destructive',
+  terminated: 'destructive',
+}
 
 export default function StudentsPage() {
-  const { data, isLoading, isError, error } = useStudents()
+  const [search, setSearch] = useState('')
+  const [status, setStatus] = useState<StudentStatus | 'all'>('all')
+  const [offset, setOffset] = useState(0)
+
+  // Any change to search/status starts back at page 1 — an offset carried over from a
+  // wider result set could otherwise land past the end of a narrower one.
+  const handleSearch = (v: string) => { setSearch(v); setOffset(0) }
+  const handleStatus = (v: StudentStatus | 'all') => { setStatus(v); setOffset(0) }
+
+  const { data, isLoading, isError, error } = useStudents({
+    search, status, limit: PAGE_SIZE, offset,
+  })
+
   return (
     <>
       <PageHeader title="Students" />
       <div className="px-6 pb-6 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <SearchInput
+            value={search}
+            onChange={handleSearch}
+            placeholder="Search by name or student ref…"
+          />
+          <FilterChips
+            label="Status:"
+            options={STATUS_FILTERS}
+            value={status}
+            onChange={handleStatus}
+          />
+        </div>
+
         <div className="card-elevated overflow-hidden">
           <Table>
             <TableHeader>
@@ -33,20 +88,28 @@ export default function StudentsPage() {
                   <TableCell>
                     <Link href={`/students/${s.id}`} className="hover:text-primary font-mono text-sm text-muted-foreground">{s.studentRef}</Link>
                   </TableCell>
-                  <TableCell><Badge variant="success">{s.status}</Badge></TableCell>
+                  <TableCell><Badge variant={STATUS_TONE[s.status]}>{s.status.replace(/_/g, ' ')}</Badge></TableCell>
                   <TableCell className="text-muted-foreground">{s.studyMode.replace(/_/g, ' ')}</TableCell>
                   <TableCell className="text-muted-foreground num">{s.startDate ?? '—'}</TableCell>
                 </TableRow>
               ))}
               {data && data.data.length === 0 && (
                 <TableRow><TableCell colSpan={5} className="text-muted-foreground text-center py-8">
-                  No students yet. Accept an offer in Recruitment to create one.
+                  {search || status !== 'all'
+                    ? 'No students match this search/filter.'
+                    : 'No students yet. Accept an offer in Recruitment to create one.'}
                 </TableCell></TableRow>
               )}
             </TableBody>
           </Table>
         </div>
-        {data?.page.total != null && <p className="text-helper">{data.page.total} total</p>}
+
+        <Pagination
+          offset={offset}
+          limit={PAGE_SIZE}
+          total={data?.page.total}
+          onOffsetChange={setOffset}
+        />
       </div>
     </>
   )

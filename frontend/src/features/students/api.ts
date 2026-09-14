@@ -37,8 +37,23 @@ export interface StudentSummary {
   funding: unknown[]
 }
 
-export const useStudents = () =>
-  useQuery({ queryKey: ['students'], queryFn: () => api.get<ListResponse<Student>>('/students?limit=100') })
+export interface UseStudentsParams {
+  search?: string
+  status?: StudentStatus | 'all'
+  limit?: number
+  offset?: number
+}
+
+export const useStudents = (params: UseStudentsParams = {}) => {
+  const { search, status, limit = 50, offset = 0 } = params
+  const qs = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+  if (search) qs.set('search', search)
+  if (status && status !== 'all') qs.set('status', status)
+  return useQuery({
+    queryKey: ['students', search ?? '', status ?? 'all', limit, offset],
+    queryFn: () => api.get<ListResponse<Student>>(`/students?${qs.toString()}`),
+  })
+}
 
 export const useStudent = (id: string) =>
   useQuery({ queryKey: ['student', id], queryFn: () => api.get<Student>(`/students/${id}`), enabled: !!id })

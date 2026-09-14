@@ -21,8 +21,12 @@ class StudentService:
     def __init__(self, repo: StudentRepository) -> None:
         self.repo = repo
 
-    async def list_students(self, *, limit: int, offset: int, allowed_ids=None):
-        return await self.repo.list(limit=limit, offset=offset, allowed_ids=allowed_ids)
+    async def list_students(
+        self, *, limit: int, offset: int, allowed_ids=None, search: str | None = None, status=None
+    ):
+        return await self.repo.list(
+            limit=limit, offset=offset, allowed_ids=allowed_ids, search=search, status=status
+        )
 
     async def get_student(self, student_id: uuid.UUID, *, allowed_ids=None) -> Student:
         student = await self.repo.get(student_id, allowed_ids=allowed_ids)

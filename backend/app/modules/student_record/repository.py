@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.person.models import Person
+from app.modules.student_record.constants import StudentStatus
 from app.modules.student_record.models import Programme, Student
 
 
@@ -14,7 +16,13 @@ class StudentRepository:
         self.session = session
 
     async def list(
-        self, *, limit: int, offset: int, allowed_ids: list[uuid.UUID] | None = None
+        self,
+        *,
+        limit: int,
+        offset: int,
+        allowed_ids: list[uuid.UUID] | None = None,
+        search: str | None = None,
+        status: StudentStatus | None = None,
     ) -> tuple[list[Student], int]:
         # allowed_ids: None = unrestricted; a list (incl. empty) = restrict to those ids (row scoping).
         stmt = select(Student)
@@ -22,6 +30,20 @@ class StudentRepository:
         if allowed_ids is not None:
             stmt = stmt.where(Student.id.in_(allowed_ids))
             count = count.where(Student.id.in_(allowed_ids))
+        if status is not None:
+            stmt = stmt.where(Student.status == status)
+            count = count.where(Student.status == status)
+        if search:
+            # A person's name isn't on the student row — join to search it, same as the
+            # register displays it. Matched against ref, given name and family name.
+            like = f"%{search.lower()}%"
+            cond = or_(
+                func.lower(Student.student_ref).like(like),
+                func.lower(Person.given_name).like(like),
+                func.lower(Person.family_name).like(like),
+            )
+            stmt = stmt.join(Person, Person.id == Student.person_id).where(cond)
+            count = count.join(Person, Person.id == Student.person_id).where(cond)
         stmt = stmt.order_by(Student.created_at.desc()).limit(limit).offset(offset)
         rows = (await self.session.execute(stmt)).scalars().unique().all()
         total = (await self.session.execute(count)).scalar_one()

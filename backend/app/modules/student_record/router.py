@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.authorization import student_scope
@@ -15,6 +15,7 @@ from app.core.dependencies import get_current_principal, require_permission
 from app.core.pagination import PageParams, list_envelope, page_params
 from app.core.principal import Principal
 from app.db.session import get_session
+from app.modules.student_record.constants import StudentStatus
 from app.modules.student_record.repository import StudentRepository
 from app.modules.student_record.lifecycle import LifecycleService
 from app.modules.student_record.schemas import (
@@ -68,11 +69,15 @@ async def scoped_ids(principal: Principal, session: AsyncSession) -> list[uuid.U
 @router.get("", summary="List students (row-scoped)")
 async def list_students(
     page: PageParams = Depends(page_params),
+    search: str | None = Query(None, description="match student ref or person name"),
+    status: StudentStatus | None = Query(None),
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(require_permission("student.read")),
 ) -> dict:
     allowed = await scoped_ids(principal, session)
-    rows, total = await _svc(session).list_students(limit=page.limit, offset=page.offset, allowed_ids=allowed)
+    rows, total = await _svc(session).list_students(
+        limit=page.limit, offset=page.offset, allowed_ids=allowed, search=search, status=status
+    )
     # One batch lookup for the page's person names — the register is read by
     # humans, and humans find students by name, not by reference.
     from sqlalchemy import select
