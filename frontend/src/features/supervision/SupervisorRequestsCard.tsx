@@ -73,7 +73,9 @@ export function SupervisorRequestsCard({ studentId }: { studentId: string }) {
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge variant={STATE_VARIANT[r.state]}>{r.state.replace(/_/g,' ')}</Badge>
                     <Badge variant="secondary">{r.proposedRole}</Badge>
-                    <span className="text-sm font-mono">{r.proposedSupervisorPersonId.slice(0,8)}…</span>
+                    <span className="text-sm font-medium">
+                      {r.proposedSupervisorName ?? `${r.proposedSupervisorPersonId.slice(0, 8)}…`}
+                    </span>
                     {r.matchScore !== null && (
                       <span className="text-helper">match {r.matchScore}%</span>
                     )}
@@ -215,8 +217,8 @@ function RecommendPanel({ studentId, onPick }: {
         {top.map((s) => (
           <div key={s.personId} className="flex flex-wrap items-center gap-2">
             <Badge variant="secondary">{s.score}%</Badge>
-            <span className="text-sm font-medium">{s.name ?? s.personId.slice(0,8)+'…'}</span>
-            {s.available === false && <Badge variant="destructive">unavailable</Badge>}
+            <span className="text-sm font-medium">{s.personName}</span>
+            {s.atCapacity && <Badge variant="destructive">at capacity</Badge>}
             {s.reasons && s.reasons.length > 0 && (
               <span className="text-helper">
                 {s.reasons.slice(0,3).map((r) => `${r.factor} +${r.points}`).join(' · ')}

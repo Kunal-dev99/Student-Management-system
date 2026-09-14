@@ -212,7 +212,7 @@ function IndependentTutorSection({ studentId }: { studentId: string }) {
                 <Badge variant="success" className="inline-flex items-center gap-1">
                   <BadgeCheck className="h-3 w-3" /> Assigned
                 </Badge>
-                <span className="text-sm">Tutor id <span className="font-mono text-xs">{tutor.tutorPersonId.slice(0,8)}…</span></span>
+                <span className="text-sm">Tutor: <span className="font-medium">{tutor.tutorName ?? `${tutor.tutorPersonId.slice(0, 8)}…`}</span></span>
                 <span className="text-helper">since {new Date(tutor.assignedAt).toLocaleDateString()}</span>
                 <Button size="sm" variant="ghost" className="ml-auto"
                   onClick={async () => {

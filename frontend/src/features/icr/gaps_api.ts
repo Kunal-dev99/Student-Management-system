@@ -58,6 +58,7 @@ export interface IndependentTutor {
   id: string
   studentId: string
   tutorPersonId: string
+  tutorName: string | null
   tutorDepartmentId: string | null
   assignedAt: string
   endedAt: string | null

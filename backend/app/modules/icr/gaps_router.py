@@ -106,6 +106,7 @@ class TutorOut(_Camel):
     id: uuid.UUID
     student_id: uuid.UUID
     tutor_person_id: uuid.UUID
+    tutor_name: str | None = None
     tutor_department_id: uuid.UUID | None
     assigned_at: datetime
     ended_at: datetime | None
@@ -123,6 +124,19 @@ class TutorNoteOut(_Camel):
     authored_at: datetime
 
 
+async def _tutor_out(session: AsyncSession, row) -> TutorOut:
+    from sqlalchemy import select
+    from app.modules.person.models import Person
+
+    out = TutorOut.model_validate(row)
+    person = (await session.execute(
+        select(Person).where(Person.id == row.tutor_person_id)
+    )).scalar_one_or_none()
+    if person is not None:
+        out.tutor_name = f"{person.given_name} {person.family_name}"
+    return out
+
+
 @router.get("/students/{student_id}/independent-tutor", summary="Gap 3 — current independent tutor")
 async def get_current_tutor(
     student_id: uuid.UUID,
@@ -132,7 +146,7 @@ async def get_current_tutor(
     row = await IndependentTutorService(session).current_for(student_id)
     if row is None:
         return {"currentTutor": None}
-    return {"currentTutor": TutorOut.model_validate(row).model_dump(by_alias=True)}
+    return {"currentTutor": (await _tutor_out(session, row)).model_dump(by_alias=True)}
 
 
 @router.post("/students/{student_id}/independent-tutor", response_model=TutorOut, status_code=201,
@@ -147,7 +161,7 @@ async def assign_tutor(
         student_id, tutor_person_id=body.tutor_person_id,
         tutor_department_id=body.tutor_department_id,
     )
-    return TutorOut.model_validate(row)
+    return await _tutor_out(session, row)
 
 
 @router.post("/independent-tutor/{tutor_id}/end", response_model=TutorOut,
@@ -158,7 +172,7 @@ async def end_tutor(
     _=Depends(require_permission("student.write")),
 ) -> TutorOut:
     row = await IndependentTutorService(session).end(tutor_id)
-    return TutorOut.model_validate(row)
+    return await _tutor_out(session, row)
 
 
 @router.get("/independent-tutor/{tutor_id}/notes", response_model=list[TutorNoteOut],

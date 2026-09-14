@@ -110,14 +110,18 @@ export function useUpsertSupervisorProfile(personId: string) {
 
 
 export interface MatchReason { factor: string; points: number; detail?: string }
+// Field names match MatchingService.suggest_supervisors' actual response
+// (backend/app/modules/research/matching.py) — personName/currentSupervisees/atCapacity,
+// not name/current/available. Keep in sync with SupervisorMatchPanel.tsx, which reads the
+// same endpoint's real shape correctly.
 export interface Recommendation {
   personId: string
-  name?: string
+  personName: string
   score: number
   reasons: MatchReason[]
-  current?: number
-  capacity?: number
-  available?: boolean
+  currentSupervisees: number
+  atCapacity: boolean
+  link?: string
 }
 
 export const useRecommend = (studentId: string | null) =>
