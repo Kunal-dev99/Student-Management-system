@@ -2,15 +2,18 @@
 from __future__ import annotations
 
 import uuid
+from datetime import date
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import require_permission
 from app.core.errors import NotFoundError
+from app.core.pagination import PageParams, list_envelope, page_params
 from app.core.principal import Principal
 from app.db.session import get_session
+from app.modules.funding.constants import PaymentStatus
 from app.modules.funding.repository import FundingRepository
 from app.modules.funding.schemas import (
     ArrangementCreate,
@@ -126,6 +129,38 @@ async def list_payments(
     _=Depends(require_permission("funding.read")),
 ) -> list[PaymentOut]:
     return [PaymentOut.model_validate(p) for p in await _svc(session).payments_for_arrangement(arrangement_id)]
+
+
+@funding_router.get(
+    "/payments", summary="Payment status — every stipend instalment institution-wide, filterable"
+)
+async def list_all_payments(
+    page: PageParams = Depends(page_params),
+    status: PaymentStatus | None = Query(None),
+    search: str | None = Query(None, description="match student ref or person name"),
+    fromDate: date | None = Query(None, description="due_date inclusive lower bound"),
+    toDate: date | None = Query(None, description="due_date inclusive upper bound"),
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_permission("funding.read")),
+) -> dict:
+    allowed = await scoped_ids(principal, session)
+    data, total = await _svc(session).list_payments(
+        limit=page.limit, offset=page.offset, allowed_ids=allowed, status=status,
+        search=search, from_date=fromDate, to_date=toDate,
+    )
+    return list_envelope(data, limit=page.limit, total=total)
+
+
+@funding_router.get(
+    "/payments/{payment_id}/trail",
+    summary="Finance webhook trail for one instalment — every integration_log entry against it",
+)
+async def payment_trail(
+    payment_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("funding.read")),
+) -> list[dict]:
+    return await _svc(session).payment_trail(payment_id)
 
 
 @funding_router.post("/{arrangement_id}/payments/schedule", response_model=list[PaymentOut], status_code=201, summary="Generate the payment schedule")

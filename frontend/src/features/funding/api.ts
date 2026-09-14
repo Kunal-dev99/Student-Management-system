@@ -1,7 +1,7 @@
 'use client'
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api } from '@/shared/api/client'
+import { api, type ListResponse } from '@/shared/api/client'
 
 export type FundingType = 'research_council' | 'university_scholarship' | 'external' | 'self_funded'
 export type FundingStatus = 'planned' | 'active' | 'changed' | 'ended'
@@ -132,6 +132,53 @@ export const usePayments = (arrangementId: string | undefined, enabled = true) =
     queryKey: ['funding-payments', arrangementId],
     queryFn: () => api.get<Payment[]>(`/funding/${arrangementId}/payments`),
     enabled: !!arrangementId && enabled,
+  })
+
+// --- Payment Status page — institution-wide, filterable, paginated ---
+
+export interface PaymentStatusRow extends Payment {
+  studentRef: string
+  personName: string
+  fundingType: string
+}
+
+export interface PaymentTrailEntry {
+  id: string
+  direction: 'inbound' | 'outbound'
+  system: string
+  eventType: string
+  status: 'success' | 'failed' | 'skipped' | 'duplicate'
+  detail: Record<string, unknown> | null
+  createdAt: string
+}
+
+export interface UsePaymentsListParams {
+  status?: PaymentStatus | 'all'
+  search?: string
+  fromDate?: string
+  toDate?: string
+  limit?: number
+  offset?: number
+}
+
+export const usePaymentsList = (params: UsePaymentsListParams = {}) => {
+  const { status, search, fromDate, toDate, limit = 50, offset = 0 } = params
+  const qs = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+  if (status && status !== 'all') qs.set('status', status)
+  if (search) qs.set('search', search)
+  if (fromDate) qs.set('fromDate', fromDate)
+  if (toDate) qs.set('toDate', toDate)
+  return useQuery({
+    queryKey: ['funding-payments-list', status ?? 'all', search ?? '', fromDate ?? '', toDate ?? '', limit, offset],
+    queryFn: () => api.get<ListResponse<PaymentStatusRow>>(`/funding/payments?${qs.toString()}`),
+  })
+}
+
+export const usePaymentTrail = (paymentId: string | null) =>
+  useQuery({
+    queryKey: ['funding-payment-trail', paymentId],
+    queryFn: () => api.get<PaymentTrailEntry[]>(`/funding/payments/${paymentId}/trail`),
+    enabled: !!paymentId,
   })
 
 export const usePaymentSummary = (studentId: string) =>

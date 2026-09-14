@@ -2,16 +2,20 @@
 from __future__ import annotations
 
 import uuid
+from datetime import date
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.funding.constants import PaymentStatus
 from app.modules.funding.models import (
     FeeWaiver,
     FundingArrangement,
     FundingSource,
     StipendPayment,
 )
+from app.modules.person.models import Person
+from app.modules.student_record.models import Student
 
 
 class FundingRepository:
@@ -61,6 +65,61 @@ class FundingRepository:
         return (await self.session.execute(
             select(StipendPayment).where(StipendPayment.id == payment_id)
         )).scalar_one_or_none()
+
+    async def list_payments(
+        self,
+        *,
+        limit: int,
+        offset: int,
+        allowed_ids: list[uuid.UUID] | None = None,
+        status: PaymentStatus | None = None,
+        search: str | None = None,
+        from_date: date | None = None,
+        to_date: date | None = None,
+    ) -> tuple[list[tuple[StipendPayment, FundingArrangement, Student, Person]], int]:
+        """Every stipend payment institution-wide — the "Payment Status" page's source query.
+
+        Joined against the arrangement/student/person so the page never needs a second
+        round trip per row. Row-scoped like every other funding read.
+        """
+        stmt = (
+            select(StipendPayment, FundingArrangement, Student, Person)
+            .join(FundingArrangement, FundingArrangement.id == StipendPayment.arrangement_id)
+            .join(Student, Student.id == StipendPayment.student_id)
+            .join(Person, Person.id == Student.person_id)
+        )
+        count_stmt = (
+            select(func.count()).select_from(StipendPayment)
+            .join(FundingArrangement, FundingArrangement.id == StipendPayment.arrangement_id)
+            .join(Student, Student.id == StipendPayment.student_id)
+            .join(Person, Person.id == Student.person_id)
+        )
+        if allowed_ids is not None:
+            stmt = stmt.where(StipendPayment.student_id.in_(allowed_ids))
+            count_stmt = count_stmt.where(StipendPayment.student_id.in_(allowed_ids))
+        if status is not None:
+            stmt = stmt.where(StipendPayment.status == status)
+            count_stmt = count_stmt.where(StipendPayment.status == status)
+        if from_date is not None:
+            stmt = stmt.where(StipendPayment.due_date >= from_date)
+            count_stmt = count_stmt.where(StipendPayment.due_date >= from_date)
+        if to_date is not None:
+            stmt = stmt.where(StipendPayment.due_date <= to_date)
+            count_stmt = count_stmt.where(StipendPayment.due_date <= to_date)
+        if search:
+            like = f"%{search.lower()}%"
+            cond = or_(
+                func.lower(Student.student_ref).like(like),
+                func.lower(Person.given_name).like(like),
+                func.lower(Person.family_name).like(like),
+            )
+            stmt = stmt.where(cond)
+            count_stmt = count_stmt.where(cond)
+
+        stmt = stmt.order_by(StipendPayment.due_date.desc()).limit(limit).offset(offset)
+        rows = (await self.session.execute(stmt)).all()
+        total = (await self.session.execute(count_stmt)).scalar_one()
+        return list(rows), int(total)
 
     async def waivers_for_student(self, student_id: uuid.UUID) -> list[FeeWaiver]:
         res = await self.session.execute(

@@ -192,6 +192,51 @@ class FundingService:
     async def payments_for_arrangement(self, arrangement_id: uuid.UUID) -> list[dict]:
         return [self._payment_out(p) for p in await self.repo.payments_for_arrangement(arrangement_id)]
 
+    async def list_payments(
+        self,
+        *,
+        limit: int,
+        offset: int,
+        allowed_ids=None,
+        status: PaymentStatus | None = None,
+        search: str | None = None,
+        from_date: date | None = None,
+        to_date: date | None = None,
+    ) -> tuple[list[dict], int]:
+        rows, total = await self.repo.list_payments(
+            limit=limit, offset=offset, allowed_ids=allowed_ids, status=status,
+            search=search, from_date=from_date, to_date=to_date,
+        )
+        data = []
+        for pay, arr, stu, per in rows:
+            out = self._payment_out(pay)
+            out["studentRef"] = stu.student_ref
+            out["personName"] = f"{per.given_name} {per.family_name}"
+            out["fundingType"] = arr.funding_type.value if hasattr(arr.funding_type, "value") else str(arr.funding_type)
+            data.append(out)
+        return data, total
+
+    async def payment_trail(self, payment_id: uuid.UUID) -> list[dict]:
+        """Every integration_log entry recorded against this payment — the audit trail from
+        the moment Finance was told about it to the moment they confirmed or rejected it."""
+        from sqlalchemy import select as _select
+        from app.modules.integration.models import IntegrationLog
+
+        rows = (await self.session.execute(
+            _select(IntegrationLog)
+            .where(IntegrationLog.aggregate_type == "stipend_payment", IntegrationLog.aggregate_id == payment_id)
+            .order_by(IntegrationLog.created_at)
+        )).scalars().all()
+        return [
+            {
+                "id": str(r.id), "direction": r.direction.value if hasattr(r.direction, "value") else r.direction,
+                "system": r.system, "eventType": r.event_type,
+                "status": r.status.value if hasattr(r.status, "value") else r.status,
+                "detail": r.detail, "createdAt": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in rows
+        ]
+
     async def payments_for_student(self, student_id: uuid.UUID, *, allowed_ids=None) -> list[dict]:
         student = await StudentRepository(self.session).get(student_id, allowed_ids=allowed_ids)
         if student is None:

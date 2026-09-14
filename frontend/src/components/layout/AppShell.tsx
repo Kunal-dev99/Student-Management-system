@@ -14,6 +14,7 @@ import {
   UsersRound,
   Milestone,
   Wallet,
+  Receipt,
   BookOpenCheck,
   Award,
   TrendingUp,
@@ -62,6 +63,7 @@ const mainNav: NavItem[] = [
   { href: '/progression', label: 'Progression', icon: Milestone },
   { href: '/progression/transfer-viva', label: 'Transfer viva', icon: TrendingUp },
   { href: '/funding', label: 'Funding', icon: Wallet },
+  { href: '/funding/payments', label: 'Payment status', icon: Receipt },
   { href: '/thesis', label: 'Thesis', icon: BookOpenCheck },
   { href: '/completion', label: 'Completion', icon: Award },
 ]

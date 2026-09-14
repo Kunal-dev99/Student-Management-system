@@ -44,6 +44,7 @@ export const ROUTE_ACCESS: RouteAccess[] = [
   { href: '/supervision/workforce', perms: ['student.read'], roles: ADMIN_ROLES },
   { href: '/progression', perms: ['progression.read'], roles: [...ADMIN_ROLES, 'Supervisor'] },
   { href: '/funding', perms: ['funding.read'], roles: ADMIN_ROLES },
+  { href: '/funding/payments', perms: ['funding.read'], roles: ADMIN_ROLES },
   { href: '/thesis', perms: ['student.read'], roles: [...ADMIN_ROLES, 'Supervisor'] },
   { href: '/completion', perms: ['student.read'], roles: ADMIN_ROLES },
   // ICR module — institution-specific group, additive to the core workspace.
