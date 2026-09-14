@@ -10,6 +10,15 @@ from datetime import date, datetime, timezone
 
 from sqlalchemy import select
 
+# Import every model module BEFORE any ORM work below — recruitment.ResearchOpportunity
+# carries a foreign key to research.ResearchAward, a module this file never otherwise
+# touches. Without it, that module's Table never registers on Base.metadata, and the
+# very first session.flush() blows up with NoReferencedTableError — a failure that
+# only ever surfaces on a truly fresh database, since an existing dev DB already had
+# every table and never exercised this ORM mapper-configuration path. `registry.py`
+# exists exactly to close this class of bug: it imports every model module in the app.
+from app.db import registry as _registry  # noqa: F401
+
 from app.core.database import SessionFactory
 from app.core.security import hash_password
 from app.modules.admissions.models import Offer
