@@ -69,23 +69,32 @@ def _corpus(collected: dict[str, Any]) -> set[str]:
     return out
 
 
-def _is_grounded(value: Any, corpus: set[str]) -> bool:
+def _is_grounded(value: Any, corpus: set[str], *, allow_small_int: bool = True) -> bool:
     if value is None:
         return True
     text = str(value).strip()
     if not text or text.lower() in _ALLOWED:
         return True
 
-    # Bare numbers: counts and simple aggregates are legitimate model arithmetic.
-    try:
-        number = float(_PUNCT.sub("", text))
-        if number.is_integer() and abs(number) <= 10_000:
-            return True
-    except ValueError:
-        pass
+    # Bare numbers: counts and simple aggregates are legitimate model arithmetic — but
+    # only for free-form spots (a table cell computing len(rows), say). A KPI or gauge
+    # headline number is presented AS a real aggregate from the data, so it must actually
+    # match one, or a hallucinated total (e.g. "0" next to a chart that sums to 470)
+    # sails through unnoticed — that is the failure this flag closes.
+    if allow_small_int:
+        try:
+            number = float(_PUNCT.sub("", text))
+            if number.is_integer() and abs(number) <= 10_000:
+                return True
+        except ValueError:
+            pass
 
     normalised = _normalise(text)
-    if len(normalised) < _MIN_CHECKED_LENGTH:
+    # The short-string bypass below exists for tokens too small to carry real signal
+    # ("a", "OK"). A short numeral is not that — "0" vs "470" is exactly the kind of
+    # wrong-headline-number this function exists to catch — so strict values skip it
+    # and go straight to the corpus check.
+    if len(normalised) < _MIN_CHECKED_LENGTH and allow_small_int:
         return True
     if normalised in corpus:
         return True
@@ -108,7 +117,9 @@ def _values_to_check(block: dict) -> list[tuple[str, Any]]:
                 found.append(("table cell", cell))
     elif kind == "kpi_row":
         for item in block.get("items") or []:
-            found.append(("kpi value", item.get("value")))
+            # "kpi value*" (not "kpi value") — a headline figure the model claims IS an
+            # aggregate from the data, so it is held to the strict check in violations().
+            found.append(("kpi value*", item.get("value")))
     elif kind == "timeline":
         for event in block.get("events") or []:
             found.append(("timeline date", event.get("at")))
@@ -134,7 +145,9 @@ def _values_to_check(block: dict) -> list[tuple[str, Any]]:
         # "research_council"). The grounding check tolerates that separately.
         pass
     elif kind == "gauge":
-        found.append(("gauge value", block.get("value")))
+        # Same reasoning as kpi_row above — the gauge's needle position is presented as
+        # a real measurement, so it is checked strictly rather than rubber-stamped.
+        found.append(("gauge value*", block.get("value")))
     elif kind == "tree":
         # Node labels and detail lines get scanned. Edge labels are relationship names,
         # legitimately model-authored, so they are exempt.
@@ -162,9 +175,11 @@ def violations(composition: dict, collected: dict[str, Any]) -> list[str]:
         if not isinstance(block, dict):
             continue
         for where, value in _values_to_check(block):
-            if not _is_grounded(value, corpus):
+            strict = where.endswith("*")
+            if not _is_grounded(value, corpus, allow_small_int=not strict):
                 found.append(
-                    f"block {index + 1} ({block.get('type')}) {where}: {str(value)[:60]!r}"
+                    f"block {index + 1} ({block.get('type')}) "
+                    f"{where.rstrip('*')}: {str(value)[:60]!r}"
                 )
                 if len(found) >= 12:
                     return found
