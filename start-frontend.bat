@@ -28,6 +28,8 @@ if not exist ".next\BUILD_ID" (
     )
 )
 
+set "BACKEND_ORIGIN=http://127.0.0.1:8000"
+
 echo Starting PGR frontend on http://localhost:3000
 echo (Press Ctrl+C to stop)
 echo.

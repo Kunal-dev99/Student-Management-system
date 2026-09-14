@@ -4,6 +4,9 @@ const nextConfig = {
   // Lint runs separately (`npm run lint`) — don't block the production build on
   // cosmetic ESLint errors like unescaped apostrophes so start-all.bat works.
   eslint: { ignoreDuringBuilds: true },
+  allowedDevOrigins: [
+    "research-student-management-system.fusionpractices.com",
+  ],
   // Proxy API calls to the FastAPI backend during local dev so the browser
   // talks to same-origin /api/v1 (arch §14.1). Backend runs on :8000.
   async rewrites() {
