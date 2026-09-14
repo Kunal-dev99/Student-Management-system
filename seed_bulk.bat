@@ -2,11 +2,13 @@
 REM ============================================================
 REM  PGR Platform - bulk ICR demo population.
 REM  Runs, in order:
-REM    0. clear_bulk_students  - remove any old test-format (BULK-*) seed data
-REM    1. seed.py              - base roles/admin/demo data (seed.bat's job)
-REM    2. seed_icr             - ICR department, programmes, funders
-REM    3. seed_tenant_icr      - ICR as a real tenant (login institution)
-REM    4. seed_bulk_students   - 300 students, 5 through to alumni, with docs
+REM    0. clear_bulk_students     - remove any old test-format (BULK-*) seed data
+REM    1. seed.py                 - base roles/admin/demo data (seed.bat's job)
+REM    2. seed_icr                - ICR department, programmes, funders
+REM    3. seed_tenant_icr         - ICR as a real tenant (login institution)
+REM    4. seed_bulk_students      - 300 students, 5 through to alumni, with docs
+REM    5. seed_payment_schedules  - stipend instalment schedules + Finance trail
+REM                                 for the Payment Status page
 REM
 REM  Every step is idempotent - safe to re-run any time.
 REM  Requires setup.bat to have already run (venv + migrations in place).
@@ -68,24 +70,37 @@ pause & exit /b 1
 :tenant_ok
 
 echo.
-echo === [4/4] Bulk student population (300 students, 5 to alumni) ===
+echo === [4/5] Bulk student population (300 students, 5 to alumni) ===
 ".venv\Scripts\python.exe" -m scripts.seed_bulk_students
 if not errorlevel 1 goto :bulk_ok
 echo.
 echo ============================================================
 echo ERROR: bulk student seed failed. Scroll up for the traceback.
-echo Common cause: step [2/4] above did not actually create the ICR
+echo Common cause: step [2/5] above did not actually create the ICR
 echo programmes/funders this script depends on.
 echo ============================================================
 pause & exit /b 1
 :bulk_ok
 
 echo.
+echo === [5/5] Stipend payment schedules + Finance trail ===
+".venv\Scripts\python.exe" -m scripts.seed_payment_schedules
+if not errorlevel 1 goto :payments_ok
+echo.
+echo ============================================================
+echo ERROR: payment schedule seed failed. Scroll up for the traceback.
+echo ============================================================
+pause & exit /b 1
+:payments_ok
+
+echo.
 echo ============================================================
 echo  Bulk seed complete.
 echo  300 ICR students created, 5 reached alumni with a thesis and
 echo  certificate document each; every student has at least one
-echo  attached document.
+echo  attached document. Stipend payment schedules generated for
+echo  every funded arrangement, with a real Finance approval/paid/
+echo  held trail - see Payment status in the sidebar.
 echo  Login: admin@example.com / admin123
 echo ============================================================
 pause

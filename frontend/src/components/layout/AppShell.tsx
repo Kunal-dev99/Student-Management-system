@@ -58,12 +58,12 @@ const mainNav: NavItem[] = [
   { href: '/recruitment', label: 'Recruitment', icon: Megaphone },
   { href: '/admissions', label: 'Admissions', icon: FileCheck2 },
   { href: '/students', label: 'Students', icon: GraduationCap },
+  { href: '/funding/payments', label: 'Payment status', icon: Receipt },
   { href: '/supervision', label: 'Supervision', icon: UsersRound },
   { href: '/supervision/workforce', label: 'Workforce', icon: UsersRound },
   { href: '/progression', label: 'Progression', icon: Milestone },
   { href: '/progression/transfer-viva', label: 'Transfer viva', icon: TrendingUp },
   { href: '/funding', label: 'Funding', icon: Wallet },
-  { href: '/funding/payments', label: 'Payment status', icon: Receipt },
   { href: '/thesis', label: 'Thesis', icon: BookOpenCheck },
   { href: '/completion', label: 'Completion', icon: Award },
 ]
