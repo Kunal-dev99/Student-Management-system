@@ -9,23 +9,23 @@ cd /d "%~dp0"
 echo.
 echo === [0/5] Environment file ===
 cd /d "%~dp0backend"
-if not exist ".env" (
-    echo.
-    echo ============================================================
-    echo WARNING: backend\.env does not exist. ".env" is gitignored, so
-    echo a fresh clone/pull NEVER brings it across - you must create it
-    echo yourself on this machine, every time, on every machine.
-    echo.
-    echo Without it, DATABASE_URL falls back to a local SQLite file
-    echo (sqlite+aiosqlite:///./pgr_dev.db) - the app APPEARS to work,
-    echo then breaks in confusing ways once Postgres-only assumptions
-    echo (concurrent workers, real production data) don't hold.
-    echo.
-    echo Copy backend\.env.example to backend\.env and fill in a real
-    echo DATABASE_URL, APP_SECRET_KEY and your LLM key before continuing.
-    echo ============================================================
-    pause
-)
+if exist ".env" goto :env_ok
+echo.
+echo ============================================================
+echo WARNING: backend\.env does not exist. ".env" is gitignored, so
+echo a fresh clone/pull NEVER brings it across - you must create it
+echo yourself on this machine, every time, on every machine.
+echo.
+echo Without it, DATABASE_URL falls back to a local SQLite file
+echo sqlite+aiosqlite:///./pgr_dev.db - the app APPEARS to work,
+echo then breaks in confusing ways once Postgres-only assumptions,
+echo like concurrent workers and real production data, don't hold.
+echo.
+echo Copy backend\.env.example to backend\.env and fill in a real
+echo DATABASE_URL, APP_SECRET_KEY and your LLM key before continuing.
+echo ============================================================
+pause
+:env_ok
 
 echo.
 echo === [1/5] Backend virtual environment ===
@@ -44,35 +44,35 @@ echo.
 echo === [2/5] Backend dependencies ===
 ".venv\Scripts\python.exe" -m pip install --upgrade pip
 ".venv\Scripts\python.exe" -m pip install -r requirements.txt
-if errorlevel 1 (
-    echo.
-    echo ============================================================
-    echo ERROR: backend pip install failed. Scroll up for which package.
-    echo The app WILL start and then crash later with a confusing
-    echo ModuleNotFoundError deep in a request/worker traceback if you
-    echo ignore this - fix the install error here, not there.
-    echo ============================================================
-    pause & exit /b 1
-)
+if not errorlevel 1 goto :deps_ok
+echo.
+echo ============================================================
+echo ERROR: backend pip install failed. Scroll up for which package.
+echo The app WILL start and then crash later with a confusing
+echo ModuleNotFoundError deep in a request or worker traceback if
+echo you ignore this - fix the install error here, not there.
+echo ============================================================
+pause & exit /b 1
+:deps_ok
 
 echo.
 echo === [3/5] Database migrations ===
 echo Target: check backend\.env DATABASE_URL - SQLite by default if unset.
 ".venv\Scripts\alembic.exe" upgrade head
-if errorlevel 1 (
-    echo.
-    echo ============================================================
-    echo ERROR: alembic upgrade failed. STOPPING here on purpose.
-    echo Continuing past this used to produce a silent half-migrated
-    echo database - the app would start fine, then crash at runtime
-    echo with "no such table: ..." the first time a background job or
-    echo a rarely-hit endpoint touched the missing table.
-    echo Common causes: DATABASE_URL wrong/unset in backend\.env, the
-    echo Postgres service not running, or a migration conflict - read
-    echo the error above, fix it, then re-run setup.bat.
-    echo ============================================================
-    pause & exit /b 1
-)
+if not errorlevel 1 goto :migrate_ok
+echo.
+echo ============================================================
+echo ERROR: alembic upgrade failed. STOPPING here on purpose.
+echo Continuing past this used to produce a silent half-migrated
+echo database - the app would start fine, then crash at runtime
+echo with "no such table" the first time a background job or a
+echo rarely-hit endpoint touched the table that was never created.
+echo Common causes: DATABASE_URL wrong or unset in backend\.env,
+echo the Postgres service not running, or a migration conflict -
+echo read the error above, fix it, then re-run setup.bat.
+echo ============================================================
+pause & exit /b 1
+:migrate_ok
 
 echo.
 echo === [4/5] Seed demo data (roles, admin user, sample persons) ===
