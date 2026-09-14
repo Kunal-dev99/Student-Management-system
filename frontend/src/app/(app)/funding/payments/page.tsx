@@ -24,6 +24,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'
 import {
   usePaymentsList, usePaymentTrail, type PaymentStatus, type PaymentStatusRow,
+  type PaymentTrailEntry,
 } from '@/features/funding/api'
 
 const PAGE_SIZE = 50
@@ -59,6 +60,18 @@ const EVENT_LABEL: Record<string, string> = {
   'funding.changed': 'Sent to Finance',
   'payment.confirmed': 'Finance confirmed paid',
   'payment.rejected': 'Finance rejected',
+}
+
+// "funding.changed" covers both "approved, ready to pay" and "paid" outbound notices —
+// the inner event on the emitted payload (approve_payment()/mark_paid() in funding/service.py)
+// disambiguates which one this actually was.
+function trailEventLabel(t: PaymentTrailEntry): string {
+  if (t.eventType === 'funding.changed') {
+    const inner = (t.detail?.reference as Record<string, unknown> | undefined)?.event
+    if (inner === 'stipend_approved') return 'Approved — sent to Finance'
+    if (inner === 'stipend_paid') return 'Paid — confirmation sent to Finance'
+  }
+  return EVENT_LABEL[t.eventType] ?? t.eventType
 }
 
 function TrailDrawer({ payment, onOpenChange }: { payment: PaymentStatusRow | null; onOpenChange: (o: boolean) => void }) {
@@ -111,7 +124,7 @@ function TrailDrawer({ payment, onOpenChange }: { payment: PaymentStatusRow | nu
                           <Badge variant={t.direction === 'inbound' ? 'info' : 'secondary'}>
                             {t.direction === 'inbound' ? 'From Finance' : 'To Finance'}
                           </Badge>
-                          <span className="font-medium">{EVENT_LABEL[t.eventType] ?? t.eventType}</span>
+                          <span className="font-medium">{trailEventLabel(t)}</span>
                         </div>
                         <p className="text-xs text-muted-foreground mt-1">
                           {new Date(t.createdAt).toLocaleString()} ·{' '}

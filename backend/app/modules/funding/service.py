@@ -298,6 +298,19 @@ class FundingService:
         if p.status != PaymentStatus.scheduled:
             raise WorkflowError(f"Only a scheduled payment can be approved (this one is {p.status.value})")
         p.status = PaymentStatus.approved
+        await self.session.flush()
+
+        # Tell Finance the instalment is ready to pay (arch §10.2). Previously only mark_paid()
+        # emitted anything, which left the "approved, sent to Finance, awaiting payment" stage
+        # with no trail at all — the Payment Status page's drill-down would show nothing between
+        # "scheduled" and "paid" even though this is the actual moment Finance is told about it.
+        from app.modules.workflow.engine import WorkflowEngine
+
+        WorkflowEngine(self.session).emit(
+            "stipend_payment", p.id, "funding.changed",
+            {"studentId": str(p.student_id), "event": "stipend_approved",
+             "amount": str(p.amount), "currency": p.currency},
+        )
         await self.session.commit()
         return self._payment_out(p)
 

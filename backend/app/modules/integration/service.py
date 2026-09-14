@@ -7,6 +7,7 @@ marked dispatched once its adapters have been called. Inbound messages are dedup
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import datetime, timedelta, timezone
 
 from app.core.config import get_settings
@@ -277,9 +278,19 @@ class IntegrationService:
         except Exception as exc:  # a bad partner payload must not lose the message
             error = f"{type(exc).__name__}: {exc}"
 
+        # A handler that resolved a concrete domain row (e.g. finance_handler resolving a
+        # StipendPayment) reports it via aggregate_type/aggregate_id on its result dict — pick
+        # that up so this inbound row joins the same per-aggregate trail an outbound row does.
+        # Without this, a payment's "Finance confirmed/rejected" half of the story was silently
+        # unlinkable from the payment it was about.
+        agg_type = applied.get("aggregate_type") if applied else None
+        agg_id_raw = applied.get("aggregate_id") if applied else None
+        agg_id = uuid.UUID(agg_id_raw) if agg_id_raw else None
+
         try:
             self.repo.add(IntegrationLog(
                 direction=Direction.inbound, system=system, event_type=event_type,
+                aggregate_type=agg_type, aggregate_id=agg_id,
                 source_id=source_id,
                 status=IntegrationStatus.failed if error else IntegrationStatus.success,
                 detail={**payload, "_applied": applied, "_error": error},

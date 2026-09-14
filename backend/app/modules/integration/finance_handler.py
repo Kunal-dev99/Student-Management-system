@@ -73,7 +73,8 @@ async def apply_finance_event(session: AsyncSession, event_type: str, payload: d
         # Idempotency: an already-paid row should NOT explode when Finance re-sends.
         if row.status == PaymentStatus.paid:
             return {"handler": "finance_payment", "action": "already_paid",
-                    "paymentId": str(row.id)}
+                    "paymentId": str(row.id),
+                    "aggregate_type": "stipend_payment", "aggregate_id": str(row.id)}
         if row.status == PaymentStatus.cancelled:
             raise ValueError(
                 f"Payment {row.id} is cancelled — cannot mark paid without reactivating first"
@@ -95,7 +96,8 @@ async def apply_finance_event(session: AsyncSession, event_type: str, payload: d
         )
         return {"handler": "finance_payment", "action": "marked_paid",
                 "paymentId": str(row.id), "financeReference": finance_ref,
-                "paidOn": result.get("paidOn")}
+                "paidOn": result.get("paidOn"),
+                "aggregate_type": "stipend_payment", "aggregate_id": str(row.id)}
 
     if event == "payment.rejected":
         row = await _resolve_payment(session, payload)
@@ -112,6 +114,7 @@ async def apply_finance_event(session: AsyncSession, event_type: str, payload: d
         )
         return {"handler": "finance_payment", "action": "held",
                 "paymentId": str(row.id), "reason": reason,
-                "status": result.get("status")}
+                "status": result.get("status"),
+                "aggregate_type": "stipend_payment", "aggregate_id": str(row.id)}
 
     raise ValueError(f"Unknown finance event type: {event_type!r}")
