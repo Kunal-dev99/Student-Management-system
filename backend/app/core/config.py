@@ -7,7 +7,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -23,6 +23,19 @@ class Settings(BaseSettings):
     # Production sets DATABASE_URL to postgresql+asyncpg://...
     database_url: str = "sqlite+aiosqlite:///./pgr_dev.db"
     database_replica_url: str | None = None
+
+    @field_validator("database_url", "database_replica_url")
+    @classmethod
+    def _use_asyncpg_driver(cls, v: str | None) -> str | None:
+        # Managed Postgres providers (Render, Heroku, etc.) hand out a bare
+        # postgres:// or postgresql:// URL — SQLAlchemy's async engine needs the
+        # +asyncpg driver suffix explicitly, so rewrite it rather than requiring
+        # every deployment target to know that detail.
+        if v and v.startswith("postgres://"):
+            return "postgresql+asyncpg://" + v[len("postgres://"):]
+        if v and v.startswith("postgresql://"):
+            return "postgresql+asyncpg://" + v[len("postgresql://"):]
+        return v
 
     redis_url: str | None = None
     broker_url: str | None = None

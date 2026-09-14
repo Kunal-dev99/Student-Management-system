@@ -34,3 +34,4 @@ scratchpad_*.log/
 Thumbs.db
 .vscode/
 .idea/
+db_export/

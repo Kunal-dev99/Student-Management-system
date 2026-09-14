@@ -1,0 +1,50 @@
+databases:
+  - name: pgr-db
+    plan: free
+    databaseName: pgr
+    user: pgr
+
+services:
+  - type: web
+    name: pgr-research-backend
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: APP_ENV
+        value: production
+      - key: APP_SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: pgr-db
+          property: connectionString
+      - key: EMAIL_BACKEND
+        value: console
+      - key: STORAGE_BACKEND
+        value: local
+      - key: STORAGE_ROOT
+        value: ./var/storage
+      - key: LLM_PROVIDER
+        value: mock
+      - key: APP_BASE_URL
+        value: https://pgr-research-frontend.onrender.com
+      - key: LOG_LEVEL
+        value: info
+
+  - type: web
+    name: pgr-research-frontend
+    runtime: node
+    plan: free
+    rootDir: frontend
+    buildCommand: "npm install && npm run build"
+    startCommand: "npm run start -- -p $PORT"
+    envVars:
+      - key: NODE_VERSION
+        value: 20.11.0
+      - key: BACKEND_ORIGIN
+        value: https://pgr-research-backend.onrender.com
