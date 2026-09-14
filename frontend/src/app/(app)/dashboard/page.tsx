@@ -11,8 +11,12 @@ import { useAdministratorDashboard, useExecutiveDashboard } from '@/features/rep
 
 function StatTile({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
-    <div className="card-elevated p-4">
-      <p className="text-label">{label}</p>
+    <div className="card-elevated p-4 flex flex-col">
+      {/* Fixed-height label band (room for two lines) so the value below starts at the
+          same vertical position whether a neighbouring tile's label wraps or not — e.g.
+          "Active researchers" (2 lines) sitting next to "Applications" (1 line) used to
+          knock "543" out of line with "356". */}
+      <p className="text-label min-h-[2rem] flex items-start">{label}</p>
       <p className="mt-1 text-2xl font-semibold tracking-tight num">{value}</p>
       {hint && <p className="text-helper mt-0.5">{hint}</p>}
     </div>

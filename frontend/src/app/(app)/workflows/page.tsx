@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { GitBranch, Plus, Workflow } from 'lucide-react'
+import { ChevronDown, ChevronRight, GitBranch, Plus, Workflow } from 'lucide-react'
 import { PageHeader } from '@/components/common/PageHeader'
 import { PageSection } from '@/components/common/PageSection'
 import { FilterChips } from '@/components/common/FilterChips'
@@ -15,6 +15,7 @@ import {
   useInstances, useStartInstance,
 } from '@/features/workflows/api'
 import { WorkflowBuilder } from '@/features/workflows/WorkflowBuilder'
+import { WorkflowDiagram } from '@/features/workflows/WorkflowDiagram'
 
 
 export default function WorkflowsPage() {
@@ -28,6 +29,12 @@ export default function WorkflowsPage() {
   const [builderOpen, setBuilderOpen] = useState(false)
   const [events, setEvents] = useState<Record<string, string>>({})
   const [stateFilter, setStateFilter] = useState('all')
+  const [openDiagramDefId, setOpenDiagramDefId] = useState<string | null>(null)
+  const [openDiagramInstanceId, setOpenDiagramInstanceId] = useState<string | null>(null)
+  const defById = useMemo(
+    () => new Map((defs.data ?? []).map((d) => [d.id, d])),
+    [defs.data],
+  )
 
   const stateOptions = useMemo(() => {
     const states = Array.from(new Set((instances.data ?? []).map((i) => i.currentState))).sort()
@@ -68,20 +75,37 @@ export default function WorkflowsPage() {
         >
           {defs.isLoading ? <Skeleton className="h-16 w-full" /> : (
             <div className="space-y-2 mb-4">
-              {defs.data?.map((d) => (
-                <div key={d.id} className="flex items-center justify-between border-b border-border/60 last:border-0 pb-2 last:pb-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-sm font-medium">{d.name}</span>
-                    <span className="text-helper font-mono">{d.key} v{d.version}</span>
-                    {d.active ? <Badge variant="success">active</Badge> : <Badge variant="outline">inactive</Badge>}
-                    <span className="text-helper">{d.states.join(' → ')}</span>
+              {defs.data?.map((d) => {
+                const diagramOpen = openDiagramDefId === d.id
+                return (
+                  <div key={d.id} className="border-b border-border/60 last:border-0 pb-2 last:pb-0">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <button type="button" className="inline-flex items-center gap-1 text-sm font-medium hover:text-primary"
+                          onClick={() => setOpenDiagramDefId(diagramOpen ? null : d.id)}>
+                          {diagramOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                          {d.name}
+                        </button>
+                        <span className="text-helper font-mono">{d.key} v{d.version}</span>
+                        {d.active ? <Badge variant="success">active</Badge> : <Badge variant="outline">inactive</Badge>}
+                        <span className="text-helper">{d.states.join(' → ')}</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        {!d.active && <Button size="sm" variant="ghost" onClick={async () => { try { await activate.mutateAsync(d.id); toast({ title: 'Activated' }) } catch (e) { err(e) } }}>Activate</Button>}
+                        {d.active && <Button size="sm" variant="secondary" onClick={async () => { try { await start.mutateAsync(d.key); toast({ title: 'Instance started' }) } catch (e) { err(e) } }}>Start instance</Button>}
+                      </div>
+                    </div>
+                    {diagramOpen && (
+                      <WorkflowDiagram
+                        className="mt-2"
+                        states={d.states}
+                        transitions={d.transitions}
+                        initialState={d.initialState}
+                      />
+                    )}
                   </div>
-                  <div className="flex items-center gap-1">
-                    {!d.active && <Button size="sm" variant="ghost" onClick={async () => { try { await activate.mutateAsync(d.id); toast({ title: 'Activated' }) } catch (e) { err(e) } }}>Activate</Button>}
-                    {d.active && <Button size="sm" variant="secondary" onClick={async () => { try { await start.mutateAsync(d.key); toast({ title: 'Instance started' }) } catch (e) { err(e) } }}>Start instance</Button>}
-                  </div>
-                </div>
-              ))}
+                )
+              })}
               {defs.data && defs.data.length === 0 && <p className="text-helper">No definitions yet.</p>}
             </div>
           )}
@@ -99,20 +123,38 @@ export default function WorkflowsPage() {
                 <FilterChips label="State:" options={stateOptions} value={stateFilter} onChange={setStateFilter} />
               )}
               <div className="space-y-2">
-              {filteredInstances.map((i) => (
-                <div key={i.id} className="flex items-center justify-between border-b border-border/60 last:border-0 pb-2 last:pb-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-mono">{i.id.slice(0, 8)}</span>
-                    <Badge variant="info">{i.currentState}</Badge>
-                    <span className="text-helper">{i.aggregateType}</span>
+              {filteredInstances.map((i) => {
+                const def = defById.get(i.definitionId)
+                const diagramOpen = openDiagramInstanceId === i.id
+                return (
+                  <div key={i.id} className="border-b border-border/60 last:border-0 pb-2 last:pb-0">
+                    <div className="flex items-center justify-between">
+                      <button type="button" className="flex items-center gap-2 hover:text-primary disabled:hover:text-inherit"
+                        disabled={!def}
+                        onClick={() => def && setOpenDiagramInstanceId(diagramOpen ? null : i.id)}>
+                        {def && (diagramOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />)}
+                        <span className="text-sm font-mono">{i.id.slice(0, 8)}</span>
+                        <Badge variant="info">{i.currentState}</Badge>
+                        <span className="text-helper">{i.aggregateType}</span>
+                      </button>
+                      <div className="flex items-center gap-1">
+                        <Input placeholder="event" className="h-8 w-32" value={events[i.id] ?? ''} onChange={(e) => setEvents((s) => ({ ...s, [i.id]: e.target.value }))} />
+                        <Button size="sm" variant="ghost" disabled={!events[i.id] || dispatch.isPending}
+                          onClick={async () => { try { await dispatch.mutateAsync({ id: i.id, event: events[i.id] }); toast({ title: 'Event dispatched' }); setEvents((s) => ({ ...s, [i.id]: '' })) } catch (e) { err(e) } }}>Send</Button>
+                      </div>
+                    </div>
+                    {diagramOpen && def && (
+                      <WorkflowDiagram
+                        className="mt-2"
+                        states={def.states}
+                        transitions={def.transitions}
+                        initialState={def.initialState}
+                        currentState={i.currentState}
+                      />
+                    )}
                   </div>
-                  <div className="flex items-center gap-1">
-                    <Input placeholder="event" className="h-8 w-32" value={events[i.id] ?? ''} onChange={(e) => setEvents((s) => ({ ...s, [i.id]: e.target.value }))} />
-                    <Button size="sm" variant="ghost" disabled={!events[i.id] || dispatch.isPending}
-                      onClick={async () => { try { await dispatch.mutateAsync({ id: i.id, event: events[i.id] }); toast({ title: 'Event dispatched' }); setEvents((s) => ({ ...s, [i.id]: '' })) } catch (e) { err(e) } }}>Send</Button>
-                  </div>
-                </div>
-              ))}
+                )
+              })}
               {instances.data && instances.data.length === 0 && <p className="text-helper">No running instances. Start one from a definition above.</p>}
               {instances.data && instances.data.length > 0 && filteredInstances.length === 0 && (
                 <p className="text-helper">No instances match this state filter.</p>
