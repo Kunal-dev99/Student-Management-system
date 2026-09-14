@@ -66,6 +66,20 @@ class FundingRepository:
             select(StipendPayment).where(StipendPayment.id == payment_id)
         )).scalar_one_or_none()
 
+    async def get_payment_joined(
+        self, payment_id: uuid.UUID,
+    ) -> tuple[StipendPayment, FundingArrangement, Student, Person] | None:
+        """Same join as list_payments(), for one row — so the Payment Status drawer can
+        refresh its own payment after an action without depending on it still matching
+        whatever filter/search/page the underlying list happens to be on."""
+        return (await self.session.execute(
+            select(StipendPayment, FundingArrangement, Student, Person)
+            .join(FundingArrangement, FundingArrangement.id == StipendPayment.arrangement_id)
+            .join(Student, Student.id == StipendPayment.student_id)
+            .join(Person, Person.id == Student.person_id)
+            .where(StipendPayment.id == payment_id)
+        )).first()
+
     async def list_payments(
         self,
         *,
@@ -116,7 +130,11 @@ class FundingRepository:
             stmt = stmt.where(cond)
             count_stmt = count_stmt.where(cond)
 
-        stmt = stmt.order_by(StipendPayment.due_date.desc()).limit(limit).offset(offset)
+        # Oldest/most-overdue first — same "worklist" convention as the Thesis/Completion
+        # pipeline pages. Sorting by due_date desc (furthest-future first) buried every
+        # instalment with real Finance history under a wall of untouched future-dated
+        # "scheduled" rows, which made the page look empty of activity by default.
+        stmt = stmt.order_by(StipendPayment.due_date.asc()).limit(limit).offset(offset)
         rows = (await self.session.execute(stmt)).all()
         total = (await self.session.execute(count_stmt)).scalar_one()
         return list(rows), int(total)

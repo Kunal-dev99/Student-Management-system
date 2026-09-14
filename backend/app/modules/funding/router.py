@@ -152,6 +152,21 @@ async def list_all_payments(
 
 
 @funding_router.get(
+    "/payments/{payment_id}",
+    summary="One instalment, joined with student/person — for refreshing a single row after an action",
+)
+async def get_payment_row(
+    payment_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("funding.read")),
+) -> dict:
+    row = await _svc(session).get_payment_row(payment_id)
+    if row is None:
+        raise NotFoundError("Stipend payment not found")
+    return row
+
+
+@funding_router.get(
     "/payments/{payment_id}/trail",
     summary="Finance webhook trail for one instalment — every integration_log entry against it",
 )

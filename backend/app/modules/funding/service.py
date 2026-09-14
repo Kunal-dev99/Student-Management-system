@@ -216,6 +216,17 @@ class FundingService:
             data.append(out)
         return data, total
 
+    async def get_payment_row(self, payment_id: uuid.UUID) -> dict | None:
+        joined = await self.repo.get_payment_joined(payment_id)
+        if joined is None:
+            return None
+        pay, arr, stu, per = joined
+        out = self._payment_out(pay)
+        out["studentRef"] = stu.student_ref
+        out["personName"] = f"{per.given_name} {per.family_name}"
+        out["fundingType"] = arr.funding_type.value if hasattr(arr.funding_type, "value") else str(arr.funding_type)
+        return out
+
     async def payment_trail(self, payment_id: uuid.UUID) -> list[dict]:
         """Every integration_log entry recorded against this payment — the audit trail from
         the moment Finance was told about it to the moment they confirmed or rejected it."""

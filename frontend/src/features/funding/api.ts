@@ -174,6 +174,13 @@ export const usePaymentsList = (params: UsePaymentsListParams = {}) => {
   })
 }
 
+export const usePayment = (paymentId: string | null) =>
+  useQuery({
+    queryKey: ['funding-payment', paymentId],
+    queryFn: () => api.get<PaymentStatusRow>(`/funding/payments/${paymentId}`),
+    enabled: !!paymentId,
+  })
+
 export const usePaymentTrail = (paymentId: string | null) =>
   useQuery({
     queryKey: ['funding-payment-trail', paymentId],
@@ -191,6 +198,12 @@ export const usePaymentSummary = (studentId: string) =>
 function invalidatePayments(qc: ReturnType<typeof useQueryClient>, studentId: string, arrangementId?: string) {
   qc.invalidateQueries({ queryKey: ['funding-payments', arrangementId] })
   qc.invalidateQueries({ queryKey: ['payment-summary', studentId] })
+  // The institution-wide Payment Status page and its per-payment trail drawer read
+  // through separate query keys — bust those too so an action taken there (or from a
+  // student's own Funding panel) is reflected without a manual page refresh.
+  qc.invalidateQueries({ queryKey: ['funding-payments-list'] })
+  qc.invalidateQueries({ queryKey: ['funding-payment-trail'] })
+  qc.invalidateQueries({ queryKey: ['funding-payment'] })
 }
 
 export interface ScheduleInput {
