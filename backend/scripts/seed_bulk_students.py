@@ -4,22 +4,30 @@ Extends the small hand-curated cohort from `seed_icr_cohort.py` (14 students) in
 realistic-scale population for load-testing the UI, Weekly Review Queue, Pattern Lab,
 and the AI intelligence layer against something bigger than a handful of rows.
 
+Every field is generated to look exactly like a real record the system itself would
+have produced — not an obviously-synthetic test fixture:
+  - `student_ref` uses the SAME format the real registration flow generates
+    (`PGR-{registration year}-{6 uppercase hex}`, see
+    `app/modules/student_record/service.py::_generate_student_ref`), computed from
+    each student's own start date so a 2022 registrant gets a 2022-dated ref, exactly
+    as if they had actually registered that year.
+  - Documents are real, valid PDFs (via reportlab, the same library the platform's
+    own certificate generator uses) written through the real object store — opening
+    one in an actual PDF viewer works, it is not a renamed .txt file.
+
 Distribution (out of 300):
   - 5 fully completed through to Alumni (thesis approved, completion graduated,
-    award published, PersonRelationship flipped to alumni) — with a thesis document
-    and a certificate document attached.
+    award published, PersonRelationship flipped to alumni) — with a thesis PDF and
+    a certificate PDF attached.
   - ~20 on_leave / suspended (realistic exceptions)
-  - ~15 withdrawn
+  - ~10 withdrawn
   - the rest active/registered, spread across the pipeline from month 1 to month 50
     so milestones land at every stage (not started / due / decided).
 
-Every student gets at least one attached document (a progress-report placeholder)
-via the real object store (app/core/storage.py) — not fabricated metadata pointing
-nowhere; `Document.open()` will actually return real bytes for these rows.
-
 Requires `scripts/seed_icr.py` to have already run (ICR-PHD / ICR-MDRES programmes
-and funders). Idempotent by student_ref prefix — safe to re-run; already-created
-students in the BULK-* range are skipped.
+and funders). Idempotent: tagged internally via `ResearchProject.research_group =
+"ICR Demo Cohort"` (a real, legitimate-looking field — not a fake ref prefix) rather
+than anything visible as obviously-seeded data; safe to re-run.
 
     python -m scripts.seed_icr            (if not already run)
     python -m scripts.seed_bulk_students
@@ -27,11 +35,15 @@ students in the BULK-* range are skipped.
 from __future__ import annotations
 
 import asyncio
+import io
 import random
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import cm
+from reportlab.pdfgen import canvas
 from sqlalchemy import func, select
 
 from app.core.database import SessionFactory
@@ -60,8 +72,11 @@ random.seed(4200)  # reproducible across re-runs — same 300 people every time
 
 TOTAL_STUDENTS = 300
 ALUMNI_COUNT = 5
-REF_PREFIX = "BULK"
 TODAY = date.today()
+
+# Internal idempotency tag — a plausible real value (a lab/cohort label), never a
+# fake-looking ref prefix. Nothing in the UI treats this as special.
+SEED_TAG = "ICR Demo Cohort"
 
 FIRST_NAMES = [
     "Amina", "Chen", "Diego", "Fatima", "Giulia", "Hassan", "Ingrid", "Jamal",
@@ -107,6 +122,13 @@ CO_SUP_NAMES = [
 ]
 
 
+def _generate_student_ref(year: int) -> str:
+    """Exactly mirrors app/modules/student_record/service.py::_generate_student_ref,
+    parameterised by year so a historical registrant gets a ref dated to the year
+    they actually registered, not today's year."""
+    return f"PGR-{year}-{uuid.uuid4().hex[:6].upper()}"
+
+
 def _clean_email(given: str, family: str, n: int) -> str:
     slug = f"{given}.{family}".lower().replace("'", "").replace(" ", "")
     return f"{slug}.{n}@icr.example.ac.uk"
@@ -121,17 +143,29 @@ async def get_or_create_person(s, given: str, family: str, email: str) -> Person
     return p
 
 
-def _placeholder_document(owner_type: str, owner_id, doc_type: str, filename: str,
-                           body_text: str, uploaded_by=None) -> Document:
-    """Write a small real text file through the real object store and return its
-    Document metadata row — Document.open() will return real bytes for this row,
-    not a checksum pointing at nothing."""
-    store = get_object_store()
-    data = body_text.encode("utf-8")
-    key, checksum, size = store.save(data, suffix=".txt")
+def _pdf_bytes(title: str, lines: list[str]) -> bytes:
+    """A real, valid single-page PDF — opens correctly in any PDF viewer."""
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    width, height = A4
+    c.setFont("Helvetica-Bold", 15)
+    c.drawString(2 * cm, height - 3 * cm, title)
+    c.setFont("Helvetica", 11)
+    y = height - 4.2 * cm
+    for line in lines:
+        c.drawString(2 * cm, y, line[:110])
+        y -= 0.7 * cm
+    c.showPage()
+    c.save()
+    return buf.getvalue()
+
+
+def _save_document(store, owner_type: str, owner_id, doc_type: str, filename: str,
+                    pdf_bytes: bytes, uploaded_by=None) -> Document:
+    key, checksum, size = store.save(pdf_bytes, suffix=".pdf")
     return Document(
         owner_type=owner_type, owner_id=owner_id, doc_type=doc_type,
-        filename=filename, content_type="text/plain", size_bytes=size,
+        filename=filename, content_type="application/pdf", size_bytes=size,
         checksum_sha256=checksum, storage_key=key, uploaded_by=uploaded_by,
     )
 
@@ -159,11 +193,11 @@ async def main() -> None:
             )).scalars().all()
 
         existing_count = (await s.execute(
-            select(func.count()).select_from(Student)
-            .where(Student.student_ref.like(f"{REF_PREFIX}-%"))
+            select(func.count()).select_from(ResearchProject)
+            .where(ResearchProject.research_group == SEED_TAG)
         )).scalar_one()
         if existing_count >= TOTAL_STUDENTS:
-            print(f"  = {existing_count} {REF_PREFIX}-* students already present - skipped")
+            print(f"  = {existing_count} students already seeded under '{SEED_TAG}' - skipped")
             return
 
         pis = [await get_or_create_person(s, g, f, _clean_email(g, f, i))
@@ -172,19 +206,17 @@ async def main() -> None:
                for i, (g, f) in enumerate(CO_SUP_NAMES)]
         await s.flush()
 
+        store = get_object_store()
+
         # Deterministic assignment of which sequence numbers become the 5 alumni,
         # spread evenly rather than clustered at the front.
-        alumni_indices = set(range(0, TOTAL_STUDENTS, TOTAL_STUDENTS // ALUMNI_COUNT))
-        alumni_indices = set(list(alumni_indices)[:ALUMNI_COUNT])
+        alumni_indices = set(list(range(0, TOTAL_STUDENTS, TOTAL_STUDENTS // ALUMNI_COUNT))[:ALUMNI_COUNT])
 
         created = 0
         for i in range(existing_count, TOTAL_STUDENTS):
             given = random.choice(FIRST_NAMES)
             family = random.choice(LAST_NAMES)
             email = _clean_email(given, family, i)
-            ref = f"{REF_PREFIX}-{i:04d}"
-            if (await s.execute(select(Student).where(Student.student_ref == ref))).scalars().first():
-                continue
 
             is_alumnus = i in alumni_indices
             code = "ICR-PHD" if random.random() < 0.7 else "ICR-MDRES"
@@ -192,17 +224,17 @@ async def main() -> None:
             limit_days = 1460 if code == "ICR-PHD" else 1095
 
             if is_alumnus:
-                # Fully in the past: started 5-6 years ago, finished on schedule.
+                # Fully in the past: started several years ago, finished on schedule.
                 months_ago = random.randint(limit_days // 30 + 6, limit_days // 30 + 14)
                 status = StudentStatus.completed
             else:
                 months_ago = random.randint(1, limit_days // 30 + 2)
                 roll = random.random()
-                if roll < 0.05:
+                if roll < 0.03:
                     status = StudentStatus.withdrawn
-                elif roll < 0.12:
+                elif roll < 0.09:
                     status = StudentStatus.suspended
-                elif roll < 0.18:
+                elif roll < 0.16:
                     status = StudentStatus.on_leave
                 elif months_ago <= 1:
                     status = StudentStatus.registered
@@ -211,6 +243,9 @@ async def main() -> None:
 
             start = TODAY - timedelta(days=months_ago * 30)
             expected_end = start + timedelta(days=limit_days)
+            ref = _generate_student_ref(start.year)
+            while (await s.execute(select(Student).where(Student.student_ref == ref))).scalars().first():
+                ref = _generate_student_ref(start.year)  # astronomically unlikely, but stay correct
 
             person = await get_or_create_person(s, given, family, email)
             s.add(PersonRelationship(
@@ -231,7 +266,8 @@ async def main() -> None:
             await s.flush()
 
             topic = random.choice(TOPICS)
-            s.add(ResearchProject(student_id=student.id, research_topic=topic, start_date=start))
+            s.add(ResearchProject(student_id=student.id, research_topic=topic,
+                                   start_date=start, research_group=SEED_TAG))
 
             pi = pis[i % len(pis)]
             co = cos[i % len(cos)]
@@ -276,20 +312,26 @@ async def main() -> None:
                 funder_reference=f"{code}-{ref}",
             ))
 
-            # Every student gets at least one real, openable document.
-            s.add(_placeholder_document(
-                owner_type="student", owner_id=student.id, doc_type="progress_report",
-                filename=f"{ref}-progress-report.txt",
-                body_text=(
-                    f"Progress report for {given} {family} ({ref})\n"
-                    f"Programme: {prog.name}\nTopic: {topic}\n"
-                    f"Status as of {TODAY.isoformat()}: {status.value}\n"
+            # Every student gets at least one real, openable PDF document.
+            s.add(_save_document(
+                store, owner_type="student", owner_id=student.id, doc_type="progress_report",
+                filename=f"{ref}-progress-report.pdf",
+                pdf_bytes=_pdf_bytes(
+                    f"Progress Report - {given} {family} ({ref})",
+                    [
+                        f"Programme: {prog.name}",
+                        f"Research topic: {topic}",
+                        f"Status as of {TODAY.isoformat()}: {status.value.replace('_', ' ')}",
+                        f"Primary supervisor: {pi.given_name} {pi.family_name}",
+                        f"Co-supervisor: {co.given_name} {co.family_name}",
+                    ],
                 ),
             ))
 
             if is_alumnus:
                 grad_date = expected_end
-                thesis_title = f"{topic} — a thesis submitted for the degree of {code.split('-')[1]}"
+                degree = "Doctor of Philosophy" if code == "ICR-PHD" else "Doctor of Medicine (Research)"
+                thesis_title = f"{topic} - a thesis submitted for the degree of {degree}"
                 thesis = Thesis(
                     student_id=student.id, title=thesis_title,
                     status=ThesisStatus.approved,
@@ -308,8 +350,7 @@ async def main() -> None:
                     graduation_date=grad_date,
                 ))
                 s.add(Award(
-                    student_id=student.id,
-                    title=f"Doctor of Philosophy" if code == "ICR-PHD" else "Doctor of Medicine (Research)",
+                    student_id=student.id, title=degree,
                     award_type="PhD" if code == "ICR-PHD" else "MD(Res)",
                     conferred_at=datetime.combine(grad_date, datetime.min.time(), tzinfo=timezone.utc),
                     classification="PhD" if code == "ICR-PHD" else "MD(Res)",
@@ -320,19 +361,25 @@ async def main() -> None:
                     person_id=person.id, relationship_type=PersonRelationshipType.alumni,
                     valid_from=grad_date, valid_to=None,
                 ))
-                s.add(_placeholder_document(
-                    owner_type="student", owner_id=student.id, doc_type="thesis",
-                    filename=f"{ref}-thesis.txt",
-                    body_text=f"{thesis_title}\n\nSubmitted by {given} {family}\nAwarded: {grad_date.isoformat()}\n",
+                s.add(_save_document(
+                    store, owner_type="student", owner_id=student.id, doc_type="thesis",
+                    filename=f"{ref}-thesis.pdf",
+                    pdf_bytes=_pdf_bytes(thesis_title, [
+                        f"Submitted by {given} {family}",
+                        f"Student reference: {ref}",
+                        f"Submitted: {(expected_end - timedelta(days=30)).isoformat()}",
+                        f"Approved: {grad_date.isoformat()}",
+                    ]),
                 ))
-                s.add(_placeholder_document(
-                    owner_type="student", owner_id=student.id, doc_type="certificate",
-                    filename=f"{ref}-certificate.txt",
-                    body_text=(
-                        f"This certifies that {given} {family} has been awarded the degree of "
-                        f"{'Doctor of Philosophy' if code == 'ICR-PHD' else 'Doctor of Medicine (Research)'} "
-                        f"on {grad_date.isoformat()}.\n"
-                    ),
+                s.add(_save_document(
+                    store, owner_type="student", owner_id=student.id, doc_type="certificate",
+                    filename=f"{ref}-certificate.pdf",
+                    pdf_bytes=_pdf_bytes("Certificate of Award", [
+                        f"This certifies that {given} {family} ({ref})",
+                        f"has been awarded the degree of {degree}",
+                        f"on {grad_date.isoformat()}.",
+                        "Institute of Cancer Research",
+                    ]),
                 ))
 
             created += 1

@@ -2,8 +2,9 @@
 REM ============================================================
 REM  PGR Platform - bulk ICR demo population.
 REM  Runs, in order:
-REM    1. seed.py            - base roles/admin/demo data (seed.bat's job)
-REM    2. seed_icr            - ICR department, programmes, funders
+REM    0. clear_bulk_students  - remove any old test-format (BULK-*) seed data
+REM    1. seed.py              - base roles/admin/demo data (seed.bat's job)
+REM    2. seed_icr             - ICR department, programmes, funders
 REM    3. seed_tenant_icr      - ICR as a real tenant (login institution)
 REM    4. seed_bulk_students   - 300 students, 5 through to alumni, with docs
 REM
@@ -21,6 +22,17 @@ if not exist ".venv\Scripts\python.exe" (
     echo ============================================================
     pause & exit /b 1
 )
+
+echo.
+echo === [0/4] Clearing previous test-format seed (BULK-* students) ===
+".venv\Scripts\python.exe" -m scripts.clear_bulk_students
+if not errorlevel 1 goto :clear_ok
+echo.
+echo ============================================================
+echo ERROR: cleanup step failed. Scroll up for the traceback.
+echo ============================================================
+pause & exit /b 1
+:clear_ok
 
 echo.
 echo === [1/4] Base seed (roles, admin, demo data) ===
