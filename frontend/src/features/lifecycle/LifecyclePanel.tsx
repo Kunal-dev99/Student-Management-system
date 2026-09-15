@@ -58,13 +58,14 @@ function eventDates(e: LifecycleEvent): string {
 
 /** Small note dialog shared by Approve and Reject — the note is optional in both cases. */
 function DecisionDialog({
-  label, variant, title, pending, onConfirm,
+  label, variant, title, pending, onConfirm, impactNote,
 }: {
   label: string
   variant: 'default' | 'outline'
   title: string
   pending: boolean
   onConfirm: (note: string | undefined) => Promise<boolean>
+  impactNote?: string
 }) {
   const [open, setOpen] = useState(false)
   const [note, setNote] = useState('')
@@ -75,6 +76,12 @@ function DecisionDialog({
       </DialogTrigger>
       <DialogContent>
         <DialogHeader><DialogTitle>{title}</DialogTitle></DialogHeader>
+        {impactNote && (
+          <div className="rounded-md border border-[hsl(var(--warning)/0.3)] bg-[hsl(var(--warning)/0.08)] p-3 text-sm">
+            <p className="font-medium mb-0.5">What this will do</p>
+            <p className="text-muted-foreground">{impactNote}</p>
+          </div>
+        )}
         <div className="space-y-1.5">
           <Label htmlFor="decision-note">Note (optional)</Label>
           <Textarea id="decision-note" className="min-h-[72px]" value={note}
@@ -283,38 +290,61 @@ function ReturnDialog({ studentId }: { studentId: string }) {
   )
 }
 
-/** ICR G4 — a compact FTE-% timeline: one segment per intensity period, width ∝ its duration. */
+/** ICR G4/G6 — a compact FTE-% timeline: one segment per intensity period, width ∝ its duration.
+ * Falls back to a plain chip when there is no real registration span (e.g. no expected end date),
+ * so it never draws a misleading one-day bar. */
 function IntensityStrip({ studentId }: { studentId: string }) {
   const { data } = useStudentIntensity(studentId)
-  if (!data || data.periods.length === 0) return null
-  const spans = data.periods.map((p) => Math.max(1, dayDelta(p.from, p.to)))
-  const total = spans.reduce((a, b) => a + b, 0) || 1
-  // Only worth drawing when intensity actually varied (or isn't a flat 100%).
-  const varied = new Set(data.periods.map((p) => p.pct)).size > 1 || (data.currentPct ?? 100) !== 100
+  if (!data) return null
+
+  const current = data.currentPct
+  // Only worth showing once intensity is (or is scheduled to be) something other than full-time.
+  const varied = new Set(data.periods.map((p) => p.pct)).size > 1 || (current ?? 100) !== 100
   if (!varied) return null
+
+  // Real (non-negative) span per period; drop zero-width ones from the bar.
+  const drawable = data.periods
+    .map((p) => ({ ...p, span: Math.max(0, dayDelta(p.from, p.to)) }))
+    .filter((p) => p.span > 0)
+  const total = drawable.reduce((a, b) => a + b.span, 0)
+
   return (
     <div className="mb-4">
       <div className="flex items-center justify-between mb-1">
         <span className="text-helper">Study intensity (FTE)</span>
-        <span className="text-sm font-medium">{data.currentPct}% now</span>
+        <span className="text-sm font-medium">{current == null ? '—' : `${current}% now`}</span>
       </div>
-      <div className="flex h-6 w-full overflow-hidden rounded-sm border border-border" title="Study intensity over time">
-        {data.periods.map((p, i) => (
-          <div key={i}
-            className="flex items-center justify-center text-[10px] font-medium text-white"
-            style={{
-              width: `${(spans[i] / total) * 100}%`,
-              backgroundColor: `hsl(var(--primary) / ${0.35 + 0.55 * (p.pct / 100)})`,
-            }}
-            title={`${p.from} → ${p.to}: ${p.pct}%`}>
-            {(spans[i] / total) > 0.08 ? `${p.pct}%` : ''}
+
+      {total > 0 ? (
+        <>
+          <div className="flex h-6 w-full overflow-hidden rounded-sm border border-border" title="Study intensity over time">
+            {drawable.map((p, i) => (
+              <div key={i}
+                className="flex items-center justify-center text-[10px] font-medium text-white"
+                style={{
+                  width: `${(p.span / total) * 100}%`,
+                  backgroundColor: `hsl(var(--primary) / ${0.35 + 0.55 * (p.pct / 100)})`,
+                }}
+                title={`${p.from} → ${p.to}: ${p.pct}%`}>
+                {(p.span / total) > 0.08 ? `${p.pct}%` : ''}
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
-      <div className="flex justify-between text-[10px] text-muted-foreground mt-0.5 num">
-        <span>{data.periods[0].from}</span>
-        <span>{data.periods[data.periods.length - 1].to}</span>
-      </div>
+          <div className="flex justify-between text-[10px] text-muted-foreground mt-0.5 num">
+            <span>{drawable[0].from}</span>
+            <span>{drawable[drawable.length - 1].to}</span>
+          </div>
+        </>
+      ) : (
+        // No real span to plot (e.g. no expected end date) — list the changes instead of a bar.
+        <div className="text-xs text-muted-foreground">
+          {data.periods.map((p, i) => (
+            <span key={i} className="num">
+              {i > 0 && ' → '}{p.pct}%{i < data.periods.length - 1 ? ` (from ${p.from})` : ''}
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -414,9 +444,16 @@ export function LifecyclePanel({ studentId, student }: { studentId: string; stud
                   </TableCell>
                   <TableCell><Badge variant={STATUS_VARIANT[e.status]}>{e.status}</Badge></TableCell>
                   <TableCell className="num">
-                    {e.daysApplied === null || e.daysApplied === undefined
-                      ? '—'
-                      : `${e.daysApplied > 0 ? '+' : ''}${e.daysApplied}`}
+                    {e.daysApplied !== null && e.daysApplied !== undefined
+                      ? `${e.daysApplied > 0 ? '+' : ''}${e.daysApplied}`
+                      : e.impact
+                        ? (
+                          <span className="text-muted-foreground" title={e.impact.summary}>
+                            {e.impact.daysDelta > 0 ? '+' : ''}{e.impact.daysDelta}
+                            <span className="text-[10px]"> (if approved)</span>
+                          </span>
+                        )
+                        : '—'}
                   </TableCell>
                   <TableCell className="text-right">
                     {e.status === 'requested' && !canDecide && (
@@ -427,6 +464,7 @@ export function LifecyclePanel({ studentId, student }: { studentId: string; stud
                         <DecisionDialog
                           label="Approve" variant="default" title="Approve this request"
                           pending={approve.isPending}
+                          impactNote={e.impact?.summary}
                           onConfirm={async (note) => {
                             try {
                               const res = await approve.mutateAsync({ eventId: e.id, note })

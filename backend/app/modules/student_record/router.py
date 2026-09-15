@@ -16,7 +16,11 @@ from app.core.errors import ValidationAppError
 from app.core.pagination import PageParams, list_envelope, page_params
 from app.core.principal import Principal
 from app.db.session import get_session
-from app.modules.student_record.constants import StudentStatus
+from app.modules.student_record.constants import (
+    LifecycleEventStatus,
+    LifecycleEventType,
+    StudentStatus,
+)
 from app.modules.student_record.import_service import CohortImportService
 from app.modules.student_record.repository import StudentRepository
 from app.modules.student_record.lifecycle import LifecycleService
@@ -228,7 +232,23 @@ async def list_lifecycle_events(
     if allowed is not None and student_id not in allowed:
         return []
     svc = LifecycleService(session)
-    return [LifecycleEventOut.model_validate(svc.out(e)) for e in await svc.events_for_student(student_id)]
+    events = await svc.events_for_student(student_id)
+    student = None
+    out: list[LifecycleEventOut] = []
+    for e in events:
+        row = svc.out(e)
+        # ICR G6 — attach a deterministic impact preview to a PENDING intensity change, so the
+        # approver sees what it will do before deciding.
+        if (e.event_type is LifecycleEventType.intensity_change
+                and e.status is LifecycleEventStatus.requested and e.intensity_pct):
+            if student is None:
+                student = await svc._get_student(student_id)
+            row["impact"] = await svc.intensity_impact_preview(
+                student, prev_pct=e.previous_intensity_pct or await svc._current_intensity(student),
+                new_pct=e.intensity_pct, effective=e.start_date,
+            )
+        out.append(LifecycleEventOut.model_validate(row))
+    return out
 
 
 @router.post("/{student_id}/lifecycle-events", response_model=LifecycleEventOut, status_code=201,

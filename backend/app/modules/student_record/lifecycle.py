@@ -273,13 +273,66 @@ class LifecycleService:
         )
 
     async def _current_intensity(self, student: Student) -> int:
-        """The student's current FTE %: the latest approved intensity change, else derived from
-        study mode (full-time = 100, part-time = the part-time-factor default)."""
+        """The student's FTE % **as of today**: the most recent approved change whose effective
+        date has arrived. A change dated in the future is scheduled, not current — so it does not
+        move "now". Falls back to the study-mode default when nothing has taken effect yet."""
+        today = date.today()
         events = await self._intensity_events(student.id)
+        effective = [e for e in events if e.start_date <= today]
+        if effective:
+            return effective[-1].intensity_pct  # type: ignore[return-value]
         if events:
-            return events[-1].intensity_pct  # type: ignore[return-value]
+            # Changes exist but all take effect in the future — "now" is the pre-change baseline
+            # (the first change's recorded previous %), not a flipped study_mode.
+            return events[0].previous_intensity_pct or (
+                FULL_TIME_INTENSITY_PCT if student.study_mode is StudyMode.full_time
+                else DEFAULT_PART_TIME_INTENSITY_PCT)
         return (FULL_TIME_INTENSITY_PCT if student.study_mode is StudyMode.full_time
                 else DEFAULT_PART_TIME_INTENSITY_PCT)
+
+    async def intensity_impact_preview(
+        self, student: Student, *, prev_pct: int, new_pct: int, effective: date,
+    ) -> dict:
+        """What approving an intensity change WOULD do — deterministic, computed from the same
+        arithmetic approval uses (ICR G6/G4). Lets the admin see the consequence before deciding."""
+        days_delta = self._intensity_change_days(student, effective, prev_pct, new_pct)
+        if student.expected_end_date is None:
+            return {
+                "daysDelta": 0, "projectedEnd": None, "milestonesAffected": 0,
+                "summary": (
+                    f"Sets study intensity to {new_pct}%. No expected end date is set for this "
+                    "student, so the timeline will not move — set a programme duration or end date "
+                    "first if this change should extend it."
+                ),
+            }
+        from datetime import timedelta
+
+        from app.modules.progression.models import Milestone
+
+        projected_end = student.expected_end_date + timedelta(days=days_delta)
+        affected = 0
+        if days_delta:
+            affected = len((await self.session.execute(
+                select(Milestone).where(
+                    Milestone.student_id == student.id,
+                    Milestone.status != MilestoneStatus.decided,
+                    Milestone.due_date.is_not(None),
+                )
+            )).scalars().unique().all())
+        direction = "extend" if days_delta > 0 else ("shorten" if days_delta < 0 else "keep")
+        summary = (
+            f"Sets study intensity to {new_pct}% (from {prev_pct}%). "
+            + (f"Would {direction} the expected end by {abs(days_delta)} day(s) to "
+               f"{projected_end.isoformat()}"
+               + (f", shifting {affected} undecided milestone(s)." if affected else ".")
+               if days_delta else "The expected end does not change.")
+        )
+        return {
+            "daysDelta": days_delta,
+            "projectedEnd": projected_end.isoformat(),
+            "milestonesAffected": affected,
+            "summary": summary,
+        }
 
     async def intensity_periods(self, student: Student) -> list[dict]:
         """The dated FTE-% timeline, derived from approved intensity changes + registration."""

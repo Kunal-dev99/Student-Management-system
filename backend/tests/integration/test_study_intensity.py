@@ -76,7 +76,7 @@ async def ctx():
     await eng.dispose()
 
 
-async def _request_intensity(c, h, sid, pct, start="2027-01-01"):
+async def _request_intensity(c, h, sid, pct, start="2026-06-01"):
     return await c.post(f"/api/v1/students/{sid}/lifecycle-events", headers=h, json={
         "eventType": "intensity_change", "reason": "Clinical duties", "startDate": start,
         "intensityPct": pct,
@@ -98,7 +98,7 @@ async def test_dropping_to_50pct_doubles_remaining_time(ctx):
     res = await _approve(c, h, req.json()["id"])
     assert res.status_code == 200, res.text
     recalc = res.json()["recalculation"]
-    remaining = (END - date(2027, 1, 1)).days
+    remaining = (END - date(2026, 6, 1)).days
     assert recalc["totalDaysApplied"] == remaining  # 100/50 - 1 = 1 -> +remaining
 
     summary = (await c.get(f"/api/v1/students/{sid}/summary", headers=h)).json()
@@ -110,7 +110,9 @@ async def test_dropping_to_50pct_doubles_remaining_time(ctx):
 async def test_intensity_timeline(ctx):
     c, h, ids, _ = ctx
     sid = ids["student"]
-    req = await _request_intensity(c, h, sid, 60)
+    # Use an effective date that has already arrived, so the change is genuinely "current"
+    # (a future-dated change is scheduled, not now — see test_scheduled_change_is_not_current).
+    req = await _request_intensity(c, h, sid, 60, start="2026-03-01")
     await _approve(c, h, req.json()["id"])
     overview = (await c.get(f"/api/v1/students/{sid}/intensity", headers=h)).json()
     assert overview["currentPct"] == 60
@@ -118,17 +120,29 @@ async def test_intensity_timeline(ctx):
     pcts = [p["pct"] for p in overview["periods"]]
     assert pcts[0] == 100 and pcts[-1] == 60
     assert overview["periods"][0]["from"] == "2026-01-01"
-    assert overview["periods"][0]["to"] == "2027-01-01"
+    assert overview["periods"][0]["to"] == "2026-03-01"
+
+
+@pytest.mark.asyncio
+async def test_scheduled_change_is_not_current(ctx):
+    """A future-dated intensity change is scheduled, not 'now' — current stays as-of-today."""
+    c, h, ids, _ = ctx
+    sid = ids["student"]
+    req = await _request_intensity(c, h, sid, 50, start="2027-01-01")  # future
+    await _approve(c, h, req.json()["id"])
+    overview = (await c.get(f"/api/v1/students/{sid}/intensity", headers=h)).json()
+    # The change hasn't taken effect yet, so current is still full-time.
+    assert overview["currentPct"] == 100
 
 
 @pytest.mark.asyncio
 async def test_speeding_back_up_shortens(ctx):
     c, h, ids, _ = ctx
     sid = ids["student"]
-    # 100 -> 50 (extends), then 50 -> 100 (should remove time).
-    r1 = await _request_intensity(c, h, sid, 50, start="2027-01-01")
+    # 100 -> 50 (extends), then 50 -> 100 (should remove time). Both already in effect.
+    r1 = await _request_intensity(c, h, sid, 50, start="2026-06-01")
     await _approve(c, h, r1.json()["id"])
-    r2 = await _request_intensity(c, h, sid, 100, start="2028-01-01")
+    r2 = await _request_intensity(c, h, sid, 100, start="2026-08-01")
     res2 = await _approve(c, h, r2.json()["id"])
     assert res2.status_code == 200, res2.text
     # The 50->100 event contributes negative days.
@@ -151,6 +165,42 @@ async def test_fte_for_year_is_time_weighted(ctx):
         fte = await LifecycleService(s).fte_for_year(student, year=2026, start_month=8)
         assert fte is not None
         assert 70 <= fte <= 80  # roughly half the year at 100, half at 50 -> ~75
+
+
+@pytest.mark.asyncio
+async def test_requested_change_carries_an_impact_preview(ctx):
+    """A pending intensity change shows the admin what approving it will do (ICR G6)."""
+    c, h, ids, _ = ctx
+    sid = ids["student"]
+    req = await _request_intensity(c, h, sid, 50, start="2026-06-01")
+    assert req.status_code == 201, req.text
+    events = (await c.get(f"/api/v1/students/{sid}/lifecycle-events", headers=h)).json()
+    pending = next(e for e in events if e["status"] == "requested")
+    impact = pending["impact"]
+    assert impact is not None
+    assert impact["daysDelta"] == (END - date(2026, 6, 1)).days   # 50% doubles the remaining
+    assert impact["projectedEnd"] is not None
+    assert "50%" in impact["summary"]
+
+
+@pytest.mark.asyncio
+async def test_impact_preview_flags_missing_end_date(ctx):
+    """With no expected end date, the preview says the timeline won't move (root cause of the
+    'expected end unchanged' + 'intensity dropped' contradiction the demo hit)."""
+    c, h, ids, sm = ctx
+    sid = ids["student"]
+    import uuid as _uuid
+    async with sm() as s:
+        st = (await s.execute(select(Student).where(Student.id == _uuid.UUID(sid)))).scalar_one()
+        st.expected_end_date = None
+        st.original_expected_end_date = None
+        await s.commit()
+    req = await _request_intensity(c, h, sid, 50, start="2026-06-01")
+    events = (await c.get(f"/api/v1/students/{sid}/lifecycle-events", headers=h)).json()
+    impact = next(e for e in events if e["status"] == "requested")["impact"]
+    assert impact["daysDelta"] == 0
+    assert impact["projectedEnd"] is None
+    assert "No expected end date" in impact["summary"]
 
 
 @pytest.mark.asyncio

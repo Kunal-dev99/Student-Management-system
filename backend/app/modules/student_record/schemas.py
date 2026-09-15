@@ -80,6 +80,8 @@ class LifecycleEventOut(_Camel):
     days_applied: int | None = None
     decision_note: str | None = None
     decided_at: str | None = None
+    # ICR G6 — deterministic "what will this do" preview, attached to a requested intensity change.
+    impact: dict | None = None
 
 
 class StudentUpdate(_Camel):

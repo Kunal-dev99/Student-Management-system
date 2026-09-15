@@ -31,6 +31,15 @@ export interface LifecycleEvent {
   daysApplied: number | null
   decisionNote: string | null
   decidedAt: string | null
+  /** ICR G6 — deterministic "what will this do" preview, present on a requested intensity change. */
+  impact: IntensityImpact | null
+}
+
+export interface IntensityImpact {
+  daysDelta: number
+  projectedEnd: string | null
+  milestonesAffected: number
+  summary: string
 }
 
 export interface IntensityPeriod { from: string; to: string; pct: number }
