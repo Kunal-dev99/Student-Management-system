@@ -73,6 +73,9 @@ function DecisionDialog({
   // Lazy: only fetch the AI narration once the dialog is actually open.
   const impactQ = useIntensityImpact(intensityEventId ?? '', open)
   const narrated = impactQ.data
+  const impactText =
+    narrated?.narration
+    || (intensityEventId && impactQ.isFetching ? 'Summarising…' : (impactNote ?? ''))
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
@@ -91,10 +94,9 @@ function DecisionDialog({
                 </Badge>
               )}
             </div>
-            <p className="text-muted-foreground">
-              {narrated?.narration
-                ?? (intensityEventId && impactQ.isFetching ? 'Summarising…' : impactNote)}
-            </p>
+            {impactText && (
+              <p key={impactText} className="text-muted-foreground">{impactText}</p>
+            )}
             {narrated?.projectedEnd && (
               <p className="text-[11px] text-muted-foreground mt-1 num">
                 New expected end {narrated.projectedEnd} · {narrated.daysDelta > 0 ? '+' : ''}
