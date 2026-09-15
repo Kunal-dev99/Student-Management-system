@@ -9,6 +9,8 @@ import { Pagination } from '@/components/common/Pagination'
 import { Badge, type BadgeProps } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Skeleton } from '@/components/ui/skeleton'
+import { useCan } from '@/shared/auth/Can'
+import { EnrolStudentDialog } from '@/features/students/EnrolStudentDialog'
 import { useStudents, type StudentStatus } from '@/features/students/api'
 
 const PAGE_SIZE = 50
@@ -46,13 +48,15 @@ export default function StudentsPage() {
   const handleSearch = (v: string) => { setSearch(v); setOffset(0) }
   const handleStatus = (v: StudentStatus | 'all') => { setStatus(v); setOffset(0) }
 
+  const canEnrol = useCan('student.write')
+
   const { data, isLoading, isError, error } = useStudents({
     search, status, limit: PAGE_SIZE, offset,
   })
 
   return (
     <>
-      <PageHeader title="Students" />
+      <PageHeader title="Students" actions={canEnrol ? <EnrolStudentDialog /> : undefined} />
       <div className="px-6 pb-6 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <SearchInput
@@ -97,7 +101,7 @@ export default function StudentsPage() {
                 <TableRow><TableCell colSpan={5} className="text-muted-foreground text-center py-8">
                   {search || status !== 'all'
                     ? 'No students match this search/filter.'
-                    : 'No students yet. Accept an offer in Recruitment to create one.'}
+                    : 'No students yet. Use “Enrol student” to add an accepted student, or accept an offer in Recruitment.'}
                 </TableCell></TableRow>
               )}
             </TableBody>

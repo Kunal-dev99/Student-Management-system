@@ -19,6 +19,7 @@ from app.modules.student_record.constants import StudentStatus
 from app.modules.student_record.repository import StudentRepository
 from app.modules.student_record.lifecycle import LifecycleService
 from app.modules.student_record.schemas import (
+    EnrolRequest,
     LifecycleDecision,
     LifecycleEventOut,
     LifecycleEventRequest,
@@ -95,6 +96,29 @@ async def list_students(
         for s in rows
     ]
     return list_envelope(data, limit=page.limit, total=total)
+
+
+@router.post("/enrol", response_model=StudentOut, status_code=201,
+             summary="Enrol an already-accepted student (no recruitment funnel)")
+async def enrol_student(
+    body: EnrolRequest,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("student.write")),
+) -> StudentOut:
+    student = await _svc(session).enrol(
+        person_id=body.person_id,
+        person_data=body.person,
+        programme_id=body.programme_id,
+        department_id=body.department_id,
+        research_area_id=body.research_area_id,
+        research_topic=body.research_topic,
+        start_date=body.start_date,
+        study_mode=body.study_mode,
+        status=body.status,
+        expected_end_date=body.expected_end_date,
+        funding=body.funding,
+    )
+    return StudentOut.model_validate(student)
 
 
 @router.get("/{student_id}", response_model=StudentOut, summary="Get a student (row-scoped)")

@@ -1,6 +1,6 @@
 'use client'
 
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type ListResponse } from '@/shared/api/client'
 
 export type StudentStatus =
@@ -66,3 +66,24 @@ export const useStudent = (id: string) =>
 
 export const useStudentSummary = (id: string) =>
   useQuery({ queryKey: ['student', id, 'summary'], queryFn: () => api.get<StudentSummary>(`/students/${id}/summary`), enabled: !!id })
+
+// --- ICR G2 — enrol an already-accepted student directly (no recruitment funnel) ---
+
+export interface EnrolStudentPayload {
+  /** Supply exactly one of personId (attach existing) or person (create new). */
+  personId?: string
+  person?: { givenName: string; familyName: string; email?: string }
+  programmeId?: string
+  startDate?: string
+  studyMode?: 'full_time' | 'part_time'
+  status?: StudentStatus
+  expectedEndDate?: string
+}
+
+export const useEnrolStudent = () => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: EnrolStudentPayload) => api.post<Student>('/students/enrol', body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['students'] }),
+  })
+}

@@ -4,9 +4,11 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 from pydantic.alias_generators import to_camel
 
+from app.modules.funding.schemas import ArrangementCreate
+from app.modules.person.schemas import PersonCreate
 from app.modules.student_record.constants import (
     LifecycleEventStatus,
     LifecycleEventType,
@@ -82,6 +84,32 @@ class StudentUpdate(_Camel):
     study_mode: StudyMode | None = None
     expected_end_date: date | None = None
     research_area_id: uuid.UUID | None = None
+
+
+class EnrolRequest(_Camel):
+    """Enrol an already-accepted student directly, bypassing the recruitment funnel (ICR G2).
+
+    Supply exactly one of ``personId`` (attach an existing Person) or ``person`` (create one).
+    ``status`` defaults to ``registered``; pass ``prospective`` for an accepted student who is
+    pre-enrolment. ``funding`` optionally records an initial funding arrangement in the same call.
+    """
+    person_id: uuid.UUID | None = None
+    person: PersonCreate | None = None
+    programme_id: uuid.UUID | None = None
+    department_id: uuid.UUID | None = None
+    research_area_id: uuid.UUID | None = None
+    research_topic: str | None = None
+    start_date: date | None = None
+    study_mode: StudyMode = StudyMode.full_time
+    status: StudentStatus = StudentStatus.registered
+    expected_end_date: date | None = None
+    funding: ArrangementCreate | None = None
+
+    @model_validator(mode="after")
+    def _exactly_one_person_source(self) -> "EnrolRequest":
+        if (self.person_id is None) == (self.person is None):
+            raise ValueError("Provide exactly one of personId or person")
+        return self
 
 
 class StudentSummary(_Camel):
