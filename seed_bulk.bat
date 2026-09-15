@@ -9,6 +9,8 @@ REM    3. seed_tenant_icr         - ICR as a real tenant (login institution)
 REM    4. seed_bulk_students      - 300 students, 5 through to alumni, with docs
 REM    5. seed_payment_schedules  - stipend instalment schedules + Finance trail
 REM                                 for the Payment Status page
+REM    6. seed_taught_cohort      - MSc taught programme + modules + a classified
+REM                                 cohort (ICR G1 taught lifecycle)
 REM
 REM  Every step is idempotent - safe to re-run any time.
 REM  Requires setup.bat to have already run (venv + migrations in place).
@@ -70,7 +72,7 @@ pause & exit /b 1
 :tenant_ok
 
 echo.
-echo === [4/5] Bulk student population (300 students, 5 to alumni) ===
+echo === [4/6] Bulk student population (300 students, 5 to alumni) ===
 ".venv\Scripts\python.exe" -m scripts.seed_bulk_students
 if not errorlevel 1 goto :bulk_ok
 echo.
@@ -83,7 +85,7 @@ pause & exit /b 1
 :bulk_ok
 
 echo.
-echo === [5/5] Stipend payment schedules + Finance trail ===
+echo === [5/6] Stipend payment schedules + Finance trail ===
 ".venv\Scripts\python.exe" -m scripts.seed_payment_schedules
 if not errorlevel 1 goto :payments_ok
 echo.
@@ -92,6 +94,17 @@ echo ERROR: payment schedule seed failed. Scroll up for the traceback.
 echo ============================================================
 pause & exit /b 1
 :payments_ok
+
+echo.
+echo === [6/6] Taught (MSc) programme, modules and classified cohort ===
+".venv\Scripts\python.exe" -m scripts.seed_taught_cohort
+if not errorlevel 1 goto :taught_ok
+echo.
+echo ============================================================
+echo ERROR: taught cohort seed failed. Scroll up for the traceback.
+echo ============================================================
+pause & exit /b 1
+:taught_ok
 
 echo.
 echo ============================================================

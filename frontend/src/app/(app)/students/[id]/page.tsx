@@ -20,6 +20,7 @@ import { FundingPanel } from '@/features/funding/FundingPanel'
 import { FundingLineagePanel } from '@/features/funding/FundingLineagePanel'
 import { ThesisCompletionPanel } from '@/features/completion/ThesisCompletionPanel'
 import { ClassificationCard } from '@/features/completion/ClassificationCard'
+import { TaughtRecordPanel } from '@/features/taught/TaughtRecordPanel'
 import { SupervisorRequestsCard } from '@/features/supervision/SupervisorRequestsCard'
 import { RelationshipGraph } from '@/features/research/RelationshipGraph'
 import { DocumentsPanel } from '@/components/documents/DocumentsPanel'
@@ -64,6 +65,7 @@ export default function StudentDetailPage() {
   const student = useStudent(id)
   const summary = useStudentSummary(id)
   const s = student.data
+  const isTaught = summary.data?.programmeType === 'taught'
   const [briefOpen, setBriefOpen] = useState(false)
 
   return (
@@ -138,8 +140,18 @@ export default function StudentDetailPage() {
         {hasPermission('funding.read') && <FundingLineagePanel studentId={id} />}
 
         <SupervisorRequestsCard studentId={id} />
-        <ThesisCompletionPanel studentId={id} />
-        <ClassificationCard studentId={id} />
+
+        {/* ICR G1 — taught (PGT/MSc) students run a module/assessment/dissertation/award
+            lifecycle instead of the research thesis+viva flow. Research students see exactly
+            what they saw before (isTaught is false). */}
+        {isTaught
+          ? <TaughtRecordPanel studentId={id} programmeId={summary.data?.programmeId ?? null} />
+          : (
+            <>
+              <ThesisCompletionPanel studentId={id} />
+              <ClassificationCard studentId={id} />
+            </>
+          )}
 
         {/* Everything above as one picture: award, funder, funding, project,
             supervisors. Folded away by default — this record is already long.

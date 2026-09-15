@@ -24,6 +24,8 @@ export interface Student {
   project: { id: string; researchTopic: string | null; researchGroup: string | null } | null
 }
 
+export type ProgrammeType = 'research' | 'taught'
+
 export interface StudentSummary {
   id: string
   studentRef: string
@@ -32,6 +34,10 @@ export interface StudentSummary {
   status: StudentStatus
   studyMode: 'full_time' | 'part_time'
   startDate: string | null
+  programmeId: string | null
+  /** ICR G1 — drives whether the student-360 shows the research or taught panel set. */
+  programmeType: ProgrammeType
+  programmeName: string | null
   researchTopic: string | null
   supervisors: unknown[]
   funding: unknown[]

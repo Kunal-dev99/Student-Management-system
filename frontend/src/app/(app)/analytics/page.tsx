@@ -35,8 +35,9 @@ const LENSES: { key: string; label: string; cols: string[]; row: (r: Enterprise3
       r.funding ? `${r.funding.currency ?? ''} ${r.funding.amount ? Number(r.funding.amount).toLocaleString() : ''}`.trim() : '—'] },
   { key: 'workforce', label: 'Workforce', cols: ['Student', 'Also an employee?'],
     row: (r) => [r.personName, r.workforce.isEmployee ? 'yes' : 'no'] },
-  { key: 'statutory', label: 'Statutory', cols: ['Student', 'Nationality', 'Programme', 'Expected end'],
-    row: (r) => [r.personName, r.statutory.nationality ?? '—', r.statutory.programme ?? '—', r.statutory.expectedEnd ?? '—'] },
+  { key: 'statutory', label: 'Statutory', cols: ['Student', 'Nationality', 'Programme', 'Type', 'Expected end'],
+    row: (r) => [r.personName, r.statutory.nationality ?? '—', r.statutory.programme ?? '—',
+      r.statutory.programmeType ?? 'research', r.statutory.expectedEnd ?? '—'] },
 ]
 
 export default function AnalyticsPage() {
@@ -107,6 +108,8 @@ export default function AnalyticsPage() {
                 <Badge variant="info">{e360.data?.summary.population ?? 0} population</Badge>
                 <Badge variant="success">{e360.data?.summary.funded ?? 0} funded</Badge>
                 <Badge variant="secondary">{e360.data?.summary.employees ?? 0} also employees</Badge>
+                <Badge variant="outline">{e360.data?.summary.byProgrammeType?.research ?? 0} research</Badge>
+                <Badge variant="outline">{e360.data?.summary.byProgrammeType?.taught ?? 0} taught</Badge>
               </div>
               <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
                 <SearchInput value={search} onChange={handleSearch} placeholder="Search by name or student ref…" />

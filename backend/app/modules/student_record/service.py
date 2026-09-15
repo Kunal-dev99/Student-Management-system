@@ -95,6 +95,12 @@ class StudentService:
         student = await self.get_student(student_id, allowed_ids=allowed_ids)
         person_service = PersonService(PersonRepository(self.repo.session))
         person = await person_service.get_person(student.person_id)
+        # ICR G1 — surface the programme type so the student-360 can pick the taught vs research
+        # panel set. Defaults to research for any student whose programme is unset.
+        from app.modules.student_record.constants import ProgrammeType
+        from app.modules.student_record.models import Programme
+        programme = await self.repo.session.get(Programme, student.programme_id) if student.programme_id else None
+        programme_type = (programme.programme_type if programme else ProgrammeType.research)
         supervisors = await SupervisionService(
             SupervisionRepository(self.repo.session)
         ).supervisors_for_student(student_id)
@@ -123,6 +129,8 @@ class StudentService:
             "studyMode": student.study_mode,
             "startDate": student.start_date,
             "programmeId": student.programme_id,
+            "programmeType": programme_type,
+            "programmeName": programme.name if programme else None,
             "researchTopic": student.project.research_topic if student.project else None,
             "supervisors": active,
             "funding": funding,

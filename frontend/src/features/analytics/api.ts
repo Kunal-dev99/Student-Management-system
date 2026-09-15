@@ -10,10 +10,15 @@ export interface Enterprise360Row {
   research: { topic: string | null; group: string | null; area: string | null }
   funding: { type: string; source: string | null; amount: string | null; currency: string | null } | null
   workforce: { isEmployee: boolean }
-  statutory: { nationality: string | null; programme: string | null; expectedEnd: string | null }
+  statutory: { nationality: string | null; programme: string | null; programmeType: string; expectedEnd: string | null }
 }
 export interface Enterprise360 {
-  summary: { population: number; funded: number; employees: number; byStatus: Record<string, number> }
+  summary: {
+    population: number; funded: number; employees: number
+    byStatus: Record<string, number>
+    /** ICR G1 — research vs taught population split. */
+    byProgrammeType: Record<string, number>
+  }
   lenses: string[]
   population: Enterprise360Row[]
 }

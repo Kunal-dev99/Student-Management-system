@@ -17,6 +17,7 @@ from app.db.base import Base, TimestampMixin, UUIDMixin
 from app.modules.student_record.constants import (
     LifecycleEventStatus,
     LifecycleEventType,
+    ProgrammeType,
     StudentStatus,
     StudyMode,
 )
@@ -50,6 +51,15 @@ class Programme(UUIDMixin, TimestampMixin, Base):
     department_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("department.id"), nullable=True
     )
+    # ICR G1 — research (default, unchanged behaviour) vs taught (modules/assessments/award).
+    programme_type: Mapped[ProgrammeType] = mapped_column(
+        Enum(ProgrammeType, name="programme_type"),
+        default=ProgrammeType.research,
+        server_default=ProgrammeType.research.value,
+    )
+    # Target credit total for a taught programme (e.g. 180 for a UK MSc) — used to validate a
+    # student's module load is complete before classification. NULL for research programmes.
+    taught_total_credits: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class Student(UUIDMixin, TimestampMixin, Base):

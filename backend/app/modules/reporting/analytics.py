@@ -35,7 +35,10 @@ class AnalyticsService:
         rows = (await s.execute(select(Student, Person).join(Person, Person.id == Student.person_id))).all()
         projects = {p.student_id: p for p in (await s.execute(select(ResearchProject))).scalars().all()}
         areas = {a.id: a.name for a in (await s.execute(select(ResearchArea))).scalars().all()}
-        programmes = {p.id: p.name for p in (await s.execute(select(Programme))).scalars().all()}
+        prog_rows = (await s.execute(select(Programme))).scalars().all()
+        programmes = {p.id: p.name for p in prog_rows}
+        # ICR G1 — programme type (research / taught) as an Enterprise-360 dimension.
+        programme_types = {p.id: p.programme_type.value for p in prog_rows}
         sources = {f.id: f.name for f in (await s.execute(select(FundingSource))).scalars().all()}
         funding: dict = {}
         for fa in (await s.execute(select(FundingArrangement).where(
@@ -63,10 +66,10 @@ class AnalyticsService:
         routes: dict = {}
         for a in (await s.execute(select(Application))).scalars().unique().all():
             routes.setdefault(a.person_id, a.route.value if hasattr(a.route, "value") else a.route)
-        return rows, projects, areas, programmes, sources, funding, employees, overdue, completions, routes
+        return rows, projects, areas, programmes, programme_types, sources, funding, employees, overdue, completions, routes
 
     async def enterprise_360(self) -> dict:
-        rows, projects, areas, programmes, sources, funding, employees, _overdue, _c, routes = await self._load()
+        rows, projects, areas, programmes, programme_types, sources, funding, employees, _overdue, _c, routes = await self._load()
         population = []
         for student, person in rows:
             proj = projects.get(student.id)
@@ -87,6 +90,7 @@ class AnalyticsService:
                 "workforce": {"isEmployee": person.id in employees},
                 "statutory": {"nationality": person.nationality,
                               "programme": programmes.get(student.programme_id),
+                              "programmeType": programme_types.get(student.programme_id, "research"),
                               "expectedEnd": student.expected_end_date.isoformat() if student.expected_end_date else None},
             })
         summary = {
@@ -94,12 +98,13 @@ class AnalyticsService:
             "funded": sum(1 for r in population if r["funding"]),
             "employees": sum(1 for r in population if r["workforce"]["isEmployee"]),
             "byStatus": _counter(r["student"]["status"] for r in population),
+            "byProgrammeType": _counter(r["statutory"]["programmeType"] for r in population),
         }
         return {"summary": summary, "lenses": ["student", "research", "funding", "workforce", "statutory"],
                 "population": population}
 
     async def analytics(self) -> dict:
-        rows, _p, _a, _pr, _s, funding, _e, overdue, completions, _routes = await self._load()
+        rows, _p, _a, _pr, _pt, _s, funding, _e, overdue, completions, _routes = await self._load()
         at_risk = []
         active = 0
         for student, person in rows:

@@ -10,6 +10,7 @@ from pydantic.alias_generators import to_camel
 from app.modules.student_record.constants import (
     LifecycleEventStatus,
     LifecycleEventType,
+    ProgrammeType,
     StudentStatus,
     StudyMode,
 )
@@ -92,6 +93,8 @@ class StudentSummary(_Camel):
     study_mode: StudyMode
     start_date: date | None = None
     programme_id: uuid.UUID | None = None
+    programme_type: ProgrammeType = ProgrammeType.research
+    programme_name: str | None = None
     research_topic: str | None = None
     # Supervisors and funding fold in as those modules land (BE-1.6 / BE-1.8).
     supervisors: list = []

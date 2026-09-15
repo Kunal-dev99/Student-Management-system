@@ -49,3 +49,17 @@ PART_TIME_FACTOR = 2.0
 class StudyMode(str, enum.Enum):
     full_time = "full_time"
     part_time = "part_time"
+
+
+# --- ICR G1 — taught (PGT / MSc) vs research programmes ---
+
+class ProgrammeType(str, enum.Enum):
+    """What kind of lifecycle a programme runs.
+
+    ``research`` is the historical default and behaves exactly as before (Journey tracker,
+    thesis, viva, examination). ``taught`` swaps that for modules -> assessments ->
+    dissertation -> award. The column defaults to ``research`` so every existing programme is
+    unaffected (additive — see the G1 approach doc).
+    """
+    research = "research"
+    taught = "taught"

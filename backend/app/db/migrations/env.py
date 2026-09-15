@@ -15,6 +15,7 @@ from app.db.base import Base
 from app.modules.identity import models as identity_models  # noqa: F401,E402
 from app.modules.person import models as person_models  # noqa: F401,E402
 from app.modules.student_record import models as student_models  # noqa: F401,E402
+from app.modules.taught import models as taught_models  # noqa: F401,E402
 from app.modules.recruitment import models as recruitment_models  # noqa: F401,E402
 from app.modules.recruitment import f3_models as recruitment_f3_models  # noqa: F401,E402
 from app.modules.admissions import models as admissions_models  # noqa: F401,E402

@@ -16,6 +16,11 @@ PERMISSIONS: dict[str, str] = {
     "funding.change": "Change funding arrangements",
     "progression.read": "Read progression milestones",
     "progression.decide": "Decide progression outcomes",
+    # ICR G1 — taught (PGT / MSc) lifecycle: reading modules/enrolments/results and recording
+    # them. Separate from progression so a taught programme's operations don't imply research
+    # progression rights (and vice versa).
+    "taught.read": "Read taught modules, enrolments, results, dissertation and award",
+    "taught.change": "Record taught enrolments, assessment results, dissertation and award",
     "reporting.read": "Read dashboards and reports",
     # F1 — statutory sign-off. Distinct from admin.configure: signing off attests that a
     # regulatory return is complete, and belongs to Registry / HESA owners, not any admin.
@@ -55,9 +60,10 @@ ROLES: dict[str, list[str]] = {
         "audit.read", "document.read", "document.write",
         "assistant.use", "student.lifecycle.approve",
         "ml.read", "ml.analyse", "ml.train",
+        "taught.read", "taught.change",
     ],
-    "Supervisor": ["student.read", "progression.read", "progression.decide", "document.read"],
+    "Supervisor": ["student.read", "progression.read", "progression.decide", "document.read", "taught.read"],
     "Executive": ["reporting.read"],
     # A student can read their own record (row-scoping restricts them to self).
-    "Student": ["student.read", "progression.read", "funding.read", "document.read", "document.write"],
+    "Student": ["student.read", "progression.read", "funding.read", "document.read", "document.write", "taught.read"],
 }

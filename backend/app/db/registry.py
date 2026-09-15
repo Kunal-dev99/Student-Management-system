@@ -10,6 +10,7 @@ from app.modules.composer import models as composer_models  # noqa: F401
 from app.modules.identity import models as identity_models  # noqa: F401
 from app.modules.person import models as person_models  # noqa: F401
 from app.modules.student_record import models as student_models  # noqa: F401
+from app.modules.taught import models as taught_models  # noqa: F401  # ICR G1 — taught lifecycle
 from app.modules.recruitment import models as recruitment_models  # noqa: F401
 from app.modules.recruitment import f3_models as recruitment_f3_models  # noqa: F401
 from app.modules.admissions import models as admissions_models  # noqa: F401

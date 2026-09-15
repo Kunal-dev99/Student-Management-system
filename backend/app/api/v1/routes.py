@@ -40,6 +40,12 @@ from app.modules.funding.router import (
     sources_router,
     student_router as funding_student_router,
 )
+from app.modules.taught.router import (
+    programme_router as taught_programme_router,
+    module_router as taught_module_router,
+    student_router as taught_student_router,
+    enrolment_router as taught_enrolment_router,
+)
 from app.modules.thesis.router import student_router as thesis_student_router
 from app.modules.thesis.router import thesis_router, nomination_router
 from app.modules.completion.router import router as completion_router
@@ -134,6 +140,12 @@ api_router.include_router(milestone_router)
 api_router.include_router(sources_router)
 api_router.include_router(funding_student_router)
 api_router.include_router(funding_router)
+
+# Taught lifecycle (ICR G1)
+api_router.include_router(taught_programme_router)
+api_router.include_router(taught_module_router)
+api_router.include_router(taught_student_router)
+api_router.include_router(taught_enrolment_router)
 
 # Thesis and examination
 api_router.include_router(thesis_student_router)
