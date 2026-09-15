@@ -10,7 +10,7 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Date, DateTime, Enum, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import JSON, Date, DateTime, Enum, ForeignKey, Integer, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin, UUIDMixin
@@ -65,6 +65,9 @@ class Programme(UUIDMixin, TimestampMixin, Base):
     # default for this programme (NULL = fall back to the global setting).
     duration_months: Mapped[int | None] = mapped_column(Integer, nullable=True)
     supervision_meeting_interval_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # ICR G1 (full taught model) — per-programme grading policy (pass mark, resit cap,
+    # condonement allowance, classification thresholds). NULL = use DEFAULT_GRADING_POLICY.
+    grading_policy: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
 
 class Student(UUIDMixin, TimestampMixin, Base):

@@ -34,6 +34,7 @@ from app.modules.taught.constants import (
     AssessmentType,
     ClassificationBand,
     ModuleEnrolmentStatus,
+    ModuleOutcome,
 )
 
 
@@ -48,6 +49,12 @@ class TaughtModule(UUIDMixin, TimestampMixin, Base):
     title: Mapped[str] = mapped_column(String(300))
     credits: Mapped[int] = mapped_column(Integer, default=0)
     term: Mapped[str | None] = mapped_column(String(60), nullable=True)  # e.g. "Autumn 2026"
+    # ICR G1 (full model) — FHEQ level (7 = master's), core vs optional, and the module lead.
+    level: Mapped[int] = mapped_column(Integer, default=7)
+    is_core: Mapped[bool] = mapped_column(Boolean, default=True)
+    convenor_person_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("person.id"), nullable=True
+    )
 
     assessments: Mapped[list["ModuleAssessment"]] = relationship(
         back_populates="module", lazy="selectin", cascade="all, delete-orphan"
@@ -70,6 +77,15 @@ class ModuleEnrolment(UUIDMixin, TimestampMixin, Base):
         default=ModuleEnrolmentStatus.enrolled,
         index=True,
     )
+    # ICR G1 (full model) — the module RESULT: credit-weighted mark, academic outcome, and the
+    # credits it awarded (0 on a non-condoned fail). Recomputed whenever a result is recorded.
+    final_mark: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), nullable=True)
+    outcome: Mapped[ModuleOutcome] = mapped_column(
+        Enum(ModuleOutcome, name="module_outcome"),
+        default=ModuleOutcome.pending,
+    )
+    credits_awarded: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    condoned: Mapped[bool] = mapped_column(Boolean, default=False)
 
     results: Mapped[list["AssessmentResult"]] = relationship(
         back_populates="enrolment", lazy="selectin", cascade="all, delete-orphan"
@@ -90,6 +106,11 @@ class ModuleAssessment(UUIDMixin, TimestampMixin, Base):
     weight_pct: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=Decimal("100.00"))
     max_mark: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=Decimal("100.00"))
     due_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # ICR G1 (full model) — component pass mark, and resit rules. A resit mark is capped at
+    # ``resit_cap`` when set (the marks-and-standards "capped resit"). NULL cap = no cap.
+    pass_mark: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=Decimal("50.00"))
+    resit_allowed: Mapped[bool] = mapped_column(Boolean, default=True)
+    resit_cap: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), nullable=True)
 
     module: Mapped[TaughtModule] = relationship(back_populates="assessments")
 
@@ -111,6 +132,10 @@ class AssessmentResult(UUIDMixin, TimestampMixin, Base):
     mark: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), nullable=True)
     grade: Mapped[str | None] = mapped_column(String(20), nullable=True)
     is_resit: Mapped[bool] = mapped_column(Boolean, default=False)
+    # ICR G1 (full model) — which attempt this is (1 = first sit) and whether the recorded mark
+    # was capped by the resit rule (so the cap is auditable, not silently applied).
+    attempt_number: Mapped[int] = mapped_column(Integer, default=1)
+    capped: Mapped[bool] = mapped_column(Boolean, default=False)
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     marked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     marked_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -131,9 +156,17 @@ class Dissertation(UUIDMixin, TimestampMixin, Base):
     supervisor_person_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("person.id"), nullable=True
     )
+    # ICR G1 (full model) — double marking: a second marker and both marks; ``mark`` is the agreed
+    # mark the classification uses. word_count captured for the submission record.
+    second_marker_person_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("person.id"), nullable=True
+    )
+    first_mark: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), nullable=True)
+    second_mark: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), nullable=True)
+    word_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     marked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    mark: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), nullable=True)
+    mark: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), nullable=True)  # agreed mark
     grade: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
 

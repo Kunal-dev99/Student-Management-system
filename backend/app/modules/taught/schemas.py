@@ -12,6 +12,7 @@ from app.modules.taught.constants import (
     AssessmentType,
     ClassificationBand,
     ModuleEnrolmentStatus,
+    ModuleOutcome,
 )
 
 
@@ -51,6 +52,9 @@ class AssessmentOut(_Camel):
     weight_pct: Decimal
     max_mark: Decimal
     due_date: date | None = None
+    pass_mark: Decimal = Decimal("50.00")
+    resit_allowed: bool = True
+    resit_cap: Decimal | None = None
 
 
 class ModuleOut(_Camel):
@@ -60,6 +64,9 @@ class ModuleOut(_Camel):
     title: str
     credits: int
     term: str | None = None
+    level: int = 7
+    is_core: bool = True
+    convenor_person_id: uuid.UUID | None = None
     assessments: list[AssessmentOut] = []
 
 
@@ -88,6 +95,8 @@ class ResultOut(_Camel):
     mark: Decimal | None = None
     grade: str | None = None
     is_resit: bool = False
+    attempt_number: int = 1
+    capped: bool = False
     submitted_at: datetime | None = None
     marked_at: datetime | None = None
 
@@ -102,6 +111,9 @@ class EnrolmentOut(_Camel):
     academic_year: str
     status: ModuleEnrolmentStatus
     module_mark: Decimal | None = None  # credit-weighted assessment mark for this module
+    outcome: ModuleOutcome = ModuleOutcome.pending
+    credits_awarded: int | None = None
+    condoned: bool = False
     results: list[ResultOut] = []
 
 

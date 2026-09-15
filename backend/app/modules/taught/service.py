@@ -18,7 +18,12 @@ from app.core.errors import ConflictError, NotFoundError, WorkflowError
 from app.modules.student_record.constants import ProgrammeType
 from app.modules.student_record.models import Programme, Student
 from app.modules.student_record.repository import StudentRepository
-from app.modules.taught.constants import ClassificationBand, ModuleEnrolmentStatus
+from app.modules.taught.constants import (
+    DEFAULT_GRADING_POLICY,
+    ClassificationBand,
+    ModuleEnrolmentStatus,
+    ModuleOutcome,
+)
 from app.modules.taught.models import (
     AssessmentResult,
     Dissertation,
@@ -36,23 +41,28 @@ from app.modules.taught.schemas import (
     ResultRecord,
 )
 
-# Policy defaults (see module docstring). Ordered high -> low; first threshold met wins.
-CLASSIFICATION_THRESHOLDS: list[tuple[Decimal, ClassificationBand]] = [
-    (Decimal("70"), ClassificationBand.distinction),
-    (Decimal("60"), ClassificationBand.merit),
-    (Decimal("50"), ClassificationBand.pass_),
-]
-PASS_MARK = Decimal("50")
-
-
 def _q(v: Decimal) -> Decimal:
     return v.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
-def _band_for(mark: Decimal) -> ClassificationBand:
-    for threshold, band in CLASSIFICATION_THRESHOLDS:
-        if mark >= threshold:
-            return band
+def _merged_policy(programme: Programme | None) -> dict:
+    """The grading policy in force: the programme's overrides on top of the UK-MSc defaults.
+
+    Every threshold (pass mark, resit cap, condonement allowance, classification bands) comes from
+    here — nothing is hard-coded to one institution's numbers."""
+    policy = dict(DEFAULT_GRADING_POLICY)
+    if programme is not None and getattr(programme, "grading_policy", None):
+        policy.update({k: v for k, v in programme.grading_policy.items() if v is not None})
+    return policy
+
+
+def _band_for(mark: Decimal, policy: dict) -> ClassificationBand:
+    if mark >= Decimal(str(policy["distinctionMark"])):
+        return ClassificationBand.distinction
+    if mark >= Decimal(str(policy["meritMark"])):
+        return ClassificationBand.merit
+    if mark >= Decimal(str(policy["passMarkAward"])):
+        return ClassificationBand.pass_
     return ClassificationBand.fail
 
 
@@ -79,12 +89,14 @@ class TaughtService:
             "id": a.id, "module_id": a.module_id, "title": a.title,
             "assessment_type": a.assessment_type, "weight_pct": a.weight_pct,
             "max_mark": a.max_mark, "due_date": a.due_date,
+            "pass_mark": a.pass_mark, "resit_allowed": a.resit_allowed, "resit_cap": a.resit_cap,
         }
 
     def _module_out(self, m: TaughtModule) -> dict:
         return {
             "id": m.id, "programme_id": m.programme_id, "code": m.code, "title": m.title,
             "credits": m.credits, "term": m.term,
+            "level": m.level, "is_core": m.is_core, "convenor_person_id": m.convenor_person_id,
             "assessments": [self._assessment_out(a) for a in m.assessments],
         }
 
@@ -167,14 +179,80 @@ class TaughtService:
         if assessment.module_id != e.module_id:
             raise WorkflowError("That assessment does not belong to this enrolment's module")
         marked = data.mark is not None
+        if data.is_resit and not assessment.resit_allowed:
+            raise WorkflowError("This assessment does not allow a resit")
+
+        # Attempt number = how many results already exist for this component + 1.
+        prior = [x for x in e.results if x.assessment_id == data.assessment_id]
+        attempt_number = len(prior) + 1
+
+        # Capped resit: a resit mark above the cap is recorded at the cap, and the cap is flagged
+        # so it's auditable rather than silently applied.
+        mark = data.mark
+        capped = False
+        if (data.is_resit and marked and assessment.resit_cap is not None
+                and mark is not None and mark > assessment.resit_cap):
+            mark = assessment.resit_cap
+            capped = True
+
         r = AssessmentResult(
             module_enrolment_id=enrolment_id, assessment_id=data.assessment_id,
-            mark=data.mark, grade=data.grade, is_resit=data.is_resit,
+            mark=mark, grade=data.grade, is_resit=data.is_resit,
+            attempt_number=attempt_number, capped=capped,
             submitted_at=data.submitted_at,
             marked_at=datetime.now(timezone.utc) if marked else None,
             marked_by_user_id=user_id if marked else None,
         )
         self.repo.add(r)
+        await self.session.flush()
+        await self._recompute_module_result(e)
+        await self.session.commit()
+        e = await self.repo.get_enrolment(enrolment_id)
+        return await self._enrolment_out(e)
+
+    async def _recompute_module_result(self, enrolment: ModuleEnrolment) -> None:
+        """Refresh the module RESULT (mark, outcome, credits) from the latest assessment marks.
+
+        A module passes when its credit-weighted mark meets the pass mark AND every component is at
+        or above its own pass mark; otherwise it fails (a board may later condone it). Credits are
+        awarded on a pass (or condonement), never on a plain fail. Runs on every result so the
+        stored result never drifts from the marks."""
+        module = await self.repo.get_module(enrolment.module_id)
+        if module is None:
+            return
+        programme = await self._programme(module.programme_id)
+        policy = _merged_policy(programme)
+        mark = self._module_mark(module, enrolment)
+        enrolment.final_mark = mark
+        if mark is None:
+            enrolment.outcome = ModuleOutcome.pending
+            enrolment.credits_awarded = None
+            return
+        eff = self._effective_results(enrolment)
+        module_pass = Decimal(str(policy["passMark"]))
+        component_ok = all(
+            (eff[a.id].mark is None) or (eff[a.id].mark >= a.pass_mark)
+            for a in module.assessments if a.id in eff
+        )
+        if enrolment.condoned:
+            enrolment.outcome = ModuleOutcome.condoned
+            enrolment.credits_awarded = module.credits or 0
+        elif mark >= module_pass and component_ok:
+            enrolment.outcome = ModuleOutcome.passed
+            enrolment.credits_awarded = module.credits or 0
+        else:
+            enrolment.outcome = ModuleOutcome.failed
+            enrolment.credits_awarded = 0
+
+    async def condone_module(self, enrolment_id: uuid.UUID, *, condoned: bool = True) -> dict:
+        """Board action: condone (or un-condone) a failed module — awards its credits despite the
+        fail, within the programme's condonement allowance."""
+        e = await self.repo.get_enrolment(enrolment_id)
+        if e is None:
+            raise NotFoundError("Enrolment not found")
+        e.condoned = condoned
+        await self.session.flush()
+        await self._recompute_module_result(e)
         await self.session.commit()
         e = await self.repo.get_enrolment(enrolment_id)
         return await self._enrolment_out(e)
@@ -223,10 +301,12 @@ class TaughtService:
             "credits": module.credits if module else None,
             "academic_year": e.academic_year, "status": e.status,
             "module_mark": mark,
+            "outcome": e.outcome, "credits_awarded": e.credits_awarded, "condoned": e.condoned,
             "results": [
                 {
                     "id": r.id, "assessment_id": r.assessment_id, "mark": r.mark,
                     "grade": r.grade, "is_resit": r.is_resit,
+                    "attempt_number": r.attempt_number, "capped": r.capped,
                     "submitted_at": r.submitted_at, "marked_at": r.marked_at,
                 }
                 for r in e.results
@@ -278,6 +358,7 @@ class TaughtService:
         if programme is None or programme.programme_type != ProgrammeType.taught:
             raise WorkflowError("Classification only applies to a taught programme")
 
+        policy = _merged_policy(programme)
         enrolments = await self.repo.enrolments_for_student(student_id)
         components: list[tuple[Decimal, Decimal]] = []  # (mark, credit weight)
         module_credit_sum = 0
@@ -292,8 +373,11 @@ class TaughtService:
             weight = Decimal(module.credits) if module.credits else Decimal("1")
             components.append((mark, weight))
             module_credit_sum += module.credits or 0
-            if mark >= PASS_MARK:
-                credits_achieved += module.credits or 0
+            # Credits come from the stored module result (a pass or a condoned fail), not a raw
+            # mark comparison — so board condonement is honoured.
+            credits_achieved += (e.credits_awarded
+                                 if e.credits_awarded is not None
+                                 else (module.credits or 0 if mark >= Decimal(str(policy["passMark"])) else 0))
 
         dissertation = await self.repo.get_dissertation(student_id)
         if dissertation is not None and dissertation.mark is not None:
@@ -312,7 +396,7 @@ class TaughtService:
 
         total_w = sum((w for _, w in components), Decimal("0"))
         final = _q(sum((m * w for m, w in components), Decimal("0")) / total_w)
-        band = _band_for(final)
+        band = _band_for(final, policy)
 
         award = await self.repo.get_award(student_id)
         if award is None:
