@@ -8,7 +8,7 @@
 
 import { useEffect, useState } from 'react'
 import {
-  CheckCircle2, CopyPlus, Download, FileSpreadsheet, ListChecks, Lock, Unlock, Play, Plus, ShieldAlert, ShieldCheck,
+  CheckCircle2, CopyPlus, Download, FileSpreadsheet, ListChecks, Lock, Unlock, Play, Plus, ShieldAlert, ShieldCheck, Sparkles,
 } from 'lucide-react'
 import { PageHeader } from '@/components/common/PageHeader'
 import { PageSection } from '@/components/common/PageSection'
@@ -31,8 +31,9 @@ import { ApiError } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthContext'
 import { downloadExport } from '@/features/exports/api'
 import {
-  useAddField, useCloneProfile, useCompileProfile, useCreateProfile, useGenerateProfile,
-  useProfile, useProfiles, useSignOffProfile, useTransforms, useUnsignProfile, useValidateProfile,
+  useAddField, useCloneProfile, useCompileProfile, useCreateFromSpec, useCreateProfile,
+  useGenerateProfile, useProfile, useProfiles, useSignOffProfile, useSpecs, useTransforms,
+  useUnsignProfile, useValidateProfile,
   type GenerateResult, type ReportProfile, type ValidationResult,
 } from '@/features/statutory/api'
 
@@ -42,6 +43,59 @@ function err(toast: ReturnType<typeof useToast>['toast'], title: string) {
 }
 
 // ---------------------------------------------------------------- dialogs
+
+/** ICR G5 — create a profile pre-mapped from a published HESA spec pack. */
+function FromSpecDialog({ onCreated }: { onCreated: (id: string) => void }) {
+  const { toast } = useToast()
+  const { data } = useSpecs()
+  const fromSpec = useCreateFromSpec()
+  const [open, setOpen] = useState(false)
+  const [specKey, setSpecKey] = useState('')
+
+  const specs = data?.specs ?? []
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) setSpecKey('') }}>
+      <DialogTrigger asChild>
+        <Button size="sm"><Sparkles className="h-4 w-4 mr-1" /> New from HESA spec</Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader><DialogTitle>New profile from a published spec</DialogTitle></DialogHeader>
+        <p className="text-helper -mt-1">
+          Creates the profile with every spec field pre-mapped to its best-known source. Registry
+          only fills the gaps (fields we can&apos;t source yet are left required-but-unmapped).
+        </p>
+        <div className="space-y-1.5 py-2">
+          <Label>Spec pack</Label>
+          <Select value={specKey} onValueChange={setSpecKey}>
+            <SelectTrigger><SelectValue placeholder="Choose a published spec…" /></SelectTrigger>
+            <SelectContent>
+              {specs.map((s) => (
+                <SelectItem key={s.key} value={s.key}>
+                  {s.name} {s.academicYear} — {s.fieldCount} fields
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <DialogFooter>
+          <Button
+            disabled={!specKey || fromSpec.isPending}
+            onClick={async () => {
+              try {
+                const p = await fromSpec.mutateAsync({ specKey })
+                toast({ title: 'Profile created from spec', description: `${p.fields.length} fields pre-mapped.` })
+                setOpen(false); setSpecKey('')
+                onCreated(p.id)
+              } catch (e) { err(toast, 'Could not create from spec')(e) }
+            }}>
+            {fromSpec.isPending ? 'Creating…' : 'Create from spec'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
 
 function NewProfileDialog() {
   const { toast } = useToast()
@@ -266,6 +320,9 @@ function ValidationReportView({ result, rowCount }: { result: ValidationResult; 
         <Badge variant={result.errors > 0 ? 'destructive' : 'success'}>
           {result.errors} error{result.errors === 1 ? '' : 's'}
         </Badge>
+        {(result.warnings ?? 0) > 0 && (
+          <Badge variant="warning">{result.warnings} warning{result.warnings === 1 ? '' : 's'}</Badge>
+        )}
         <span className="text-helper num">{rowCount} row{rowCount === 1 ? '' : 's'} would be produced</span>
       </div>
       {result.issues.length === 0 ? (
@@ -279,6 +336,7 @@ function ValidationReportView({ result, rowCount }: { result: ValidationResult; 
               <TableRow>
                 <TableHead>Student ref</TableHead>
                 <TableHead>Field</TableHead>
+                <TableHead>Severity</TableHead>
                 <TableHead>Message</TableHead>
               </TableRow>
             </TableHeader>
@@ -287,6 +345,9 @@ function ValidationReportView({ result, rowCount }: { result: ValidationResult; 
                 <TableRow key={`${i.studentRef}-${i.field}-${idx}`}>
                   <TableCell className="font-mono text-xs whitespace-nowrap">{i.studentRef}</TableCell>
                   <TableCell className="font-mono text-xs whitespace-nowrap">{i.field}</TableCell>
+                  <TableCell>
+                    <Badge variant={i.severity === 'warning' ? 'warning' : 'destructive'}>{i.severity}</Badge>
+                  </TableCell>
                   <TableCell className="text-sm">
                     {i.message}
                     {i.allowed && i.allowed.length > 0 && (
@@ -479,7 +540,12 @@ export default function StatutoryPage() {
       <PageHeader
         title="Statutory returns"
         description="A statutory return is configuration, not code — HESA is an external specification, expressed as a versioned profile of field mappings."
-        actions={canConfigure ? <NewProfileDialog /> : undefined}
+        actions={canConfigure ? (
+          <div className="flex items-center gap-2">
+            <FromSpecDialog onCreated={setSelectedId} />
+            <NewProfileDialog />
+          </div>
+        ) : undefined}
       />
       <div className="px-6 pb-6 space-y-4">
         <PageSection

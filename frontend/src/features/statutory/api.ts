@@ -55,8 +55,18 @@ export interface ValidationIssue {
 
 export interface ValidationResult {
   errors: number
+  warnings?: number
   issues: ValidationIssue[]
   valid: boolean
+}
+
+export interface SpecPack {
+  key: string
+  code: string
+  name: string
+  academicYear: string
+  version: number
+  fieldCount: number
 }
 
 export interface ValidationReport {
@@ -101,6 +111,24 @@ export function useCreateProfile() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (body: ProfileInput) => api.post<ReportProfile>('/report-profiles', body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['report-profiles'] }),
+  })
+}
+
+/** ICR G5 — the published spec packs a profile can be created pre-mapped from. */
+export const useSpecs = () =>
+  useQuery({
+    queryKey: ['report-profile-specs'],
+    queryFn: () => api.get<{ specs: SpecPack[] }>('/report-profiles/specs'),
+    staleTime: 60 * 60 * 1000,
+  })
+
+/** ICR G5 — create a profile pre-mapped from a published HESA spec pack. */
+export function useCreateFromSpec() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: { specKey: string; academicYear?: string; name?: string }) =>
+      api.post<ProfileDetail>('/report-profiles/from-spec', body),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['report-profiles'] }),
   })
 }
