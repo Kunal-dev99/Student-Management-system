@@ -90,6 +90,31 @@ TRANSFORMS.update({
 })
 
 
+def _luhn_check_digit(number: str) -> str:
+    digits = [int(c) for c in number]
+    total = 0
+    for i, d in enumerate(reversed(digits)):
+        if i % 2 == 0:
+            d *= 2
+            if d > 9:
+                d -= 9
+        total += d
+    return str((10 - total % 10) % 10)
+
+
+def husid(inst_code: str, start_year: int | None, ref: str) -> str:
+    """A stable HESA-shaped unique student id: 4-digit institution code + 2-digit entry year +
+    6-digit sequence (deterministic from the student ref) + a Luhn check digit. Generated, never
+    hand-keyed (ICR G5)."""
+    import hashlib
+
+    code = (inst_code or "0000")[:4].rjust(4, "0")
+    yy = f"{(start_year or 0) % 100:02d}"
+    seq = int(hashlib.sha1(ref.encode()).hexdigest(), 16) % 1_000_000
+    body = f"{code}{yy}{seq:06d}"
+    return body + _luhn_check_digit(body)
+
+
 def resolve(record: dict, path: str):
     """Read a dotted path out of the flat student record. Unknown paths resolve to None."""
     node = record
@@ -236,6 +261,37 @@ class StatutoryEngine:
         await self.session.refresh(clone)
         return clone
 
+    async def from_spec(
+        self, *, spec_key: str, academic_year: str | None = None, name: str | None = None,
+    ) -> ReportProfile:
+        """Create a profile PRE-MAPPED from a published spec pack — ICR G5.
+
+        Every spec field becomes a mapping using its best-known source/transform/coding frame;
+        fields with no automatic source are created required-but-unmapped (empty source), so the
+        sign-off gate and validation flag exactly what Registry still needs to supply. This is the
+        honest version of "check the website": HESA publishes the spec, we ship it as data.
+        """
+        from app.modules.exports.specs import spec_pack
+
+        pack = spec_pack(spec_key)
+        if pack is None:
+            raise NotFoundError(f"No spec pack '{spec_key}'")
+        profile = await self.create_profile(
+            code=pack["code"], name=name or pack["name"],
+            academic_year=academic_year or pack["academic_year"],
+            description=f"Created from spec pack {spec_key}",
+        )
+        for i, f in enumerate(pack["fields"], start=1):
+            self.session.add(ReportFieldMapping(
+                profile_id=profile.id, target_field=f["field"], position=i,
+                source_expression=f.get("source", "") or "",
+                transform=f.get("transform"), default_value=f.get("default"),
+                required=f.get("required", True), allowed_values=f.get("allowed"),
+            ))
+        await self.session.commit()
+        await self.session.refresh(profile)
+        return profile
+
     # ---------------- the flat record every mapping reads from ----------------
 
     async def build_records(self) -> list[dict]:
@@ -283,6 +339,11 @@ class StatutoryEngine:
             if ev.intensity_pct is not None:
                 latest_intensity[ev.student_id] = ev.intensity_pct  # last by start_date wins
 
+        # ICR G5 — HUSID is generated from the institution code + entry year + a sequence, so it is
+        # never hand-keyed. The institution code is a setting (0000 until Registry sets the real one).
+        from app.modules.settings.service import setting_value
+        inst_code = await setting_value(self.session, "statutory.husid_institution_code")
+
         records = []
         for student, person in rows:
             fa = funding.get(student.id)
@@ -302,6 +363,11 @@ class StatutoryEngine:
                         student.id,
                         FULL_TIME_INTENSITY_PCT if student.study_mode is StudyMode.full_time
                         else DEFAULT_PART_TIME_INTENSITY_PCT,
+                    ),
+                    "husid": husid(
+                        inst_code,
+                        student.start_date.year if student.start_date else None,
+                        student.student_ref,
                     ),
                 },
                 "person": {
@@ -337,8 +403,14 @@ class StatutoryEngine:
         header = [m.target_field for m in mappings]
         rows, issues = [], []
 
+        import re
+
+        from app.modules.exports.specs import rules_for
+        spec_rules = rules_for(profile.code)
+
         for record in records:
             out_row, ref = [], record["student"]["ref"]
+            values: dict[str, str] = {}
             for m in mappings:
                 raw = resolve(record, m.source_expression)
                 if raw is None and m.default_value is not None:
@@ -358,7 +430,31 @@ class StatutoryEngine:
                         "message": f"'{text}' is not an accepted value for '{m.target_field}'.",
                         "allowed": m.allowed_values,
                     })
+                values[m.target_field] = text
                 out_row.append(text)
+
+            # ICR G5 — spec-level cross-field / format rules (e.g. ENDDATE >= COMDATE).
+            # Cross-field / format issues are advisory (severity "warning"): they surface in the
+            # report for Registry to review but, unlike an unmapped required field or a bad coding
+            # value, they don't block sign-off.
+            for rule in spec_rules:
+                flds = rule.get("fields", [])
+                if rule["kind"] == "order" and len(flds) == 2:
+                    a, b = values.get(flds[0], ""), values.get(flds[1], "")
+                    if a and b and a > b:  # YYYYMMDD compares correctly as text
+                        issues.append({
+                            "studentRef": ref, "field": flds[1], "severity": "warning",
+                            "message": f"{flds[1]} ({b}) — {rule.get('message', 'ordering rule failed')} "
+                                       f"({flds[0]} is {a}).",
+                        })
+                elif rule["kind"] == "format_yyyymmdd":
+                    for fld in flds:
+                        v = values.get(fld, "")
+                        if v and not re.fullmatch(r"\d{8}", v):
+                            issues.append({
+                                "studentRef": ref, "field": fld, "severity": "warning",
+                                "message": f"{fld} ('{v}') {rule.get('message', 'must be YYYYMMDD')}.",
+                            })
             rows.append(out_row)
 
         return {
@@ -368,8 +464,10 @@ class StatutoryEngine:
             "rowCount": len(rows),
             "validation": {
                 "errors": sum(1 for i in issues if i["severity"] == "error"),
+                "warnings": sum(1 for i in issues if i["severity"] == "warning"),
                 "issues": issues,
-                "valid": not issues,
+                # Sign-off blocks on hard errors only; warnings (cross-field/format) are advisory.
+                "valid": not any(i["severity"] == "error" for i in issues),
             },
         }
 

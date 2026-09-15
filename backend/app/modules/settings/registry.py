@@ -81,6 +81,14 @@ SETTINGS: dict[str, SettingDef] = {s.key: s for s in [
                     "window a student's study-intensity history into a per-year FTE (STULOAD).",
         type="int", default=8, min=1, max=12,
     ),
+    SettingDef(
+        key="statutory.husid_institution_code", group="Statutory reporting",
+        label="HUSID institution code",
+        description="The 4-digit HESA institution code used to generate each student's HUSID "
+                    "(institution code + entry year + sequence + check digit), so it is never "
+                    "hand-keyed. Set this to your registered HESA code before the first return.",
+        type="str", default="0000",
+    ),
     # --- Supervision policy ---
     SettingDef(
         key="supervision.max_supervisees", group="Supervision policy",

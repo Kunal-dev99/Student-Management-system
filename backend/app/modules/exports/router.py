@@ -99,6 +99,13 @@ class SignOffRequest(BaseModel):
     notes: str | None = None
 
 
+class FromSpecRequest(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+    spec_key: str
+    academic_year: str | None = None
+    name: str | None = None
+
+
 profiles_router = APIRouter(prefix="/report-profiles", tags=["exports"])
 
 
@@ -121,6 +128,27 @@ async def list_transforms(_=Depends(require_permission("reporting.read"))) -> di
     from app.modules.exports.statutory import TRANSFORMS
 
     return {"transforms": sorted(TRANSFORMS)}
+
+
+@profiles_router.get("/specs", summary="Published spec packs a profile can be created from")
+async def list_specs(_=Depends(require_permission("reporting.read"))) -> dict:
+    from app.modules.exports.specs import list_spec_packs
+
+    return {"specs": list_spec_packs()}
+
+
+@profiles_router.post("/from-spec", status_code=201,
+                      summary="Create a profile pre-mapped from a published spec (ICR G5)")
+async def create_from_spec(
+    body: FromSpecRequest,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("admin.configure")),
+) -> dict:
+    eng = _engine(session)
+    profile = await eng.from_spec(
+        spec_key=body.spec_key, academic_year=body.academic_year, name=body.name,
+    )
+    return await eng.profile_detail(profile.id)
 
 
 @profiles_router.post("", status_code=201, summary="Create a statutory profile")
