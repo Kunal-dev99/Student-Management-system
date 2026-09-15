@@ -32,6 +32,14 @@ class ProgressionRepository:
             await self.session.execute(select(MilestoneDefinition).where(MilestoneDefinition.id == def_id))
         ).scalar_one_or_none()
 
+    async def count_milestones_for_definition(self, def_id: uuid.UUID) -> int:
+        from sqlalchemy import func
+
+        return (await self.session.execute(
+            select(func.count()).select_from(Milestone)
+            .where(Milestone.milestone_definition_id == def_id)
+        )).scalar_one()
+
     async def milestones_for_student(self, student_id: uuid.UUID) -> list[Milestone]:
         rows = await self.session.execute(
             select(Milestone).where(Milestone.student_id == student_id).order_by(Milestone.due_date)

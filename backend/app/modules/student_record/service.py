@@ -8,13 +8,27 @@ from app.core.errors import ConflictError, NotFoundError
 from app.modules.person.repository import PersonRepository
 from app.modules.person.service import PersonService
 from app.modules.student_record.constants import StudentStatus, StudyMode
-from app.modules.student_record.models import ResearchProject, Student
+from app.modules.student_record.models import Programme, ResearchProject, Student
 from app.modules.student_record.repository import StudentRepository
 
 
 def _generate_student_ref() -> str:
     year = datetime.now(timezone.utc).year
     return f"PGR-{year}-{uuid.uuid4().hex[:6].upper()}"
+
+
+def _add_months(start: date, months: int) -> date:
+    """Add whole months to a date, clamping the day to the target month's length."""
+    total = start.month - 1 + months
+    year = start.year + total // 12
+    month = total % 12 + 1
+    # Clamp (e.g. 31 Jan + 1 month -> 28/29 Feb).
+    for day in (start.day, 28, 29, 30, 31):
+        try:
+            return date(year, month, min(day, start.day))
+        except ValueError:
+            continue
+    return date(year, month, 28)
 
 
 class StudentService:
@@ -41,6 +55,32 @@ class StudentService:
         await self.repo.session.commit()
         await self.repo.session.refresh(student)
         return student
+
+    # --- Programme administration (ICR G3) ---
+    async def list_programmes(self) -> list[Programme]:
+        return await self.repo.list_programmes()
+
+    async def create_programme(self, data) -> Programme:
+        if await self.repo.get_programme_by_code(data.code):
+            raise ConflictError(f"A programme with code '{data.code}' already exists")
+        prog = Programme(**data.model_dump())
+        self.repo.session.add(prog)
+        await self.repo.session.commit()
+        await self.repo.session.refresh(prog)
+        return prog
+
+    async def update_programme(self, programme_id: uuid.UUID, patch: dict) -> Programme:
+        prog = await self.repo.get_programme(programme_id)
+        if prog is None:
+            raise NotFoundError("Programme not found")
+        new_code = patch.get("code")
+        if new_code and new_code != prog.code and await self.repo.get_programme_by_code(new_code):
+            raise ConflictError(f"A programme with code '{new_code}' already exists")
+        for key, value in patch.items():
+            setattr(prog, key, value)
+        await self.repo.session.commit()
+        await self.repo.session.refresh(prog)
+        return prog
 
     async def create_from_application(
         self,
@@ -134,6 +174,18 @@ class StudentService:
             person_id = person.id
         else:
             await person_service.get_person(person_id)  # 404 if the person does not exist
+
+        # ICR G3 — when no end date is supplied, derive it from the programme's expected duration
+        # (part-time stretches it by the institution's part-time factor), so an enrolled student
+        # has a baseline for suspensions/extensions to adjust later.
+        if expected_end_date is None and programme_id is not None:
+            prog = await self.repo.get_programme(programme_id)
+            if prog is not None and prog.duration_months:
+                months = prog.duration_months
+                if study_mode is StudyMode.part_time:
+                    from app.modules.student_record.constants import PART_TIME_FACTOR
+                    months = int(months * PART_TIME_FACTOR)
+                expected_end_date = _add_months(start_date or date.today(), months)
 
         student = await self.create_from_application(
             person_id=person_id,

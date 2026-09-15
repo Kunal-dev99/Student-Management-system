@@ -30,6 +30,16 @@ class MilestoneDefinitionCreate(_Camel):
     possible_outcomes: dict | None = None
 
 
+class MilestoneDefinitionUpdate(_Camel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    due_offset_days: int | None = None
+    trigger: dict | None = None
+    required_documents: dict | None = None
+    review_panel: dict | None = None
+    assessment_criteria: dict | None = None
+    possible_outcomes: dict | None = None
+
+
 class MilestoneDefinitionOut(_Camel):
     id: uuid.UUID
     programme_id: uuid.UUID

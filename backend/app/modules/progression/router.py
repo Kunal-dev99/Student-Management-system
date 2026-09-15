@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import require_permission
@@ -18,6 +18,7 @@ from app.modules.progression.schemas import (
     DecideRequest,
     MilestoneDefinitionCreate,
     MilestoneDefinitionOut,
+    MilestoneDefinitionUpdate,
     MilestoneOut,
     MilestoneOverrideRequest,
     PanelMemberOut,
@@ -55,6 +56,31 @@ async def create_definition(
     _=Depends(require_permission("admin.configure")),
 ) -> MilestoneDefinitionOut:
     return MilestoneDefinitionOut.model_validate(await _svc(session).create_definition(programme_id, body))
+
+
+@programme_router.patch("/{programme_id}/milestone-definitions/{definition_id}",
+                        response_model=MilestoneDefinitionOut, summary="Edit a milestone definition")
+async def update_definition(
+    programme_id: uuid.UUID,
+    definition_id: uuid.UUID,
+    body: MilestoneDefinitionUpdate,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("admin.configure")),
+) -> MilestoneDefinitionOut:
+    defn = await _svc(session).update_definition(definition_id, body.model_dump(exclude_unset=True))
+    return MilestoneDefinitionOut.model_validate(defn)
+
+
+@programme_router.delete("/{programme_id}/milestone-definitions/{definition_id}", status_code=204,
+                         summary="Delete a milestone definition (only if unused)")
+async def delete_definition(
+    programme_id: uuid.UUID,
+    definition_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("admin.configure")),
+) -> Response:
+    await _svc(session).delete_definition(definition_id)
+    return Response(status_code=204)
 
 
 # --- Milestones (per student, row-scoped) ---

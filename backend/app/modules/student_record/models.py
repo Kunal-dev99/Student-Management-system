@@ -60,6 +60,11 @@ class Programme(UUIDMixin, TimestampMixin, Base):
     # Target credit total for a taught programme (e.g. 180 for a UK MSc) — used to validate a
     # student's module load is complete before classification. NULL for research programmes.
     taught_total_credits: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # ICR G3 — programme admin. Expected duration drives a new student's expected end date at
+    # enrolment; the supervision-meeting interval, when set, overrides the institution-wide
+    # default for this programme (NULL = fall back to the global setting).
+    duration_months: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    supervision_meeting_interval_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class Student(UUIDMixin, TimestampMixin, Base):

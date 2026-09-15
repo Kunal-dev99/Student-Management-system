@@ -86,6 +86,37 @@ class StudentUpdate(_Camel):
     research_area_id: uuid.UUID | None = None
 
 
+class ProgrammeOut(_Camel):
+    id: uuid.UUID
+    name: str
+    code: str
+    department_id: uuid.UUID | None = None
+    programme_type: ProgrammeType = ProgrammeType.research
+    taught_total_credits: int | None = None
+    duration_months: int | None = None
+    supervision_meeting_interval_days: int | None = None
+
+
+class ProgrammeCreate(_Camel):
+    name: str
+    code: str
+    department_id: uuid.UUID | None = None
+    programme_type: ProgrammeType = ProgrammeType.research
+    taught_total_credits: int | None = None
+    duration_months: int | None = None
+    supervision_meeting_interval_days: int | None = None
+
+
+class ProgrammeUpdate(_Camel):
+    name: str | None = None
+    code: str | None = None
+    department_id: uuid.UUID | None = None
+    programme_type: ProgrammeType | None = None
+    taught_total_credits: int | None = None
+    duration_months: int | None = None
+    supervision_meeting_interval_days: int | None = None
+
+
 class EnrolRequest(_Camel):
     """Enrol an already-accepted student directly, bypassing the recruitment funnel (ICR G2).
 

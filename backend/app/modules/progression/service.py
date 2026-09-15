@@ -51,6 +51,30 @@ class ProgressionService:
         await self.session.refresh(defn)
         return defn
 
+    async def update_definition(self, def_id: uuid.UUID, patch: dict) -> MilestoneDefinition:
+        defn = await self.repo.get_definition(def_id)
+        if defn is None:
+            raise NotFoundError("Milestone definition not found")
+        for key, value in patch.items():
+            setattr(defn, key, value)
+        await self.session.commit()
+        await self.session.refresh(defn)
+        return defn
+
+    async def delete_definition(self, def_id: uuid.UUID) -> None:
+        defn = await self.repo.get_definition(def_id)
+        if defn is None:
+            raise NotFoundError("Milestone definition not found")
+        # A definition already instantiated for students is referenced by their milestones;
+        # removing it would strand those. Block it with a clear message rather than a DB error.
+        in_use = await self.repo.count_milestones_for_definition(def_id)
+        if in_use:
+            raise ConflictError(
+                f"This milestone is already scheduled for {in_use} student(s); it cannot be deleted."
+            )
+        await self.session.delete(defn)
+        await self.session.commit()
+
     # --- Milestones (instances) ---
     async def _generate_next(self, student: Student) -> Milestone | None:
         """Create a milestone for the next programme definition not yet instantiated."""

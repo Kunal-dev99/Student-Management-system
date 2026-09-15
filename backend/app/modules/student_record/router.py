@@ -25,6 +25,9 @@ from app.modules.student_record.schemas import (
     LifecycleDecision,
     LifecycleEventOut,
     LifecycleEventRequest,
+    ProgrammeCreate,
+    ProgrammeOut,
+    ProgrammeUpdate,
     ResearchProjectOut,
     ReturnRequest,
     StudentOut,
@@ -42,13 +45,33 @@ def _svc(session: AsyncSession) -> StudentService:
     return StudentService(StudentRepository(session))
 
 
-@programmes_router.get("", summary="List programmes")
+@programmes_router.get("", response_model=list[ProgrammeOut], summary="List programmes")
 async def list_programmes(
     session: AsyncSession = Depends(get_session),
     _=Depends(require_permission("student.read")),
-) -> list[dict]:
-    rows = await StudentRepository(session).list_programmes()
-    return [{"id": str(p.id), "name": p.name, "code": p.code} for p in rows]
+) -> list[ProgrammeOut]:
+    rows = await _svc(session).list_programmes()
+    return [ProgrammeOut.model_validate(p) for p in rows]
+
+
+@programmes_router.post("", response_model=ProgrammeOut, status_code=201, summary="Create a programme")
+async def create_programme(
+    body: ProgrammeCreate,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("admin.configure")),
+) -> ProgrammeOut:
+    return ProgrammeOut.model_validate(await _svc(session).create_programme(body))
+
+
+@programmes_router.patch("/{programme_id}", response_model=ProgrammeOut, summary="Update a programme")
+async def update_programme(
+    programme_id: uuid.UUID,
+    body: ProgrammeUpdate,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("admin.configure")),
+) -> ProgrammeOut:
+    prog = await _svc(session).update_programme(programme_id, body.model_dump(exclude_unset=True))
+    return ProgrammeOut.model_validate(prog)
 
 
 async def scoped_ids(principal: Principal, session: AsyncSession) -> list[uuid.UUID] | None:

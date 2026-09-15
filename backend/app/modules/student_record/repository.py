@@ -73,6 +73,16 @@ class StudentRepository:
         res = await self.session.execute(select(Programme).order_by(Programme.name))
         return list(res.scalars().all())
 
+    async def get_programme(self, programme_id: uuid.UUID) -> Programme | None:
+        return (
+            await self.session.execute(select(Programme).where(Programme.id == programme_id))
+        ).scalar_one_or_none()
+
+    async def get_programme_by_code(self, code: str) -> Programme | None:
+        return (
+            await self.session.execute(select(Programme).where(Programme.code == code))
+        ).scalar_one_or_none()
+
     async def add(self, student: Student) -> Student:
         self.session.add(student)
         await self.session.flush()
