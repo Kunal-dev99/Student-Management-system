@@ -63,6 +63,16 @@ class SettingDef:
 
 
 SETTINGS: dict[str, SettingDef] = {s.key: s for s in [
+    # --- Recruitment ---
+    SettingDef(
+        key="recruitment.enabled", group="Recruitment",
+        label="Recruitment & admissions in scope",
+        description="On (default): the platform runs the full applicant→offer→enrolment funnel. "
+                    "Off: an institution that recruits in a separate system — the student record "
+                    "starts at the accepted student. Research demand, Opportunities, Recruitment "
+                    "and Admissions are hidden, and students are added via Enrol / cohort import.",
+        type="bool", default=True,
+    ),
     # --- Supervision policy ---
     SettingDef(
         key="supervision.max_supervisees", group="Supervision policy",

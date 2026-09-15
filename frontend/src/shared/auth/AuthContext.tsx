@@ -27,6 +27,8 @@ export interface Principal {
   personId: string | null
   roles: string[]
   permissions: string[]
+  /** Institution feature flags (e.g. { recruitment: false }) — shape the UI, not enforcement. */
+  features?: Record<string, boolean>
 }
 
 interface AuthState {
@@ -35,6 +37,8 @@ interface AuthState {
   login: (email: string, password: string) => Promise<void>
   logout: () => void
   hasPermission: (code: string) => boolean
+  /** A feature is on unless the institution explicitly turned it off (default-on). */
+  hasFeature: (name: string) => boolean
 }
 
 const AuthCtx = createContext<AuthState | null>(null)
@@ -119,12 +123,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [principal],
   )
 
+  const hasFeature = useCallback(
+    (name: string) => principal?.features?.[name] ?? true,
+    [principal],
+  )
+
   // Memoise the context value so every `useAuth()` consumer isn't invalidated on every
   // parent render. Without this, AppShell's auth read cascades a full sidebar re-render
   // on every route change — the perceptible click delay users noticed.
   const value = useMemo(
-    () => ({ principal, loading, login, logout, hasPermission }),
-    [principal, loading, login, logout, hasPermission],
+    () => ({ principal, loading, login, logout, hasPermission, hasFeature }),
+    [principal, loading, login, logout, hasPermission, hasFeature],
   )
 
   return <AuthCtx.Provider value={value}>{children}</AuthCtx.Provider>

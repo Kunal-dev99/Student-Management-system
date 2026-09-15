@@ -74,8 +74,13 @@ const baseAdminNav: NavItem[] = [
   { href: '/settings', label: 'Settings', icon: Settings },
 ]
 
+// ICR G2 — the recruitment funnel. Hidden wholesale when an institution recruits in a separate
+// system (recruitment.enabled = false); the student record then starts at the accepted student.
+const RECRUITMENT_ROUTES = new Set(['/research', '/recruitment', '/admissions'])
+
 export function AppShell({ children }: { children: ReactNode }) {
-  const { principal, logout, hasPermission } = useAuth()
+  const { principal, logout, hasPermission, hasFeature } = useAuth()
+  const recruitmentOn = hasFeature('recruitment')
   const tenant = useTenant()
   const email = principal?.email ?? 'user@institution'
   const name = email.split('@')[0]
@@ -109,6 +114,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { filteredMainNav, adminNav, advancedNav } = useMemo(() => {
     const visible = (items: NavItem[]) =>
       items.filter((item) => {
+        if (!recruitmentOn && RECRUITMENT_ROUTES.has(item.href)) return false
         const route = findRouteAccess(item.href)
         return !route || canSeeRoute(route, roles, hasPermission)
       })
@@ -130,7 +136,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     }
     // `roles.join` gives a stable dep instead of the fresh array reference each render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roles.join(','), hasPermission])
+  }, [roles.join(','), hasPermission, recruitmentOn])
 
   // Stable callback identities — otherwise Header/Launcher get a fresh function on every
   // AppShell render and can't skip their own re-renders even if they're memoised.

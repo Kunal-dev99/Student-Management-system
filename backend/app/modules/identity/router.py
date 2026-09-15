@@ -71,7 +71,12 @@ async def password_reset_confirm(
 
 
 @me_router.get("/me", response_model=MeResponse, summary="Current principal, roles, permissions")
-async def me(principal: Principal = Depends(get_current_principal)) -> MeResponse:
+async def me(
+    principal: Principal = Depends(get_current_principal),
+    session: AsyncSession = Depends(get_session),
+) -> MeResponse:
+    from app.modules.settings.service import setting_value
+
     return MeResponse(
         authenticated=True,
         user_id=principal.user_id,
@@ -79,4 +84,7 @@ async def me(principal: Principal = Depends(get_current_principal)) -> MeRespons
         person_id=principal.person_id,
         roles=principal.roles,
         permissions=principal.permissions,
+        features={
+            "recruitment": bool(await setting_value(session, "recruitment.enabled")),
+        },
     )

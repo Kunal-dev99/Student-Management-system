@@ -42,3 +42,7 @@ class MeResponse(_CamelModel):
     person_id: uuid.UUID | None = None
     roles: list[str] = Field(default_factory=list)
     permissions: list[str] = Field(default_factory=list)
+    # Institution feature flags the client uses to shape the UI (e.g. hide the recruitment
+    # funnel when an institution recruits elsewhere — ICR G2). The API stays the enforcement
+    # layer; these only drive what the nav shows.
+    features: dict[str, bool] = Field(default_factory=dict)
