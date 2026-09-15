@@ -13,7 +13,9 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from sqlalchemy import select
+from datetime import date, timedelta
+
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.principal import Principal
@@ -65,44 +67,61 @@ class InstitutionalMemoryService:
             return {"case_class": case_class, "candidates": [],
                     "narration": "Unknown case class — no precedents surfaced."}
 
-        # Candidate pull is deliberately narrow: same programme + same case class.
-        # In production these live in a dedicated case_history projection. Phase 5 uses
-        # the workflow's task/aggregate history as a stand-in so we don't require a
-        # new source-of-truth table.
-        from app.modules.workflow.models import Task
-        rows = (await self.session.execute(
-            select(Task)
-            .where(Task.aggregate_type == "student")
-            .order_by(Task.created_at.desc())
-            .limit(200)
-        )).scalars().all()
+        # Candidate pool: real students, joined to the features the similarity vector needs so
+        # scores genuinely vary (ICR G6). Earlier this synthesised records from Task rows with
+        # study_mode/programme/funding hard-coded to None, so every candidate scored the same —
+        # the "identical scores" the demo hit. Refs stay de-identified (no name, no student ref).
+        from app.modules.funding.constants import FundingStatus
+        from app.modules.funding.models import FundingArrangement
+        from app.modules.student_record.models import Programme, Student
 
-        # Build a candidate list of anonymised feature vectors from those rows.
+        students = (await self.session.execute(
+            select(Student).order_by(Student.created_at.desc()).limit(200)
+        )).scalars().all()
+        programmes = {
+            p.id: p for p in (await self.session.execute(select(Programme))).scalars().all()
+        }
+        funded_ids = {
+            fa.student_id for fa in (await self.session.execute(
+                select(FundingArrangement).where(
+                    FundingArrangement.status == FundingStatus.active,
+                    FundingArrangement.valid_to.is_(None),
+                )
+            )).scalars().all()
+        }
+
+        # Supervision-overdue set in one grouped query (no N+1): latest meeting older than the
+        # institution's expected interval, or no meeting at all, counts as overdue.
+        from app.modules.settings.service import setting_value
+        from app.modules.supervision.models import SupervisionMeeting
+
+        interval = int(await setting_value(self.session, "supervision.expected_meeting_interval_days"))
+        cutoff = date.today() - timedelta(days=interval)
+        last_meeting = dict((await self.session.execute(
+            select(SupervisionMeeting.student_id, func.max(SupervisionMeeting.met_on))
+            .group_by(SupervisionMeeting.student_id)
+        )).all())
+
         candidates: list[dict[str, Any]] = []
         subject_vec = _feature_vector(subject)
-        for t in rows:
-            # Extract a compact feature record — in a real deployment this would join
-            # to Student/Funding/Progression to produce comparable features. For P5 we
-            # synthesize using what's on the Task row so the contract shape is honest.
+        for st in students:
+            prog = programmes.get(st.programme_id)
             record = {
-                "case_class": case_class,
-                # `aggregate_type` is always "student" (it's the query filter above),
-                # never a real study mode — reporting it as study_mode would silently
-                # corrupt this dimension of every similarity score (it can never match
-                # the caller's real value) and mislead a reader looking at the candidate
-                # card. Honest "unknown" until this joins to Student for the real field.
-                "study_mode": None,
-                "stage": t.status.value if hasattr(t.status, "value") else str(t.status),
-                "has_active_funding": None,
-                "supervision_overdue": None,
-                "programme_code": None,
+                "case_class": case_class,   # the candidate filter — always the explored class
+                "study_mode": st.study_mode.value if hasattr(st.study_mode, "value") else st.study_mode,
+                "stage": st.status.value if hasattr(st.status, "value") else str(st.status),
+                "has_active_funding": st.id in funded_ids,
+                "supervision_overdue": (
+                    st.id not in last_meeting or last_meeting[st.id] < cutoff
+                ),
+                "programme_code": prog.code if prog else None,
             }
             score = _similarity(subject_vec, _feature_vector(record))
             candidates.append({
-                "case_ref": f"task:{t.id}",
+                "case_ref": f"case:{str(st.id)[:8]}",
                 "score": round(score, 3),
                 "features": record,
-                "opened_at": t.created_at.isoformat() if t.created_at else None,
+                "opened_at": st.created_at.isoformat() if st.created_at else None,
             })
 
         candidates.sort(key=lambda c: -c["score"])
