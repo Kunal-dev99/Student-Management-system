@@ -10,7 +10,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/shared/api/client'
 
-export type LifecycleEventType = 'suspension' | 'extension' | 'mode_change'
+export type LifecycleEventType = 'suspension' | 'extension' | 'mode_change' | 'intensity_change'
 export type LifecycleEventStatus = 'requested' | 'approved' | 'rejected' | 'cancelled'
 export type StudyMode = 'full_time' | 'part_time'
 
@@ -25,11 +25,27 @@ export interface LifecycleEvent {
   extensionDays: number | null
   previousMode: StudyMode | null
   newMode: StudyMode | null
+  previousIntensityPct: number | null
+  intensityPct: number | null
   reason: string | null
   daysApplied: number | null
   decisionNote: string | null
   decidedAt: string | null
 }
+
+export interface IntensityPeriod { from: string; to: string; pct: number }
+export interface IntensityOverview {
+  studentId: string
+  currentPct: number | null
+  periods: IntensityPeriod[]
+}
+
+export const useStudentIntensity = (studentId: string) =>
+  useQuery({
+    queryKey: ['intensity', studentId],
+    queryFn: () => api.get<IntensityOverview>(`/students/${studentId}/intensity`),
+    enabled: !!studentId,
+  })
 
 export interface RecalculationBreakdown {
   eventType: LifecycleEventType
@@ -59,6 +75,7 @@ export interface LifecycleEventRequest {
   endDate?: string
   extensionDays?: number
   newMode?: StudyMode
+  intensityPct?: number
 }
 
 export const useLifecycleEvents = (studentId: string) =>
@@ -75,6 +92,7 @@ export const useLifecycleEvents = (studentId: string) =>
 function invalidate(qc: ReturnType<typeof useQueryClient>, studentId: string) {
   qc.invalidateQueries({ queryKey: ['lifecycle', studentId] })
   qc.invalidateQueries({ queryKey: ['student', studentId] })
+  qc.invalidateQueries({ queryKey: ['intensity', studentId] })
   qc.invalidateQueries({ queryKey: ['milestones', studentId] })
   qc.invalidateQueries({ queryKey: ['students'] })
   qc.invalidateQueries({ queryKey: ['tasks'] })

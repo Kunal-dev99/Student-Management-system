@@ -22,7 +22,7 @@ import { useAuth } from '@/shared/auth/AuthContext'
 import type { Student } from '@/features/students/api'
 import {
   useApproveLifecycleEvent, useLifecycleEvents, useRecordReturn, useRejectLifecycleEvent,
-  useRequestLifecycleEvent,
+  useRequestLifecycleEvent, useStudentIntensity,
   type LifecycleEvent, type LifecycleEventStatus, type LifecycleEventType, type StudyMode,
 } from './api'
 
@@ -30,6 +30,7 @@ const EVENT_LABELS: Record<LifecycleEventType, string> = {
   suspension: 'Suspension',
   extension: 'Extension',
   mode_change: 'Mode change',
+  intensity_change: 'Intensity change',
 }
 
 const STATUS_VARIANT: Record<LifecycleEventStatus, 'success' | 'warning' | 'destructive' | 'secondary'> = {
@@ -102,17 +103,20 @@ function RequestDialog({ studentId }: { studentId: string }) {
   const [endDate, setEndDate] = useState('')
   const [extensionDays, setExtensionDays] = useState('')
   const [newMode, setNewMode] = useState<StudyMode>('part_time')
+  const [intensityPct, setIntensityPct] = useState('')
   const [reason, setReason] = useState('')
 
   const reset = () => {
     setEventType('suspension'); setStartDate(''); setEndDate('')
-    setExtensionDays(''); setNewMode('part_time'); setReason('')
+    setExtensionDays(''); setNewMode('part_time'); setIntensityPct(''); setReason('')
   }
 
+  const intensityValid = Number(intensityPct) >= 1 && Number(intensityPct) <= 100
   const complete =
     !!reason.trim() && !!startDate &&
     (eventType !== 'suspension' || !!endDate) &&
-    (eventType !== 'extension' || Number(extensionDays) > 0)
+    (eventType !== 'extension' || Number(extensionDays) > 0) &&
+    (eventType !== 'intensity_change' || intensityValid)
 
   const submit = async () => {
     try {
@@ -123,6 +127,7 @@ function RequestDialog({ studentId }: { studentId: string }) {
         endDate: eventType === 'suspension' ? endDate : undefined,
         extensionDays: eventType === 'extension' ? Number(extensionDays) : undefined,
         newMode: eventType === 'mode_change' ? newMode : undefined,
+        intensityPct: eventType === 'intensity_change' ? Number(intensityPct) : undefined,
       })
       toast({
         title: 'Request submitted',
@@ -200,6 +205,20 @@ function RequestDialog({ studentId }: { studentId: string }) {
             </div>
           )}
 
+          {eventType === 'intensity_change' && (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="lc-ieff">Effective date</Label>
+                <Input id="lc-ieff" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="lc-pct">Study intensity (% FTE)</Label>
+                <Input id="lc-pct" type="number" min={1} max={100} value={intensityPct}
+                  onChange={(e) => setIntensityPct(e.target.value)} placeholder="e.g. 50" />
+              </div>
+            </div>
+          )}
+
           <div className="space-y-1.5">
             <Label htmlFor="lc-reason">Reason</Label>
             <Textarea id="lc-reason" className="min-h-[72px]" value={reason}
@@ -264,6 +283,42 @@ function ReturnDialog({ studentId }: { studentId: string }) {
   )
 }
 
+/** ICR G4 — a compact FTE-% timeline: one segment per intensity period, width ∝ its duration. */
+function IntensityStrip({ studentId }: { studentId: string }) {
+  const { data } = useStudentIntensity(studentId)
+  if (!data || data.periods.length === 0) return null
+  const spans = data.periods.map((p) => Math.max(1, dayDelta(p.from, p.to)))
+  const total = spans.reduce((a, b) => a + b, 0) || 1
+  // Only worth drawing when intensity actually varied (or isn't a flat 100%).
+  const varied = new Set(data.periods.map((p) => p.pct)).size > 1 || (data.currentPct ?? 100) !== 100
+  if (!varied) return null
+  return (
+    <div className="mb-4">
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-helper">Study intensity (FTE)</span>
+        <span className="text-sm font-medium">{data.currentPct}% now</span>
+      </div>
+      <div className="flex h-6 w-full overflow-hidden rounded-sm border border-border" title="Study intensity over time">
+        {data.periods.map((p, i) => (
+          <div key={i}
+            className="flex items-center justify-center text-[10px] font-medium text-white"
+            style={{
+              width: `${(spans[i] / total) * 100}%`,
+              backgroundColor: `hsl(var(--primary) / ${0.35 + 0.55 * (p.pct / 100)})`,
+            }}
+            title={`${p.from} → ${p.to}: ${p.pct}%`}>
+            {(spans[i] / total) > 0.08 ? `${p.pct}%` : ''}
+          </div>
+        ))}
+      </div>
+      <div className="flex justify-between text-[10px] text-muted-foreground mt-0.5 num">
+        <span>{data.periods[0].from}</span>
+        <span>{data.periods[data.periods.length - 1].to}</span>
+      </div>
+    </div>
+  )
+}
+
 export function LifecyclePanel({ studentId, student }: { studentId: string; student?: Student }) {
   const { toast } = useToast()
   const { hasPermission } = useAuth()
@@ -322,6 +377,8 @@ export function LifecyclePanel({ studentId, student }: { studentId: string; stud
         )}
       </div>
 
+      <IntensityStrip studentId={studentId} />
+
       {events.isLoading ? <Skeleton className="h-24 w-full" /> : (
         events.data && events.data.length > 0 ? (
           <Table>
@@ -343,6 +400,11 @@ export function LifecyclePanel({ studentId, student }: { studentId: string; stud
                     {e.eventType === 'mode_change' && e.newMode && (
                       <span className="text-muted-foreground font-normal">
                         {' '}({(e.previousMode ?? '?').replace(/_/g, ' ')} → {e.newMode.replace(/_/g, ' ')})
+                      </span>
+                    )}
+                    {e.eventType === 'intensity_change' && e.intensityPct != null && (
+                      <span className="text-muted-foreground font-normal">
+                        {' '}({e.previousIntensityPct ?? '?'}% → {e.intensityPct}%)
                       </span>
                     )}
                   </TableCell>
