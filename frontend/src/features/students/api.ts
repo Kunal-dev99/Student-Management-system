@@ -1,7 +1,7 @@
 'use client'
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, type ListResponse } from '@/shared/api/client'
+import { api, uploadFile, type ListResponse } from '@/shared/api/client'
 
 export type StudentStatus =
   | 'prospective' | 'registered' | 'active' | 'on_leave' | 'suspended'
@@ -84,6 +84,52 @@ export const useEnrolStudent = () => {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (body: EnrolStudentPayload) => api.post<Student>('/students/enrol', body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['students'] }),
+  })
+}
+
+// --- ICR G2 (slice B) — cohort CSV import ---
+
+export type ImportAction = 'create' | 'attach' | 'skip' | 'error'
+
+export interface ImportRow {
+  line: number
+  name: string
+  email: string | null
+  studentRef: string | null
+  programmeCode: string | null
+  programmeName: string | null
+  studyMode: string
+  status: string
+  funder: string | null
+  action: ImportAction
+  messages: string[]
+}
+
+export interface ImportResult {
+  committed: boolean
+  total: number
+  toCreate: number
+  skipped: number
+  errors: number
+  rows: ImportRow[]
+}
+
+const toForm = (file: File) => {
+  const fd = new FormData()
+  fd.append('file', file)
+  return fd
+}
+
+/** Validate a cohort CSV without writing anything. */
+export const useImportPreview = () =>
+  useMutation({ mutationFn: (file: File) => uploadFile<ImportResult>('/students/import/preview', toForm(file)) })
+
+/** Enrol the cohort (idempotent on student ref). */
+export const useImportCommit = () => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (file: File) => uploadFile<ImportResult>('/students/import/commit', toForm(file)),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['students'] }),
   })
 }

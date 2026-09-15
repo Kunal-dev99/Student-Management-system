@@ -7,15 +7,17 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, File, Query, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.authorization import student_scope
 from app.core.dependencies import get_current_principal, require_permission
+from app.core.errors import ValidationAppError
 from app.core.pagination import PageParams, list_envelope, page_params
 from app.core.principal import Principal
 from app.db.session import get_session
 from app.modules.student_record.constants import StudentStatus
+from app.modules.student_record.import_service import CohortImportService
 from app.modules.student_record.repository import StudentRepository
 from app.modules.student_record.lifecycle import LifecycleService
 from app.modules.student_record.schemas import (
@@ -119,6 +121,33 @@ async def enrol_student(
         funding=body.funding,
     )
     return StudentOut.model_validate(student)
+
+
+async def _read_csv(file: UploadFile) -> bytes:
+    data = await file.read()
+    if not data:
+        raise ValidationAppError("The file is empty.")
+    if len(data) > 5 * 1024 * 1024:
+        raise ValidationAppError("File too large (limit 5 MB).")
+    return data
+
+
+@router.post("/import/preview", summary="Validate a cohort CSV without writing anything")
+async def import_preview(
+    file: UploadFile = File(...),
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("student.write")),
+) -> dict:
+    return await CohortImportService(session).preview(await _read_csv(file))
+
+
+@router.post("/import/commit", status_code=201, summary="Enrol a cohort from CSV (idempotent on ref)")
+async def import_commit(
+    file: UploadFile = File(...),
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("student.write")),
+) -> dict:
+    return await CohortImportService(session).commit(await _read_csv(file))
 
 
 @router.get("/{student_id}", response_model=StudentOut, summary="Get a student (row-scoped)")

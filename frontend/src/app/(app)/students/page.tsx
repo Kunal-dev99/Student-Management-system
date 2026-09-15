@@ -11,6 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Skeleton } from '@/components/ui/skeleton'
 import { useCan } from '@/shared/auth/Can'
 import { EnrolStudentDialog } from '@/features/students/EnrolStudentDialog'
+import { CohortImportDialog } from '@/features/students/CohortImportDialog'
 import { useStudents, type StudentStatus } from '@/features/students/api'
 
 const PAGE_SIZE = 50
@@ -56,7 +57,15 @@ export default function StudentsPage() {
 
   return (
     <>
-      <PageHeader title="Students" actions={canEnrol ? <EnrolStudentDialog /> : undefined} />
+      <PageHeader
+        title="Students"
+        actions={canEnrol ? (
+          <div className="flex items-center gap-2">
+            <CohortImportDialog />
+            <EnrolStudentDialog />
+          </div>
+        ) : undefined}
+      />
       <div className="px-6 pb-6 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <SearchInput

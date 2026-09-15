@@ -56,6 +56,7 @@ class StudentService:
         research_opportunity_id: uuid.UUID | None = None,
         status: StudentStatus = StudentStatus.registered,
         expected_end_date: date | None = None,
+        student_ref: str | None = None,
     ) -> Student:
         """Create a student, REUSING the applicant's person_id (arch §8.6 key rule).
 
@@ -63,6 +64,8 @@ class StudentService:
         door (ICR G2) passes it explicitly so an accepted-but-not-yet-registered student can be
         recorded as ``prospective``. ``expected_end_date`` is optional here — the offer path
         derives it from the position's advertised duration; the enrol door may pass it directly.
+        ``student_ref`` lets the cohort import carry the institution's own reference (so a re-run
+        is idempotent on it); when omitted a ``PGR-<year>-<hex>`` reference is generated.
         """
         if await self.repo.get_by_person(person_id) is not None:
             raise ConflictError("This person is already a student")
@@ -72,7 +75,7 @@ class StudentService:
 
         student = Student(
             person_id=person_id,
-            student_ref=_generate_student_ref(),
+            student_ref=student_ref or _generate_student_ref(),
             programme_id=programme_id,
             department_id=department_id,
             research_area_id=research_area_id,
@@ -110,6 +113,7 @@ class StudentService:
         study_mode: StudyMode = StudyMode.full_time,
         status: StudentStatus = StudentStatus.registered,
         expected_end_date: date | None = None,
+        student_ref: str | None = None,
         funding=None,
     ) -> Student:
         """Enrol an already-accepted student directly — ICR G2.
@@ -141,6 +145,7 @@ class StudentService:
             research_topic=research_topic,
             status=status,
             expected_end_date=expected_end_date,
+            student_ref=student_ref,
         )
         # Preserve the identity thread: open a student relationship, closing an applicant one if
         # this person happened to have applied through us first (harmless no-op if they didn't).

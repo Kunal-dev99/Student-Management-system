@@ -61,6 +61,10 @@ class StudentRepository:
         res = await self.session.execute(select(Student).where(Student.person_id == person_id))
         return res.scalars().unique().one_or_none()
 
+    async def get_by_ref(self, student_ref: str) -> Student | None:
+        res = await self.session.execute(select(Student).where(Student.student_ref == student_ref))
+        return res.scalars().unique().one_or_none()
+
     async def first_programme(self) -> Programme | None:
         res = await self.session.execute(select(Programme).limit(1))
         return res.scalar_one_or_none()
