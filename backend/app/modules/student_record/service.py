@@ -165,6 +165,16 @@ class StudentService:
 
         await self.repo.session.commit()
         await self.repo.session.refresh(student)
+
+        # ICR G3 — lay down the whole milestone schedule now, so a newly enrolled student shows
+        # every expected milestone up front rather than one at a time. Safe for taught programmes
+        # too (they simply have their own milestone templates, or none).
+        from app.modules.progression.repository import ProgressionRepository
+        from app.modules.progression.service import ProgressionService
+
+        await ProgressionService(
+            ProgressionRepository(self.repo.session)
+        ).generate_full_schedule(student)
         return student
 
     async def summary(self, student_id: uuid.UUID, *, allowed_ids=None) -> dict:

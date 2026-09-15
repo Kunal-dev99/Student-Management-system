@@ -9,6 +9,7 @@ from pydantic.alias_generators import to_camel
 
 from app.modules.progression.constants import (
     AppealStatus,
+    MilestoneOrigin,
     MilestoneStatus,
     PanelRole,
     ProgressionOutcome,
@@ -50,15 +51,27 @@ class ProgressionReviewOut(_Camel):
 class MilestoneOut(_Camel):
     id: uuid.UUID
     student_id: uuid.UUID
-    milestone_definition_id: uuid.UUID
+    milestone_definition_id: uuid.UUID | None = None
     name: str
     due_date: date | None = None
     status: MilestoneStatus
+    origin: MilestoneOrigin = MilestoneOrigin.template
     review: ProgressionReviewOut | None = None
 
 
 class SubmitRequest(_Camel):
     student_submission_ref: str | None = None
+
+
+class MilestoneOverrideRequest(_Camel):
+    """Hand-adjust one student's milestone (ICR G3). At least a due date is expected."""
+    due_date: date | None = None
+    status: MilestoneStatus | None = None
+
+
+class AdHocMilestoneRequest(_Camel):
+    name: str = Field(min_length=1, max_length=200)
+    due_date: date | None = None
 
 
 class DecideRequest(_Camel):

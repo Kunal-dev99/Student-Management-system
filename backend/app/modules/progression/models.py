@@ -14,6 +14,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base, TimestampMixin, UUIDMixin
 from app.modules.progression.constants import (
     AppealStatus,
+    MilestoneOrigin,
     MilestoneStatus,
     PanelRole,
     ProgressionOutcome,
@@ -42,10 +43,23 @@ class Milestone(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "milestone"
 
     student_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("student.id", ondelete="CASCADE"), index=True)
-    milestone_definition_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("milestone_definition.id"), index=True)
+    # Nullable since ICR G3: an ad-hoc milestone added for one student has no backing definition.
+    milestone_definition_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("milestone_definition.id"), index=True, nullable=True
+    )
+    # Only set for ad-hoc milestones; template/override milestones take their name from the
+    # definition. _milestone_dict falls back to this when there is no definition.
+    name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     due_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     status: Mapped[MilestoneStatus] = mapped_column(
         Enum(MilestoneStatus, name="milestone_status"), default=MilestoneStatus.not_started
+    )
+    # ICR G3 — override precedence: a regeneration re-dates template milestones but leaves
+    # override/ad_hoc ones untouched.
+    origin: Mapped[MilestoneOrigin] = mapped_column(
+        Enum(MilestoneOrigin, name="milestone_origin"),
+        default=MilestoneOrigin.template,
+        server_default=MilestoneOrigin.template.value,
     )
 
     review: Mapped["ProgressionReview | None"] = relationship(

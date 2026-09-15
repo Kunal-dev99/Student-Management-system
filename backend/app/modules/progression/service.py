@@ -17,6 +17,7 @@ from app.modules.progression.constants import (
     RE_REVIEW_DAYS,
     REQUIRED_PANEL_ROLES,
     AppealStatus,
+    MilestoneOrigin,
     MilestoneStatus,
     PanelRole,
     ProgressionOutcome,
@@ -70,6 +71,88 @@ class ProgressionService:
                 return milestone
         return None
 
+    async def generate_full_schedule(
+        self, student: Student, *, regenerate: bool = False
+    ) -> list[Milestone]:
+        """Instantiate the student's WHOLE milestone schedule up front — ICR G3.
+
+        Called on enrolment (and via the "Regenerate schedule" action) so a newly enrolled student
+        immediately shows every expected milestone, not just the next one. Precedence: a definition
+        that already has a milestone is not duplicated; on ``regenerate`` a plain *template*
+        milestone is re-dated to the current offset, while ``override`` / ``ad_hoc`` / already
+        ``decided`` milestones are left exactly as they are.
+        """
+        if student.programme_id is None:
+            return []
+        defs = await self.repo.definitions_for_programme(student.programme_id)
+        existing = {
+            m.milestone_definition_id: m
+            for m in await self.repo.milestones_for_student(student.id)
+            if m.milestone_definition_id is not None
+        }
+        created: list[Milestone] = []
+        for defn in defs:
+            due = (student.start_date or date.today()) + timedelta(days=defn.due_offset_days)
+            m = existing.get(defn.id)
+            if m is None:
+                m = Milestone(
+                    student_id=student.id, milestone_definition_id=defn.id, due_date=due,
+                    status=(MilestoneStatus.due if due <= date.today() else MilestoneStatus.not_started),
+                    origin=MilestoneOrigin.template,
+                )
+                self.repo.add(m)
+                created.append(m)
+            elif (regenerate and m.origin == MilestoneOrigin.template
+                  and m.status in (MilestoneStatus.not_started, MilestoneStatus.due)):
+                m.due_date = due
+                m.status = MilestoneStatus.due if due <= date.today() else MilestoneStatus.not_started
+        await self.session.commit()
+        return created
+
+    async def regenerate_schedule(self, student_id: uuid.UUID, *, allowed_ids=None) -> list[dict]:
+        student = await StudentRepository(self.session).get(student_id, allowed_ids=allowed_ids)
+        if student is None:
+            raise NotFoundError("Student not found")
+        await self.generate_full_schedule(student, regenerate=True)
+        return await self.list_milestones(student_id, allowed_ids=allowed_ids)
+
+    async def override_milestone(
+        self, milestone_id: uuid.UUID, *, due_date: date | None = None,
+        status: MilestoneStatus | None = None,
+    ) -> Milestone:
+        """Hand-adjust one student's milestone (move the due date). Marks it as an override so a
+        later template regeneration leaves it alone."""
+        m = await self._get_milestone(milestone_id)
+        if m.status == MilestoneStatus.decided:
+            raise WorkflowError("A decided milestone cannot be changed")
+        if due_date is not None:
+            m.due_date = due_date
+        if status is not None:
+            m.status = status
+        if m.origin == MilestoneOrigin.template:
+            m.origin = MilestoneOrigin.override
+        await self.session.commit()
+        await self.session.refresh(m)
+        return m
+
+    async def add_ad_hoc(
+        self, student_id: uuid.UUID, *, name: str, due_date: date | None = None, allowed_ids=None
+    ) -> Milestone:
+        """Add a bespoke milestone for one student, with no backing programme definition."""
+        student = await StudentRepository(self.session).get(student_id, allowed_ids=allowed_ids)
+        if student is None:
+            raise NotFoundError("Student not found")
+        status = (MilestoneStatus.due if (due_date and due_date <= date.today())
+                  else MilestoneStatus.not_started)
+        m = Milestone(
+            student_id=student_id, milestone_definition_id=None, name=name,
+            due_date=due_date, status=status, origin=MilestoneOrigin.ad_hoc,
+        )
+        self.repo.add(m)
+        await self.session.commit()
+        await self.session.refresh(m)
+        return m
+
     async def list_milestones(self, student_id: uuid.UUID, *, allowed_ids=None) -> list[dict]:
         student = await StudentRepository(self.session).get(student_id, allowed_ids=allowed_ids)
         if student is None:
@@ -98,9 +181,10 @@ class ProgressionService:
             "id": m.id,
             "studentId": m.student_id,
             "milestoneDefinitionId": m.milestone_definition_id,
-            "name": defn.name if defn else "Milestone",
+            "name": m.name or (defn.name if defn else "Milestone"),
             "dueDate": m.due_date,
             "status": m.status,
+            "origin": m.origin,
             "review": review,
         }
 

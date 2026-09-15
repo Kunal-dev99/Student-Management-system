@@ -11,6 +11,7 @@ from app.core.principal import Principal
 from app.db.session import get_session
 from app.modules.progression.repository import ProgressionRepository
 from app.modules.progression.schemas import (
+    AdHocMilestoneRequest,
     AppealDecisionRequest,
     AppealOut,
     AppealRequest,
@@ -18,6 +19,7 @@ from app.modules.progression.schemas import (
     MilestoneDefinitionCreate,
     MilestoneDefinitionOut,
     MilestoneOut,
+    MilestoneOverrideRequest,
     PanelMemberOut,
     PanelMemberRequest,
     SubmitRequest,
@@ -65,6 +67,46 @@ async def list_milestones(
     allowed = await scoped_ids(principal, session)
     rows = await _svc(session).list_milestones(student_id, allowed_ids=allowed)
     return [MilestoneOut.model_validate(r) for r in rows]
+
+
+@student_router.post("/{student_id}/milestones", response_model=MilestoneOut, status_code=201,
+                     summary="Add an ad-hoc milestone for one student")
+async def add_ad_hoc_milestone(
+    student_id: uuid.UUID,
+    body: AdHocMilestoneRequest,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_permission("student.write")),
+) -> MilestoneOut:
+    allowed = await scoped_ids(principal, session)
+    svc = _svc(session)
+    m = await svc.add_ad_hoc(student_id, name=body.name, due_date=body.due_date, allowed_ids=allowed)
+    return MilestoneOut.model_validate(svc._milestone_dict(m, None))
+
+
+@student_router.post("/{student_id}/milestones/regenerate", response_model=list[MilestoneOut],
+                     summary="Regenerate the full milestone schedule from the programme template")
+async def regenerate_schedule(
+    student_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_permission("student.write")),
+) -> list[MilestoneOut]:
+    allowed = await scoped_ids(principal, session)
+    rows = await _svc(session).regenerate_schedule(student_id, allowed_ids=allowed)
+    return [MilestoneOut.model_validate(r) for r in rows]
+
+
+@milestone_router.patch("/{milestone_id}", response_model=MilestoneOut,
+                        summary="Override a milestone's due date for one student")
+async def override_milestone(
+    milestone_id: uuid.UUID,
+    body: MilestoneOverrideRequest,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("student.write")),
+) -> MilestoneOut:
+    svc = _svc(session)
+    m = await svc.override_milestone(milestone_id, due_date=body.due_date, status=body.status)
+    defn = await ProgressionRepository(session).get_definition(m.milestone_definition_id) if m.milestone_definition_id else None
+    return MilestoneOut.model_validate(svc._milestone_dict(m, defn))
 
 
 @milestone_router.post("/{milestone_id}/submit", response_model=MilestoneOut, summary="Submit a milestone")

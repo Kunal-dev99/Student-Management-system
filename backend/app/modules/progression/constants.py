@@ -13,6 +13,19 @@ class MilestoneStatus(str, enum.Enum):
     overdue = "overdue"
 
 
+class MilestoneOrigin(str, enum.Enum):
+    """Where a milestone instance came from — ICR G3, drives override precedence.
+
+    ``template``: generated from the programme's MilestoneDefinition; a template-definition change
+    re-applies to it. ``override``: a template milestone whose due date was hand-adjusted for one
+    student — a regeneration leaves it alone. ``ad_hoc``: a bespoke milestone added for one student
+    with no backing definition.
+    """
+    template = "template"
+    override = "override"
+    ad_hoc = "ad_hoc"
+
+
 class ProgressionOutcome(str, enum.Enum):
     progress = "progress"
     progress_with_conditions = "progress_with_conditions"
