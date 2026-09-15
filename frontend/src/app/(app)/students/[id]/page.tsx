@@ -28,6 +28,7 @@ import { useAudit } from '@/features/audit/api'
 import { useAuth } from '@/shared/auth/AuthContext'
 import { JourneyTracker } from '@/features/students/JourneyTracker'
 import { IntelligenceStrip, EngagementPanel, TwinTimeline, RiskStoryline, InsightsPanel } from '@/features/intelligence'
+import { STUDENT_PANELS as P } from '@/config/studentPanels'
 
 function Field({ label, value }: { label: string; value: string | null | undefined }) {
   return <div><p className="text-label">{label}</p><p className="text-sm mt-0.5">{value || '—'}</p></div>
@@ -76,32 +77,36 @@ export default function StudentDetailPage() {
           <Link href="/students" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
             <ArrowLeft className="h-4 w-4" /> Back to students
           </Link>
-          <Button size="sm" variant="secondary" onClick={() => setBriefOpen(true)}>
-            <Sparkles className="h-3.5 w-3.5 mr-1.5 text-primary" />
-            Prepare for meeting
-          </Button>
+          {P.meetingBrief && (
+            <Button size="sm" variant="secondary" onClick={() => setBriefOpen(true)}>
+              <Sparkles className="h-3.5 w-3.5 mr-1.5 text-primary" />
+              Prepare for meeting
+            </Button>
+          )}
         </div>
 
-        <MeetingBriefDrawer
-          studentId={id}
-          studentName={summary.data?.personName}
-          open={briefOpen}
-          onOpenChange={setBriefOpen}
-        />
+        {P.meetingBrief && (
+          <MeetingBriefDrawer
+            studentId={id}
+            studentName={summary.data?.personName}
+            open={briefOpen}
+            onOpenChange={setBriefOpen}
+          />
+        )}
 
-        <JourneyTracker student={s} />
+        {P.journeyTracker && <JourneyTracker student={s} />}
 
         {/* PGR Intelligence strip — spec §4. Renders deterministically before narrative loads. */}
-        <IntelligenceStrip studentId={id} studentName={summary.data?.personName ?? undefined} />
+        {P.intelligenceStrip && <IntelligenceStrip studentId={id} studentName={summary.data?.personName ?? undefined} />}
 
         {/* AI Case Insights — streaming reasoning + typewriter reveal. */}
-        <InsightsPanel studentId={id} />
+        {P.insights && <InsightsPanel studentId={id} />}
 
         {/* Digital Twin timeline — spec §5. Longitudinal cross-domain view. */}
-        <TwinTimeline studentId={id} />
+        {P.twinTimeline && <TwinTimeline studentId={id} />}
 
         {/* Pattern Lab risk storyline — spec §12-13. Trajectory + drivers + health. */}
-        <RiskStoryline studentId={id} />
+        {P.riskStoryline && <RiskStoryline studentId={id} />}
 
         <PageSection icon={GraduationCap} title="Record" accent="primary">
           {student.isLoading ? <Skeleton className="h-20 w-full" /> : (
@@ -123,40 +128,40 @@ export default function StudentDetailPage() {
           )}
         </PageSection>
 
-        <LifecyclePanel studentId={id} student={s} />
+        {P.lifecycle && <LifecyclePanel studentId={id} student={s} />}
 
-        <SupervisorsPanel studentId={id} />
+        {P.supervisors && <SupervisorsPanel studentId={id} />}
 
-        <SupervisionMeetingsPanel studentId={id} />
+        {P.supervisionMeetings && <SupervisionMeetingsPanel studentId={id} />}
 
-        <EngagementPanel studentId={id} />
+        {P.engagement && <EngagementPanel studentId={id} />}
 
-        <MilestonesPanel studentId={id} />
+        {P.milestones && <MilestonesPanel studentId={id} />}
 
         {/* Money sections need funding.read — supervisors don't hold it, so the
             sections disappear rather than rendering permission errors. */}
-        {hasPermission('funding.read') && <FundingPanel studentId={id} />}
+        {P.funding && hasPermission('funding.read') && <FundingPanel studentId={id} />}
 
-        {hasPermission('funding.read') && <FundingLineagePanel studentId={id} />}
+        {P.fundingLineage && hasPermission('funding.read') && <FundingLineagePanel studentId={id} />}
 
-        <SupervisorRequestsCard studentId={id} />
+        {P.supervisorRequests && <SupervisorRequestsCard studentId={id} />}
 
         {/* ICR G1 — taught (PGT/MSc) students run a module/assessment/dissertation/award
             lifecycle instead of the research thesis+viva flow. Research students see exactly
             what they saw before (isTaught is false). */}
-        {isTaught
+        {P.taughtOrThesis && (isTaught
           ? <TaughtRecordPanel studentId={id} programmeId={summary.data?.programmeId ?? null} />
           : (
             <>
               <ThesisCompletionPanel studentId={id} />
               <ClassificationCard studentId={id} />
             </>
-          )}
+          ))}
 
         {/* Everything above as one picture: award, funder, funding, project,
             supervisors. Folded away by default — this record is already long.
             The graph walks the funding chain, so it needs funding.read too. */}
-        {hasPermission('funding.read') && (
+        {P.relationshipGraph && hasPermission('funding.read') && (
           <RelationshipGraph
             studentId={id}
             defaultOpen={false}
@@ -165,10 +170,11 @@ export default function StudentDetailPage() {
           />
         )}
 
-        <DocumentsPanel ownerType="student" ownerId={id} />
+        {P.documents && <DocumentsPanel ownerType="student" ownerId={id} />}
 
-        {hasPermission('audit.read') && <HistorySection studentId={id} />}
+        {P.history && hasPermission('audit.read') && <HistorySection studentId={id} />}
 
+        {P.person && (
         <PageSection icon={User} title="Person" accent="accent">
           {summary.isLoading ? <Skeleton className="h-8 w-48" /> : (
             <p className="text-sm">
@@ -180,6 +186,7 @@ export default function StudentDetailPage() {
             </p>
           )}
         </PageSection>
+        )}
       </div>
     </>
   )
