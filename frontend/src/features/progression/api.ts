@@ -14,13 +14,16 @@ export type AppealDecision = Exclude<AppealStatus, 'submitted'>
 /** Outcomes the API refuses without written conditions (422). */
 export const CONDITIONAL_OUTCOMES: ProgressionOutcome[] = ['progress_with_conditions', 'further_review']
 
+export type MilestoneOrigin = 'template' | 'override' | 'ad_hoc'
+
 export interface Milestone {
   id: string
   studentId: string
-  milestoneDefinitionId: string
+  milestoneDefinitionId: string | null
   name: string
   dueDate: string | null
   status: MilestoneStatus
+  origin: MilestoneOrigin
   review: {
     id: string
     studentSubmissionRef: string | null
@@ -90,6 +93,37 @@ export const useMilestones = (studentId: string) =>
     queryFn: () => api.get<Milestone[]>(`/students/${studentId}/milestones`),
     enabled: !!studentId,
   })
+
+// --- ICR G3 — per-student schedule controls ---
+
+/** Instantiate/refresh the whole schedule from the programme template. */
+export function useRegenerateSchedule(studentId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => api.post<Milestone[]>(`/students/${studentId}/milestones/regenerate`, {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['milestones', studentId] }),
+  })
+}
+
+/** Move one milestone's due date (marks it as an override). */
+export function useOverrideMilestone(studentId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, dueDate }: { id: string; dueDate: string }) =>
+      api.patch<Milestone>(`/milestones/${id}`, { dueDate }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['milestones', studentId] }),
+  })
+}
+
+/** Add a bespoke milestone for this student (no programme definition). */
+export function useAddAdHocMilestone(studentId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ name, dueDate }: { name: string; dueDate?: string }) =>
+      api.post<Milestone>(`/students/${studentId}/milestones`, { name, dueDate }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['milestones', studentId] }),
+  })
+}
 
 export function useSubmitMilestone(studentId: string) {
   const qc = useQueryClient()
