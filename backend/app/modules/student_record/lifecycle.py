@@ -334,6 +334,56 @@ class LifecycleService:
             "summary": summary,
         }
 
+    async def intensity_impact_narrated(self, event_id: uuid.UUID) -> dict:
+        """The deterministic impact plus an AI-worded paragraph over the SAME figures (ICR G6).
+
+        The narration is grounded — the model may only quote the figures we computed — and falls
+        back to the deterministic summary when the model is off. Called on demand (when the
+        approver opens the decision), never in a list, so it costs one call only when needed.
+        """
+        event = await self._get_event(event_id)
+        if event.event_type is not LifecycleEventType.intensity_change or not event.intensity_pct:
+            raise WorkflowError("Impact narration is only available for an intensity change")
+        student = await self._get_student(event.student_id)
+        prev = event.previous_intensity_pct or await self._current_intensity(student)
+        impact = await self.intensity_impact_preview(
+            student, prev_pct=prev, new_pct=event.intensity_pct, effective=event.start_date,
+        )
+
+        from app.ai.narrate import narrate as ai_narrate
+        from app.ai.types import Evidence
+        from app.modules.person.models import Person
+
+        person = await self.session.get(Person, student.person_id)
+        first_name = person.given_name if person else "the student"
+
+        figures = {
+            "new intensity": f"{event.intensity_pct}%",
+            "previous intensity": f"{prev}%",
+            "day change": str(impact["daysDelta"]),
+            "milestones affected": str(impact["milestonesAffected"]),
+        }
+        if impact["projectedEnd"]:
+            figures["projected end date"] = impact["projectedEnd"]
+
+        narration = await ai_narrate(
+            evidence=Evidence(figures=figures, context={"studentFirstName": first_name}),
+            question=(
+                f"Explain to the administrator, in one or two short sentences, what APPROVING this "
+                f"study-intensity change will do for {first_name}. State the new intensity, whether "
+                "the expected end date moves and to when, and that undecided milestones shift with "
+                "it. If the day change is 0, say the timeline does not move and why (no end date "
+                "set). Neutral, factual; only use the figures given; no metaphors."
+            ),
+            fallback_template=impact["summary"],
+        )
+        return {
+            **impact,
+            "narration": narration.body,
+            "narrationSource": narration.provenance.source,   # "model" or "fallback"
+            "model": narration.provenance.model,
+        }
+
     async def intensity_periods(self, student: Student) -> list[dict]:
         """The dated FTE-% timeline, derived from approved intensity changes + registration."""
         start = student.start_date or date.today()

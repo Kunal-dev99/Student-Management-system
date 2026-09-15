@@ -42,6 +42,22 @@ export interface IntensityImpact {
   summary: string
 }
 
+export interface IntensityImpactNarrated extends IntensityImpact {
+  narration: string
+  narrationSource: 'model' | 'fallback'
+  model: string | null
+}
+
+/** ICR G6 — lazy: the AI-worded impact of a pending intensity change, fetched when the approver
+ * opens the decision. Grounded on the deterministic figures; falls back to them if the model is off. */
+export const useIntensityImpact = (eventId: string, enabled: boolean) =>
+  useQuery({
+    queryKey: ['intensity-impact', eventId],
+    queryFn: () => api.get<IntensityImpactNarrated>(`/lifecycle-events/${eventId}/impact`),
+    enabled: enabled && !!eventId,
+    staleTime: 5 * 60 * 1000,
+  })
+
 export interface IntensityPeriod { from: string; to: string; pct: number }
 export interface IntensityOverview {
   studentId: string

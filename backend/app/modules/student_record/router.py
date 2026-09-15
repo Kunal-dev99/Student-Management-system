@@ -294,6 +294,16 @@ async def record_return(
     )
 
 
+@lifecycle_router.get("/{event_id}/impact",
+                      summary="AI-narrated impact of a pending intensity change (deterministic fallback)")
+async def lifecycle_event_impact(
+    event_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("student.read")),
+) -> dict:
+    return await LifecycleService(session).intensity_impact_narrated(event_id)
+
+
 @lifecycle_router.post("/{event_id}/approve", summary="Approve — this is what moves the dates")
 async def approve_lifecycle_event(
     event_id: uuid.UUID,
