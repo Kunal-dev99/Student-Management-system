@@ -127,6 +127,9 @@ class StudentLifecycleEvent(UUIDMixin, TimestampMixin, Base):
     new_mode: Mapped[StudyMode | None] = mapped_column(
         Enum(StudyMode, name="study_mode"), nullable=True
     )
+    # ICR G4 — study intensity (FTE %) for an intensity_change event: the % before and after.
+    previous_intensity_pct: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    intensity_pct: Mapped[int | None] = mapped_column(Integer, nullable=True)
     reason: Mapped[str] = mapped_column(Text)
     # Exactly how many days this event added to the expected end date (audit of the arithmetic).
     days_applied: Mapped[int | None] = mapped_column(Integer, nullable=True)

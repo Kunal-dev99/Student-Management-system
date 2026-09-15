@@ -244,9 +244,22 @@ async def request_lifecycle_event(
         student_id, event_type=body.event_type, reason=body.reason,
         start_date=body.start_date, end_date=body.end_date,
         extension_days=body.extension_days, new_mode=body.new_mode,
+        intensity_pct=body.intensity_pct,
         requested_by_user_id=principal.user_id,
     )
     return LifecycleEventOut.model_validate(svc.out(event))
+
+
+@router.get("/{student_id}/intensity", summary="Study intensity (FTE %) timeline")
+async def student_intensity(
+    student_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_permission("student.read")),
+) -> dict:
+    allowed = await scoped_ids(principal, session)
+    if allowed is not None and student_id not in allowed:
+        return {"studentId": str(student_id), "currentPct": None, "periods": []}
+    return await LifecycleService(session).intensity_overview(student_id)
 
 
 @router.post("/{student_id}/return", summary="Record a return from suspension")

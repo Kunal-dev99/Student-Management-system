@@ -22,10 +22,15 @@ class LifecycleEventType(str, enum.Enum):
 
     `suspension` pauses the journey (illness, maternity, fieldwork interruption); `extension`
     grants additional time without pausing; `mode_change` moves between full- and part-time.
+    `intensity_change` (ICR G4) is the general form of mode change: it records a dated study
+    intensity (1-100% FTE), from which study mode is derived (100 = full-time, else part-time),
+    so the return can report a real per-year FTE (HESA STULOAD) and the end date recalculates
+    from the actual ratio rather than a fixed part-time factor.
     """
     suspension = "suspension"
     extension = "extension"
     mode_change = "mode_change"
+    intensity_change = "intensity_change"
 
 
 class LifecycleEventStatus(str, enum.Enum):
@@ -44,6 +49,11 @@ PAUSED_STATUSES = {StudentStatus.suspended, StudentStatus.on_leave}
 
 # Part-time study stretches the expected duration by this factor when the mode changes.
 PART_TIME_FACTOR = 2.0
+
+# ICR G4 — study intensity (FTE %). Full-time is 100%; a part-time student with no explicit
+# intensity recorded is treated as this, derived from the historical part-time factor (100/2 = 50).
+FULL_TIME_INTENSITY_PCT = 100
+DEFAULT_PART_TIME_INTENSITY_PCT = int(round(100 / PART_TIME_FACTOR))
 
 
 class StudyMode(str, enum.Enum):

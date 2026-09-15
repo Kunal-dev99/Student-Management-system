@@ -244,6 +244,10 @@ class StudentService:
         from app.modules.student_record.models import Programme
         programme = await self.repo.session.get(Programme, student.programme_id) if student.programme_id else None
         programme_type = (programme.programme_type if programme else ProgrammeType.research)
+        # ICR G4 — the student's current study intensity (FTE %), derived from approved
+        # intensity changes (falls back to full/part-time when none recorded).
+        from app.modules.student_record.lifecycle import LifecycleService
+        current_intensity = await LifecycleService(self.repo.session)._current_intensity(student)
         supervisors = await SupervisionService(
             SupervisionRepository(self.repo.session)
         ).supervisors_for_student(student_id)
@@ -270,6 +274,7 @@ class StudentService:
             "personName": f"{person.given_name} {person.family_name}",
             "status": student.status,
             "studyMode": student.study_mode,
+            "currentIntensityPct": current_intensity,
             "startDate": student.start_date,
             "programmeId": student.programme_id,
             "programmeType": programme_type,

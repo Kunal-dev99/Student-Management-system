@@ -265,6 +265,24 @@ class StatutoryEngine:
         ))).scalars().all():
             funding.setdefault(fa.student_id, fa)
 
+        # ICR G4 — current study intensity (FTE %) per student: the latest approved intensity
+        # change, else derived from study mode. Feeds the HESA STULOAD field.
+        from app.modules.student_record.constants import (
+            DEFAULT_PART_TIME_INTENSITY_PCT, FULL_TIME_INTENSITY_PCT,
+            LifecycleEventStatus, LifecycleEventType, StudyMode,
+        )
+        from app.modules.student_record.models import StudentLifecycleEvent
+
+        latest_intensity: dict = {}
+        for ev in (await self.session.execute(
+            select(StudentLifecycleEvent)
+            .where(StudentLifecycleEvent.event_type == LifecycleEventType.intensity_change,
+                   StudentLifecycleEvent.status == LifecycleEventStatus.approved)
+            .order_by(StudentLifecycleEvent.start_date)
+        )).scalars().all():
+            if ev.intensity_pct is not None:
+                latest_intensity[ev.student_id] = ev.intensity_pct  # last by start_date wins
+
         records = []
         for student, person in rows:
             fa = funding.get(student.id)
@@ -280,6 +298,11 @@ class StatutoryEngine:
                     "expectedEndDate": student.expected_end_date,
                     "originalExpectedEndDate": student.original_expected_end_date,
                     "entryRoute": routes.get(student.person_id),
+                    "intensityPct": latest_intensity.get(
+                        student.id,
+                        FULL_TIME_INTENSITY_PCT if student.study_mode is StudyMode.full_time
+                        else DEFAULT_PART_TIME_INTENSITY_PCT,
+                    ),
                 },
                 "person": {
                     "givenName": person.given_name, "familyName": person.family_name,

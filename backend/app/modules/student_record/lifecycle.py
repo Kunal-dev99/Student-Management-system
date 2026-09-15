@@ -21,6 +21,8 @@ from app.core.errors import ConflictError, NotFoundError, WorkflowError
 from app.modules.progression.constants import MilestoneStatus
 from app.modules.progression.models import Milestone
 from app.modules.student_record.constants import (
+    DEFAULT_PART_TIME_INTENSITY_PCT,
+    FULL_TIME_INTENSITY_PCT,
     PART_TIME_FACTOR,
     SUSPENDABLE_STATUSES,
     LifecycleEventStatus,
@@ -78,6 +80,8 @@ class LifecycleService:
             "extensionDays": ev.extension_days,
             "previousMode": ev.previous_mode.value if ev.previous_mode else None,
             "newMode": ev.new_mode.value if ev.new_mode else None,
+            "previousIntensityPct": ev.previous_intensity_pct,
+            "intensityPct": ev.intensity_pct,
             "reason": ev.reason,
             "daysApplied": ev.days_applied,
             "decisionNote": ev.decision_note,
@@ -96,12 +100,15 @@ class LifecycleService:
         end_date: date | None = None,
         extension_days: int | None = None,
         new_mode: StudyMode | None = None,
+        intensity_pct: int | None = None,
         requested_by_user_id: uuid.UUID | None = None,
     ) -> StudentLifecycleEvent:
         """Record a request. Changes nothing about the student until it is approved."""
         student = await self._get_student(student_id)
         if not (reason or "").strip():
             raise WorkflowError("A reason is required")
+
+        previous_intensity: int | None = None
 
         if event_type is LifecycleEventType.suspension:
             if student.status not in SUSPENDABLE_STATUSES:
@@ -121,13 +128,22 @@ class LifecycleService:
                 raise WorkflowError("A mode change needs the new study mode")
             if new_mode == student.study_mode:
                 raise WorkflowError("The student is already studying in that mode")
+        elif event_type is LifecycleEventType.intensity_change:
+            if intensity_pct is None or not (1 <= intensity_pct <= 100):
+                raise WorkflowError("An intensity change needs a percentage between 1 and 100")
+            previous_intensity = await self._current_intensity(student)
+            if intensity_pct == previous_intensity:
+                raise WorkflowError(f"The student is already studying at {intensity_pct}% intensity")
 
         event = StudentLifecycleEvent(
             student_id=student_id, event_type=event_type,
             status=LifecycleEventStatus.requested,
             start_date=start_date, end_date=end_date, extension_days=extension_days,
             previous_mode=student.study_mode if event_type is LifecycleEventType.mode_change else None,
-            new_mode=new_mode, reason=reason, requested_by_user_id=requested_by_user_id,
+            new_mode=new_mode,
+            previous_intensity_pct=previous_intensity,
+            intensity_pct=intensity_pct if event_type is LifecycleEventType.intensity_change else None,
+            reason=reason, requested_by_user_id=requested_by_user_id,
         )
         self.session.add(event)
         await self.session.flush()
@@ -186,6 +202,17 @@ class LifecycleService:
             factor = await setting_value(self.session, "lifecycle.part_time_factor")
             event.days_applied = self._mode_change_days(student, event, factor)
             student.study_mode = event.new_mode
+        elif event.event_type is LifecycleEventType.intensity_change:
+            prev = event.previous_intensity_pct or await self._current_intensity(student)
+            event.previous_intensity_pct = prev
+            event.days_applied = self._intensity_change_days(
+                student, event.start_date, prev, event.intensity_pct or prev
+            )
+            # Study mode stays a derived summary of the intensity.
+            student.study_mode = (
+                StudyMode.full_time if (event.intensity_pct or 0) >= FULL_TIME_INTENSITY_PCT
+                else StudyMode.part_time
+            )
 
         recalc = await self._recalculate(student)
         await self.session.commit()
@@ -221,6 +248,85 @@ class LifecycleService:
         if event.new_mode is StudyMode.part_time:
             return int(remaining * (factor - 1))
         return -int(remaining * (1 - 1 / factor))
+
+    # ---------------- study intensity (ICR G4) ----------------
+
+    @staticmethod
+    def _intensity_change_days(student: Student, start: date, prev_pct: int, new_pct: int) -> int:
+        """Rescale the remaining time by the REAL ratio of the old to new intensity.
+
+        The remaining work is fixed; doing it at ``new_pct`` instead of ``prev_pct`` takes
+        prev/new as long. Slowing down (new < prev) lengthens the journey, speeding up shortens
+        it. This replaces the fixed part-time-factor step with the actual percentages.
+        """
+        if not student.expected_end_date or start >= student.expected_end_date or not new_pct:
+            return 0
+        remaining = (student.expected_end_date - start).days
+        return int(round(remaining * (prev_pct / new_pct - 1)))
+
+    async def _intensity_events(self, student_id: uuid.UUID) -> list[StudentLifecycleEvent]:
+        return sorted(
+            [e for e in await self.events_for_student(student_id)
+             if e.event_type is LifecycleEventType.intensity_change
+             and e.status is LifecycleEventStatus.approved and e.intensity_pct],
+            key=lambda e: e.start_date,
+        )
+
+    async def _current_intensity(self, student: Student) -> int:
+        """The student's current FTE %: the latest approved intensity change, else derived from
+        study mode (full-time = 100, part-time = the part-time-factor default)."""
+        events = await self._intensity_events(student.id)
+        if events:
+            return events[-1].intensity_pct  # type: ignore[return-value]
+        return (FULL_TIME_INTENSITY_PCT if student.study_mode is StudyMode.full_time
+                else DEFAULT_PART_TIME_INTENSITY_PCT)
+
+    async def intensity_periods(self, student: Student) -> list[dict]:
+        """The dated FTE-% timeline, derived from approved intensity changes + registration."""
+        start = student.start_date or date.today()
+        end_cap = student.expected_end_date or date.today()
+        events = await self._intensity_events(student.id)
+        base = (events[0].previous_intensity_pct if events and events[0].previous_intensity_pct
+                else (FULL_TIME_INTENSITY_PCT if student.study_mode is StudyMode.full_time
+                      else DEFAULT_PART_TIME_INTENSITY_PCT))
+        periods: list[dict] = []
+        cur_from, cur_pct = start, base
+        for e in events:
+            if e.start_date > cur_from:
+                periods.append({"from": cur_from, "to": e.start_date, "pct": cur_pct})
+            cur_from, cur_pct = e.start_date, e.intensity_pct
+        periods.append({"from": cur_from, "to": max(end_cap, cur_from), "pct": cur_pct})
+        return periods
+
+    async def fte_for_year(self, student: Student, *, year: int, start_month: int = 8) -> float | None:
+        """Time-weighted average FTE % over the academic year starting ``start_month`` of ``year``.
+        Maps to HESA STULOAD. Returns None when the student was not registered in that window."""
+        win_start = date(year, start_month, 1)
+        win_end = date(year + 1, start_month, 1)
+        total_days = 0
+        weighted = 0.0
+        for p in await self.intensity_periods(student):
+            lo = max(p["from"], win_start)
+            hi = min(p["to"], win_end)
+            days = (hi - lo).days
+            if days > 0:
+                total_days += days
+                weighted += days * p["pct"]
+        if total_days == 0:
+            return None
+        return round(weighted / total_days, 1)
+
+    async def intensity_overview(self, student_id: uuid.UUID) -> dict:
+        student = await self._get_student(student_id)
+        periods = await self.intensity_periods(student)
+        return {
+            "studentId": str(student_id),
+            "currentPct": await self._current_intensity(student),
+            "periods": [
+                {"from": p["from"].isoformat(), "to": p["to"].isoformat(), "pct": p["pct"]}
+                for p in periods
+            ],
+        }
 
     # ---------------- return from suspension ----------------
 

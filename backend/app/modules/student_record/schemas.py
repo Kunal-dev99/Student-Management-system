@@ -52,6 +52,7 @@ class LifecycleEventRequest(_Camel):
     end_date: date | None = None            # required for a suspension
     extension_days: int | None = None       # required for an extension
     new_mode: StudyMode | None = None       # required for a mode change
+    intensity_pct: int | None = None        # required for an intensity change (1-100)
 
 
 class LifecycleDecision(_Camel):
@@ -73,6 +74,8 @@ class LifecycleEventOut(_Camel):
     extension_days: int | None = None
     previous_mode: StudyMode | None = None
     new_mode: StudyMode | None = None
+    previous_intensity_pct: int | None = None
+    intensity_pct: int | None = None
     reason: str
     days_applied: int | None = None
     decision_note: str | None = None
@@ -150,6 +153,7 @@ class StudentSummary(_Camel):
     person_name: str
     status: StudentStatus
     study_mode: StudyMode
+    current_intensity_pct: int | None = None
     start_date: date | None = None
     programme_id: uuid.UUID | None = None
     programme_type: ProgrammeType = ProgrammeType.research

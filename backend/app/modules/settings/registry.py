@@ -73,6 +73,14 @@ SETTINGS: dict[str, SettingDef] = {s.key: s for s in [
                     "and Admissions are hidden, and students are added via Enrol / cohort import.",
         type="bool", default=True,
     ),
+    # --- Statutory / HESA ---
+    SettingDef(
+        key="statutory.academic_year_start_month", group="Statutory reporting",
+        label="Academic year start month",
+        description="The month a HESA reporting year begins (1 = January, 8 = August). Used to "
+                    "window a student's study-intensity history into a per-year FTE (STULOAD).",
+        type="int", default=8, min=1, max=12,
+    ),
     # --- Supervision policy ---
     SettingDef(
         key="supervision.max_supervisees", group="Supervision policy",
