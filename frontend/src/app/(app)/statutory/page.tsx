@@ -8,7 +8,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import {
-  CheckCircle2, CopyPlus, Download, FileSpreadsheet, FileUp, ListChecks, Lock, Unlock, Play, Plus, ShieldAlert, ShieldCheck, Sparkles,
+  CheckCircle2, CopyPlus, Download, FileSpreadsheet, FileUp, ListChecks, Lock, Unlock, Play, Plus, Pencil, Trash2, ShieldAlert, ShieldCheck, Sparkles,
 } from 'lucide-react'
 import { PageHeader } from '@/components/common/PageHeader'
 import { PageSection } from '@/components/common/PageSection'
@@ -35,7 +35,8 @@ import {
   useAddField, useCloneProfile, useCompileProfile, useCreateFromSpec, useCreateProfile,
   useGenerateProfile, useProfile, useProfiles, useSignOffProfile, useSpecs, useTransforms,
   useUnsignProfile, useValidateProfile, useFixSuggestions, useApplyFix,
-  type GenerateResult, type ReportProfile, type ValidationResult,
+  useUpdateField, useDeleteField,
+  type GenerateResult, type ReportProfile, type ValidationResult, type FieldMapping,
 } from '@/features/statutory/api'
 
 function err(toast: ReturnType<typeof useToast>['toast'], title: string) {
@@ -266,6 +267,131 @@ function AddFieldDialog({ profileId }: { profileId: string }) {
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+function EditFieldDialog({ profileId, field }: { profileId: string; field: FieldMapping }) {
+  const { toast } = useToast()
+  const update = useUpdateField(profileId)
+  const [open, setOpen] = useState(false)
+  const [sourceExpression, setSourceExpression] = useState(field.sourceExpression ?? '')
+  const [transform, setTransform] = useState(field.transform ?? '')
+  const [defaultValue, setDefaultValue] = useState(field.defaultValue ?? '')
+  const [position, setPosition] = useState(String(field.position ?? ''))
+  const [required, setRequired] = useState(field.required)
+  const [allowedValues, setAllowedValues] = useState((field.allowedValues ?? []).join(', '))
+
+  // Re-seed from the field whenever the dialog is (re)opened, so it always reflects the saved state.
+  const seed = () => {
+    setSourceExpression(field.sourceExpression ?? ''); setTransform(field.transform ?? '')
+    setDefaultValue(field.defaultValue ?? ''); setPosition(String(field.position ?? ''))
+    setRequired(field.required); setAllowedValues((field.allowedValues ?? []).join(', '))
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (o) seed() }}>
+      <DialogTrigger asChild>
+        <Button size="icon" variant="ghost" className="h-8 w-8" title={`Edit ${field.targetField}`}>
+          <Pencil className="h-4 w-4" />
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader><DialogTitle>Map {field.targetField}</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label>Target field</Label>
+              <Input value={field.targetField} disabled className="font-mono text-xs" />
+              <p className="text-helper">The statutory field is fixed by the spec — map it to a source column below.</p>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="e-pos">Position</Label>
+              <Input id="e-pos" type="number" min={1} value={position}
+                onChange={(e) => setPosition(e.target.value)} />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="e-src">Source expression (the column this field maps to)</Label>
+            <Input id="e-src" className="font-mono text-xs" value={sourceExpression}
+              onChange={(e) => setSourceExpression(e.target.value)} placeholder="student.ref" />
+            <p className="text-helper">
+              A dotted path over the flat student record — <span className="font-mono text-xs">student.*</span>,{' '}
+              <span className="font-mono text-xs">person.*</span>, <span className="font-mono text-xs">programme.*</span>,{' '}
+              <span className="font-mono text-xs">research.*</span>, <span className="font-mono text-xs">funding.*</span>,{' '}
+              <span className="font-mono text-xs">award.*</span>.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="e-transform">Transform (optional)</Label>
+              <Input id="e-transform" className="font-mono text-xs" value={transform}
+                onChange={(e) => setTransform(e.target.value)} placeholder="e.g. upper|strip_name" />
+              <p className="text-helper">One transform, or a <span className="font-mono text-xs">|</span>-separated chain applied in order.</p>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="e-default">Default value (optional)</Label>
+              <Input id="e-default" value={defaultValue} onChange={(e) => setDefaultValue(e.target.value)} />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="e-allowed">Allowed values (optional, comma separated)</Label>
+            <Input id="e-allowed" value={allowedValues} onChange={(e) => setAllowedValues(e.target.value)}
+              placeholder="01, 02, 03" />
+          </div>
+          <div className="flex items-center gap-2">
+            <Checkbox id="e-required" checked={required}
+              onCheckedChange={(c) => setRequired(c === true)} />
+            <Label htmlFor="e-required">Required by the specification</Label>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button
+            disabled={!sourceExpression.trim() || update.isPending}
+            onClick={async () => {
+              const allowed = allowedValues.split(',').map((v) => v.trim()).filter(Boolean)
+              try {
+                await update.mutateAsync({
+                  id: field.id,
+                  body: {
+                    sourceExpression: sourceExpression.trim(),
+                    position: position ? Number(position) : undefined,
+                    transform: transform.trim() || undefined,
+                    defaultValue: defaultValue || undefined,
+                    required,
+                    allowedValues: allowed.length > 0 ? allowed : undefined,
+                  },
+                })
+                toast({ title: `Updated ${field.targetField}` })
+                setOpen(false)
+              } catch (e) { err(toast, 'Could not update field')(e) }
+            }}
+          >
+            {update.isPending ? 'Saving…' : 'Save mapping'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function DeleteFieldButton({ profileId, field }: { profileId: string; field: FieldMapping }) {
+  const { toast } = useToast()
+  const del = useDeleteField(profileId)
+  return (
+    <Button
+      size="icon" variant="ghost" className="h-8 w-8 text-danger hover:text-danger"
+      title={`Remove ${field.targetField}`}
+      disabled={del.isPending}
+      onClick={async () => {
+        if (!window.confirm(`Remove the mapping for ${field.targetField}? This does not touch the master record.`)) return
+        try {
+          await del.mutateAsync(field.id)
+          toast({ title: `Removed ${field.targetField}` })
+        } catch (e) { err(toast, 'Could not remove field')(e) }
+      }}
+    >
+      <Trash2 className="h-4 w-4" />
+    </Button>
   )
 }
 
@@ -838,6 +964,7 @@ export default function StatutoryPage() {
                         <TableHead>Required</TableHead>
                         <TableHead>Allowed values</TableHead>
                         <TableHead>Default</TableHead>
+                        {canConfigure && !detail.data.signedOff && <TableHead className="text-right">Map</TableHead>}
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -855,6 +982,12 @@ export default function StatutoryPage() {
                             {f.allowedValues && f.allowedValues.length > 0 ? f.allowedValues.join(', ') : '—'}
                           </TableCell>
                           <TableCell className="text-xs text-muted-foreground">{f.defaultValue ?? '—'}</TableCell>
+                          {canConfigure && !detail.data!.signedOff && (
+                            <TableCell className="text-right whitespace-nowrap">
+                              <EditFieldDialog profileId={selectedId} field={f} />
+                              <DeleteFieldButton profileId={selectedId} field={f} />
+                            </TableCell>
+                          )}
                         </TableRow>
                       ))}
                     </TableBody>
