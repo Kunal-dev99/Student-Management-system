@@ -7,7 +7,7 @@
  * auto-instantiates for every student on it; editing an offset here re-dates non-overridden
  * milestones on the next "Regenerate schedule" for a student.
  */
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { GraduationCap, Plus, Trash2 } from 'lucide-react'
 import { PageSection } from '@/components/common/PageSection'
 import { Badge } from '@/components/ui/badge'
@@ -39,50 +39,33 @@ const POLICY_FIELDS: { key: keyof GradingPolicy; label: string; fallback: number
 ]
 
 /**
- * A labelled range slider that commits on release. Shows the live value; when the value equals the
- * platform default it is marked "default" and (when `resettable`) offers a reset that clears the
- * per-programme override. No dependency — a styled native range input.
+ * A labelled number input that commits on blur. Empty clears the value (falls back to the platform
+ * default, shown as the placeholder). `key` re-seats the field when the committed value changes.
  */
-function RangeField({ label, value, fallback, min, max, unit = '', resettable = true, onCommit }: {
+function NumberField({ label, value, fallback, min, max, unit = '', onCommit }: {
   label: string
   value: number | null | undefined
   fallback: number
-  min: number
-  max: number
+  min?: number
+  max?: number
   unit?: string
-  resettable?: boolean
   onCommit: (v: number | null) => void
 }) {
-  const isSet = value != null
-  const initial = isSet ? (value as number) : fallback
-  // Uncontrolled: the browser owns the slider during a drag; we mirror its live value into
-  // `display` on every `input` event (fires continuously while dragging). `key={initial}` remounts
-  // the input when the committed value changes (after save/refresh) so the thumb re-seats.
-  const [display, setDisplay] = useState<number>(initial)
-  useEffect(() => { setDisplay(initial) }, [initial])
-
   return (
     <div className="space-y-1.5">
-      <div className="flex items-baseline justify-between gap-2">
-        <Label className="text-xs">{label}</Label>
-        <span className="num text-sm font-semibold tabular-nums">
-          {display}{unit}
-          {!isSet && display === fallback && <span className="text-helper text-[10px] font-normal ml-1">default</span>}
-        </span>
-      </div>
-      <input
-        key={initial}
-        type="range" min={min} max={max} defaultValue={initial}
-        onInput={(e) => setDisplay(Number((e.target as HTMLInputElement).value))}
-        onChange={(e) => setDisplay(Number(e.target.value))}
-        onPointerUp={(e) => onCommit(Number((e.target as HTMLInputElement).value))}
-        onKeyUp={(e) => onCommit(Number((e.target as HTMLInputElement).value))}
-        className="w-full cursor-pointer accent-[hsl(var(--primary))]"
+      <Label className="text-xs">{label}{unit ? ` (${unit.trim()})` : ''}</Label>
+      <Input
+        key={value ?? 'default'}
+        type="number" min={min} max={max} className="h-8"
+        placeholder={`default ${fallback}`}
+        defaultValue={value ?? ''}
+        onBlur={(e) => {
+          const raw = e.target.value.trim()
+          if (raw === '') { onCommit(null); return }
+          const n = Number(raw)
+          if (Number.isFinite(n)) onCommit(n)
+        }}
       />
-      {resettable && isSet && (
-        <button type="button" className="text-[10px] text-muted-foreground hover:text-foreground underline"
-          onClick={() => onCommit(null)}>reset to default</button>
-      )}
     </div>
   )
 }
@@ -230,12 +213,12 @@ function ProgrammeEditor({ programme, onPatch }: {
           <Input defaultValue={programme.name}
             onBlur={(e) => { if (e.target.value.trim() && e.target.value !== programme.name) onPatch(programme.id, { name: e.target.value.trim() }) }} />
         </div>
-        <div className="grid gap-6 sm:grid-cols-2">
-          <RangeField label="Expected duration (months)"
-            value={programme.durationMonths} fallback={36} min={6} max={72} unit=" mo" resettable={false}
+        <div className="grid gap-4 sm:grid-cols-2">
+          <NumberField label="Expected duration" unit="months"
+            value={programme.durationMonths} fallback={36} min={1} max={120}
             onCommit={(v) => onPatch(programme.id, { durationMonths: v })} />
-          <RangeField label="Supervision meeting interval (days)"
-            value={programme.supervisionMeetingIntervalDays} fallback={90} min={7} max={365} unit=" d"
+          <NumberField label="Supervision meeting interval" unit="days"
+            value={programme.supervisionMeetingIntervalDays} fallback={90} min={1} max={365}
             onCommit={(v) => onPatch(programme.id, { supervisionMeetingIntervalDays: v })} />
         </div>
       </div>
@@ -327,17 +310,17 @@ function GradingPolicyEditor({ programme, onPatch }: {
   return (
     <div>
       <h4 className="text-sm font-medium mb-2">Grading policy</h4>
-      <div className="card-elevated grid gap-x-6 gap-y-5 p-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="card-elevated grid gap-x-6 gap-y-4 p-4 sm:grid-cols-2 lg:grid-cols-3">
         {POLICY_FIELDS.map((f) => (
-          <RangeField key={f.key} label={f.label}
-            value={policy[f.key]} fallback={f.fallback} min={f.min} max={f.max} unit={f.unit}
+          <NumberField key={f.key} label={f.label}
+            value={policy[f.key]} fallback={f.fallback} min={f.min} max={f.max}
             onCommit={(v) => save(f.key, v)} />
         ))}
       </div>
       <p className="text-helper mt-2">
-        Each value defaults to the platform standard until you move its slider; reset returns it to
-        the default. These drive module pass/fail, capped resits, board condonement and the final
-        classification bands for this programme.
+        Leave a field blank to use the platform default (shown as the placeholder). These drive
+        module pass/fail, capped resits, board condonement and the final classification bands for
+        this programme.
       </p>
     </div>
   )
