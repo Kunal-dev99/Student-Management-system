@@ -470,6 +470,10 @@ function ValidationReportView({ result, rowCount }: { result: ValidationResult; 
   const clamped = Math.min(page, pageCount - 1)
   const start = clamped * ISSUES_PER_PAGE
   const pageItems = filtered.slice(start, start + ISSUES_PER_PAGE)
+  // Use functional setState so a rapid click never captures a stale `clamped` from an earlier
+  // render — otherwise clicks can no-op or the label lags behind the actual page state.
+  const goPrev = () => setPage((p) => Math.max(0, Math.min(p, pageCount - 1) - 1))
+  const goNext = () => setPage((p) => Math.min(pageCount - 1, Math.min(p, pageCount - 1) + 1))
 
   return (
     <div className="space-y-3">
@@ -550,16 +554,19 @@ function ValidationReportView({ result, rowCount }: { result: ValidationResult; 
 
           {/* Pagination */}
           <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <span>
+            <span key={`s-${clamped}-${filtered.length}`}>
               {field ? <>Field <span className="font-mono">{field}</span> · </> : null}
               Showing {filtered.length === 0 ? 0 : start + 1}–{Math.min(start + ISSUES_PER_PAGE, filtered.length)} of {filtered.length}
             </span>
             <div className="flex items-center gap-2">
               <Button size="sm" variant="outline" className="h-7" disabled={clamped <= 0}
-                onClick={() => setPage(clamped - 1)}>Prev</Button>
-              <span>Page {clamped + 1} / {pageCount}</span>
+                onClick={goPrev}>Prev</Button>
+              {/* Keyed so React replaces the whole span (and its text nodes) on every page change —
+                 avoids a rare text-node reconciliation gap where the number would stall while the
+                 table rows below advanced correctly. */}
+              <span key={`p-${clamped}-${pageCount}`}>Page {clamped + 1} / {pageCount}</span>
               <Button size="sm" variant="outline" className="h-7" disabled={clamped >= pageCount - 1}
-                onClick={() => setPage(clamped + 1)}>Next</Button>
+                onClick={goNext}>Next</Button>
             </div>
           </div>
         </>
