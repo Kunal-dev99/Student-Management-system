@@ -16,6 +16,17 @@ const nextConfig = {
       { source: '/health/:path*', destination: `${backend}/health/:path*` },
     ]
   },
+  // Serve the HTML documents with no-store so a rebuilt bundle is always picked up on the next
+  // load (the recurring "I still see the old version" problem). The content-hashed static chunks
+  // under /_next/static keep their long immutable cache — they never change under a fixed hash.
+  async headers() {
+    return [
+      {
+        source: '/((?!_next/static|_next/image).*)',
+        headers: [{ key: 'Cache-Control', value: 'no-store, must-revalidate' }],
+      },
+    ]
+  },
 }
 
 export default nextConfig
