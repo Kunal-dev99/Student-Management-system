@@ -69,9 +69,10 @@ function RangeField({ label, value, fallback, min, max, unit = '', resettable = 
       <input
         type="range" min={min} max={max} value={v}
         onChange={(e) => setV(Number(e.target.value))}
+        onInput={(e) => setV(Number((e.target as HTMLInputElement).value))}
         onPointerUp={() => onCommit(v)}
         onKeyUp={() => onCommit(v)}
-        className="w-full h-1.5 cursor-pointer appearance-none rounded-full bg-border accent-[hsl(var(--primary))]"
+        className="w-full cursor-pointer accent-[hsl(var(--primary))]"
       />
       {resettable && isSet && (
         <button type="button" className="text-[10px] text-muted-foreground hover:text-foreground underline"
