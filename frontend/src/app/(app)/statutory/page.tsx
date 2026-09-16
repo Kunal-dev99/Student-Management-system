@@ -34,7 +34,7 @@ import { AdvisoriesPanel } from '@/features/statutory/AdvisoriesPanel'
 import {
   useAddField, useCloneProfile, useCompileProfile, useCreateFromSpec, useCreateProfile,
   useGenerateProfile, useProfile, useProfiles, useSignOffProfile, useSpecs, useTransforms,
-  useUnsignProfile, useValidateProfile,
+  useUnsignProfile, useValidateProfile, useFixSuggestions, useApplyFix,
   type GenerateResult, type ReportProfile, type ValidationResult,
 } from '@/features/statutory/api'
 
@@ -442,6 +442,72 @@ function ValidationReportView({ result, rowCount }: { result: ValidationResult; 
   )
 }
 
+// ---------------------------------------------------------------- ICR G5 — fix assistant
+
+function SuggestedFixes({ profileId, canApply }: { profileId: string; canApply: boolean }) {
+  const { toast } = useToast()
+  const fixes = useFixSuggestions(profileId)
+  const apply = useApplyFix(profileId)
+  const data = fixes.data?.suggestions
+
+  return (
+    <div className="pt-3 border-t border-border space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="text-label">Suggested fixes</p>
+        <Button size="sm" variant="outline" disabled={fixes.isFetching}
+          onClick={async () => {
+            const r = await fixes.refetch()
+            if (r.error) { err(toast, 'Could not scan')(r.error); return }
+            toast({ title: `${r.data?.suggestions.length ?? 0} fix type(s) found` })
+          }}>
+          <Sparkles className="h-4 w-4 mr-1" />{fixes.isFetching ? 'Scanning…' : 'Scan for fixes'}
+        </Button>
+        <span className="text-helper">Rule-based cleaning — clean or massage, never remove; you approve each one.</span>
+      </div>
+
+      {data && data.length === 0 && (
+        <p className="text-sm inline-flex items-center gap-2 text-[hsl(var(--success))]">
+          <CheckCircle2 className="h-4 w-4" /> No data-quality issues found.
+        </p>
+      )}
+      {data && data.length > 0 && (
+        <div className="space-y-2">
+          {data.map((f) => (
+            <div key={f.field + f.type} className="card-elevated p-3 space-y-1.5">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="warning" className="num">{f.count}</Badge>
+                <span className="font-mono text-xs font-medium">{f.field}</span>
+                <span className="text-sm font-medium">{f.label}</span>
+                {canApply && f.applicable && (
+                  <Button size="sm" className="ml-auto" disabled={apply.isPending}
+                    onClick={async () => {
+                      try {
+                        await apply.mutateAsync({ field: f.field, transform: f.transform })
+                        toast({ title: `Fix applied to ${f.field}`, description: `${f.count} value(s) will be cleaned in the return.` })
+                        await fixes.refetch()
+                      } catch (e) { err(toast, 'Could not apply fix')(e) }
+                    }}>
+                    Apply fix
+                  </Button>
+                )}
+              </div>
+              <p className="text-helper">{f.description}</p>
+              {f.samples.length > 0 && (
+                <div className="text-xs">
+                  <span className="text-helper">Examples: </span>
+                  {f.samples.slice(0, 3).map((s, i) => (
+                    <span key={i} className="mr-3">&ldquo;{s.before}&rdquo; → <span className="font-medium">&ldquo;{s.after}&rdquo;</span></span>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ---------------------------------------------------------------- F1 — sign-off + gap panel
 
 function SignOffCard({ profileId, canSignOff }: { profileId: string; canSignOff: boolean }) {
@@ -808,6 +874,10 @@ export default function StatutoryPage() {
                       rowCount={validate.data.rowCount}
                     />
                   </div>
+                )}
+
+                {detail.data && detail.data.fields.length > 0 && !detail.data.signedOff && (
+                  <SuggestedFixes profileId={selectedId} canApply={canConfigure} />
                 )}
 
                 {showGenerated && generated && (

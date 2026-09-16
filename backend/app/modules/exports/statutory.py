@@ -42,10 +42,37 @@ def _t_int(v):
 def _t_str(v): return "" if v is None else str(v)
 
 
+# --- data-cleaning transforms (ICR G5 fix assistant). Non-destructive: they normalise/massage a
+#     value, never blank it. Applied at the RETURN layer (the mapping), so the master record is
+#     untouched and the change is reversible config. ---
+import re as _re
+
+# Characters a statutory text field may safely contain; anything else is stripped (accents kept).
+_SAFE_TEXT = _re.compile(r"[^0-9A-Za-zÀ-ÿ .,'\-/()]")
+
+def _t_strip_special(v):
+    if v is None:
+        return None
+    cleaned = _SAFE_TEXT.sub("", str(v))
+    return _re.sub(r"\s{2,}", " ", cleaned).strip()
+
+def _t_clamp_pct(v):
+    """Clamp a percentage-like number into 0–100 (an outlier is corrected, never removed)."""
+    if v is None or str(v).strip() == "":
+        return v
+    try:
+        n = Decimal(str(v))
+    except Exception:
+        return v
+    n = max(Decimal("0"), min(Decimal("100"), n))
+    return str(int(n)) if n == n.to_integral_value() else str(n)
+
+
 TRANSFORMS = {
     "upper": _t_upper, "lower": _t_lower, "date_iso": _t_date_iso,
     "date_compact": _t_date_compact, "year": _t_year, "bool_yn": _t_bool_yn,
     "int": _t_int, "str": _t_str,
+    "strip_special": _t_strip_special, "clamp_pct": _t_clamp_pct,
 }
 
 
@@ -482,6 +509,63 @@ class StatutoryEngine:
                 "valid": not any(i["severity"] == "error" for i in issues),
             },
         }
+
+    # ---------------- ICR G5 — data-quality fix assistant (suggest → accept → apply) ----------------
+
+    async def fix_suggestions(self, profile_id: uuid.UUID) -> dict:
+        """Scan the return's produced values for known data-quality issues and, for each, propose a
+        deterministic fix from the resolution dictionary — with affected count and before→after
+        samples. Nothing is changed here; this is the 'suggest' half."""
+        from app.modules.exports.resolutions import RESOLUTIONS, detect
+
+        profile = await self.get_profile(profile_id)
+        mappings = await self._mappings(profile_id)
+        records = await self.build_records()
+
+        groups: dict[tuple[str, str], dict] = {}
+        for record in records:
+            ref = record["student"]["ref"]
+            for m in mappings:
+                raw = resolve(record, m.source_expression)
+                if raw is None and m.default_value is not None:
+                    raw = m.default_value
+                value = TRANSFORMS[m.transform](raw) if m.transform else raw
+                text = "" if value is None else str(value)
+                kind = detect(m, text)
+                if not kind:
+                    continue
+                g = groups.setdefault((m.target_field, kind), {
+                    "field": m.target_field, "type": kind, "count": 0, "samples": [],
+                })
+                g["count"] += 1
+                if len(g["samples"]) < 5:
+                    after = TRANSFORMS[RESOLUTIONS[kind]["transform"]](raw)
+                    g["samples"].append({
+                        "studentRef": ref, "before": text,
+                        "after": "" if after is None else str(after),
+                    })
+
+        out = []
+        for (_field, kind), g in groups.items():
+            r = RESOLUTIONS[kind]
+            out.append({**g, "label": r["label"], "description": r["description"],
+                        "transform": r["transform"], "applicable": True})
+        out.sort(key=lambda x: -x["count"])
+        return {"profile": self.profile_out(profile), "suggestions": out}
+
+    async def apply_fix(self, profile_id: uuid.UUID, *, field: str, transform: str) -> dict:
+        """Apply an accepted fix: set the resolution's transform on that field's mapping. Cleans the
+        return output (non-destructive, reversible); refuses on a signed-off profile."""
+        from app.modules.exports.resolutions import VALID_FIX_TRANSFORMS
+
+        if transform not in VALID_FIX_TRANSFORMS:
+            raise WorkflowError(f"Unknown fix transform '{transform}'")
+        mappings = await self._mappings(profile_id)
+        m = next((x for x in mappings if x.target_field == field), None)
+        if m is None:
+            raise NotFoundError(f"No mapping for field '{field}'")
+        await self.update_field(profile_id, m.id, transform=transform)
+        return {"field": field, "transform": transform, "applied": True}
 
     # ---------------- F1 — sign-off, immutability, mandatory-spec gates ----------------
 

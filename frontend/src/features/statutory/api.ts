@@ -250,6 +250,41 @@ export function useSignOffProfile(profileId: string | null) {
   })
 }
 
+// -------- ICR G5 — data-quality fix assistant (rule-based suggest → accept → apply) --------
+
+export interface FixSample { studentRef: string; before: string; after: string }
+export interface FixSuggestion {
+  field: string
+  type: string
+  label: string
+  description: string
+  transform: string
+  applicable: boolean
+  count: number
+  samples: FixSample[]
+}
+
+/** Lazy: scans the cohort for data-quality issues and proposes rule-based fixes. Call refetch(). */
+export const useFixSuggestions = (profileId: string | null) =>
+  useQuery({
+    queryKey: ['report-profile', profileId, 'fixes'],
+    queryFn: () => api.get<{ suggestions: FixSuggestion[] }>(`/report-profiles/${profileId}/fix-suggestions`),
+    enabled: false,
+    gcTime: 0,
+  })
+
+/** Apply an accepted fix — cleans the return output (non-destructive); refused if signed off. */
+export function useApplyFix(profileId: string | null) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: { field: string; transform: string }) =>
+      api.post<{ field: string; transform: string; applied: boolean }>(`/report-profiles/${profileId}/apply-fix`, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['report-profile', profileId] })
+    },
+  })
+}
+
 export function useUnsignProfile(profileId: string | null) {
   const qc = useQueryClient()
   return useMutation({

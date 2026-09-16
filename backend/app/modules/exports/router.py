@@ -219,6 +219,33 @@ async def validate_profile(
             "validation": result["validation"]}
 
 
+@profiles_router.get("/{profile_id}/fix-suggestions",
+                     summary="Rule-based data-quality fixes for this return (suggest half)")
+async def fix_suggestions(
+    profile_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("reporting.read")),
+) -> dict:
+    return await _engine(session).fix_suggestions(profile_id)
+
+
+class ApplyFixRequest(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+    field: str
+    transform: str
+
+
+@profiles_router.post("/{profile_id}/apply-fix",
+                      summary="Apply an accepted fix (cleans the return output, refused if signed off)")
+async def apply_fix(
+    profile_id: uuid.UUID,
+    body: ApplyFixRequest,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("admin.configure")),
+) -> dict:
+    return await _engine(session).apply_fix(profile_id, field=body.field, transform=body.transform)
+
+
 @profiles_router.post("/{profile_id}/generate", status_code=201, summary="Produce the statutory extract")
 async def generate_profile(
     profile_id: uuid.UUID,
