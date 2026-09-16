@@ -22,6 +22,9 @@ from app.modules.person.models import Person
 
 # email, password, [roles], person hint (given, family) or None to leave unlinked
 ACCOUNTS = [
+    ("kunal@fusionpractice.com", "dev123",
+     ["dev"], ("Kunal", "Sharma"),
+     "Developer console — the only role holding platform.configure (navigation / feature park)"),
     ("admin@example.com", "admin123",
      ["Institution Administrator", "PGR Administrator"], None,
      "Full access — every permission including admin.configure and ml.approve"),

@@ -200,6 +200,9 @@ function MyPreferencesTab() {
 export default function SettingsPage() {
   const { hasPermission } = useAuth()
   const admin = hasPermission('admin.configure')
+  // Navigation (feature park) is a developer-console capability — only the dev role holds
+  // platform.configure, so an ordinary admin does not see this tab.
+  const canConfigurePlatform = hasPermission('platform.configure')
 
   return (
     // Settings deliberately stays in English — a user who picked a language they can't
@@ -216,7 +219,7 @@ export default function SettingsPage() {
         <Tabs defaultValue={admin ? 'lov' : 'preferences'}>
           <TabsList>
             {admin && <TabsTrigger value="lov"><ListChecks className="h-4 w-4 mr-1.5" /> List of values</TabsTrigger>}
-            {admin && <TabsTrigger value="navigation"><Compass className="h-4 w-4 mr-1.5" /> Navigation</TabsTrigger>}
+            {canConfigurePlatform && <TabsTrigger value="navigation"><Compass className="h-4 w-4 mr-1.5" /> Navigation</TabsTrigger>}
             {admin && <TabsTrigger value="policy"><SlidersHorizontal className="h-4 w-4 mr-1.5" /> Institution policy</TabsTrigger>}
             {admin && <TabsTrigger value="users"><Users className="h-4 w-4 mr-1.5" /> Users &amp; roles</TabsTrigger>}
             {admin && <TabsTrigger value="hygiene"><Sparkles className="h-4 w-4 mr-1.5" /> Data hygiene</TabsTrigger>}
@@ -227,7 +230,7 @@ export default function SettingsPage() {
               <LovTab />
             </TabsContent>
           )}
-          {admin && (
+          {canConfigurePlatform && (
             <TabsContent value="navigation" className="mt-4">
               <NavigationTab />
             </TabsContent>

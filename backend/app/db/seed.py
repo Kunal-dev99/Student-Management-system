@@ -22,7 +22,7 @@ from app.db import registry as _registry  # noqa: F401
 from app.core.database import SessionFactory
 from app.core.security import hash_password
 from app.modules.admissions.models import Offer
-from app.modules.identity.constants import PERMISSIONS, ROLES
+from app.modules.identity.constants import EXCLUSIVE_PERMISSIONS, PERMISSIONS, ROLES
 from app.modules.identity.models import Permission, Role, User
 from app.modules.person.constants import PersonRelationshipType
 from app.modules.person.models import Person, PersonRelationship
@@ -63,7 +63,14 @@ async def _seed_rbac(session) -> dict[str, Permission]:
             await session.flush()
         # Load the collection in async context before reassigning (avoids MissingGreenlet).
         await session.refresh(role, ["permissions"])
-        role.permissions = list(perms.values()) if codes == ["*"] else [perms[c] for c in codes]
+        # "*" grants every NON-exclusive permission; a role may also list exclusive codes
+        # (e.g. platform.configure) explicitly alongside "*" to hold them.
+        if "*" in codes:
+            granted = {c for c in perms if c not in EXCLUSIVE_PERMISSIONS}
+            granted |= {c for c in codes if c != "*"}
+        else:
+            granted = set(codes)
+        role.permissions = [perms[c] for c in granted]
     await session.flush()
     return perms
 

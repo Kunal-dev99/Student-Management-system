@@ -48,10 +48,22 @@ PERMISSIONS: dict[str, str] = {
     # of the PGR Administrator bundle: only roles granted "*" (Institution Administrator)
     # hold it by default, and approver separation still applies on top.
     "ml.approve": "Approve, decline, promote or retire Pattern Lab model versions",
+    # Platform-level configuration reserved for the developer/vendor role: the navigation
+    # (feature park) console and, in future, per-tenant + role-feature management. Deliberately
+    # EXCLUSIVE — it is NOT granted by the "*" wildcard, so an Institution Administrator does not
+    # get it; only a role that lists it explicitly (dev) holds it.
+    "platform.configure": "Configure platform navigation / features (developer console)",
 }
 
-# Role -> permission codes. "*" means all permissions.
+# Permissions that the "*" wildcard does NOT grant — they must be listed explicitly on a role.
+# This keeps developer/vendor-only capabilities off the ordinary all-access admin role.
+EXCLUSIVE_PERMISSIONS: set[str] = {"platform.configure"}
+
+# Role -> permission codes. "*" means all NON-exclusive permissions; a role can add exclusive
+# ones by listing them alongside "*".
 ROLES: dict[str, list[str]] = {
+    # Developer / vendor console: everything, including the exclusive platform.configure.
+    "dev": ["*", "platform.configure"],
     "Institution Administrator": ["*"],
     "PGR Administrator": [
         "person.read", "person.write", "student.read", "student.write",

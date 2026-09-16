@@ -65,7 +65,7 @@ class NavFeatureWrite(BaseModel):
 @settings_router.get("/nav-features", summary="Sidebar features, grouped, with on/off state")
 async def nav_features(
     session: AsyncSession = Depends(get_read_session),
-    _=Depends(require_permission("admin.configure")),
+    _=Depends(require_permission("platform.configure")),
 ) -> dict:
     from app.modules.settings.nav_features import nav_overview
 
@@ -76,7 +76,7 @@ async def nav_features(
 async def set_nav_feature(
     body: NavFeatureWrite,
     session: AsyncSession = Depends(get_session),
-    principal: Principal = Depends(require_permission("admin.configure")),
+    principal: Principal = Depends(require_permission("platform.configure")),
 ) -> dict:
     from app.modules.settings.nav_features import set_nav_feature as _set
 

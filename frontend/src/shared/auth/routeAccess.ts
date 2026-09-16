@@ -13,7 +13,9 @@
  * Hiding/guarding here is convenience — every endpoint still enforces server-side.
  */
 
-export const ADMIN_ROLES = ['Institution Administrator', 'PGR Administrator']
+// `dev` is the developer/vendor console role — it holds every permission plus the exclusive
+// platform.configure, and should see everything an admin does (and then some).
+export const ADMIN_ROLES = ['Institution Administrator', 'PGR Administrator', 'dev']
 
 export interface RouteAccess {
   href: string
