@@ -22,6 +22,9 @@ export interface Student {
   status: StudentStatus
   createdAt: string
   project: { id: string; researchTopic: string | null; researchGroup: string | null } | null
+  /** ICR G2 — true if reached via the recruitment funnel (has an application), false if enrolled
+   * directly. Only present on the single-student detail endpoint; drives the Applicant stage. */
+  fromApplication?: boolean | null
 }
 
 export type ProgrammeType = 'research' | 'taught'

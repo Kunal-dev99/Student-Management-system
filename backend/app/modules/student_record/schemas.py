@@ -43,6 +43,10 @@ class StudentOut(_Camel):
     status: StudentStatus
     created_at: datetime
     project: ResearchProjectOut | None = None
+    # Whether this student reached the record through the recruitment funnel (has an application)
+    # vs. was enrolled directly (ICR G2). Drives the journey tracker's "Applicant" stage. Only
+    # populated on the single-student detail endpoint.
+    from_application: bool | None = None
 
 
 class LifecycleEventRequest(_Camel):

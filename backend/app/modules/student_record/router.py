@@ -184,7 +184,11 @@ async def get_student(
     principal: Principal = Depends(require_permission("student.read")),
 ) -> StudentOut:
     allowed = await scoped_ids(principal, session)
-    return StudentOut.model_validate(await _svc(session).get_student(student_id, allowed_ids=allowed))
+    svc = _svc(session)
+    student = await svc.get_student(student_id, allowed_ids=allowed)
+    # Direct-enrol vs funnel — drives the journey tracker's Applicant stage (ICR G2).
+    student.from_application = await svc.person_has_application(student.person_id)
+    return StudentOut.model_validate(student)
 
 
 @router.patch("/{student_id}", response_model=StudentOut, summary="Update a student")

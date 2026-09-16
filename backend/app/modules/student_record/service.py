@@ -48,6 +48,17 @@ class StudentService:
             raise NotFoundError("Student not found")
         return student
 
+    async def person_has_application(self, person_id: uuid.UUID) -> bool:
+        """True if this person came through recruitment (has an application) — as opposed to a
+        direct enrolment (ICR G2). Used to decide whether the journey has an 'Applicant' stage."""
+        from sqlalchemy import exists, select
+
+        from app.modules.recruitment.models import Application
+
+        return bool((await self.repo.session.execute(
+            select(exists().where(Application.person_id == person_id))
+        )).scalar())
+
     async def update_student(self, student_id: uuid.UUID, patch: dict) -> Student:
         student = await self.get_student(student_id)
         for key, value in patch.items():
