@@ -296,9 +296,14 @@ class LifecycleService:
         """What approving an intensity change WOULD do — deterministic, computed from the same
         arithmetic approval uses (ICR G6/G4). Lets the admin see the consequence before deciding."""
         days_delta = self._intensity_change_days(student, effective, prev_pct, new_pct)
+        base = {
+            "previousPct": prev_pct, "newPct": new_pct, "daysDelta": days_delta,
+            "startDate": student.start_date.isoformat() if student.start_date else None,
+            "currentEnd": student.expected_end_date.isoformat() if student.expected_end_date else None,
+        }
         if student.expected_end_date is None:
             return {
-                "daysDelta": 0, "projectedEnd": None, "milestonesAffected": 0,
+                **base, "projectedEnd": None, "milestonesAffected": 0, "milestones": [],
                 "summary": (
                     f"Sets study intensity to {new_pct}%. No expected end date is set for this "
                     "student, so the timeline will not move — set a programme duration or end date "
@@ -307,18 +312,39 @@ class LifecycleService:
             }
         from datetime import timedelta
 
-        from app.modules.progression.models import Milestone
+        from app.modules.progression.models import Milestone, MilestoneDefinition
 
         projected_end = student.expected_end_date + timedelta(days=days_delta)
-        affected = 0
-        if days_delta:
-            affected = len((await self.session.execute(
-                select(Milestone).where(
-                    Milestone.student_id == student.id,
-                    Milestone.status != MilestoneStatus.decided,
-                    Milestone.due_date.is_not(None),
-                )
-            )).scalars().unique().all())
+
+        # The specific milestones that would move (undecided, dated) with their current -> projected
+        # due dates — so the approver sees exactly what shifts, not just a count.
+        rows = (await self.session.execute(
+            select(Milestone).where(
+                Milestone.student_id == student.id,
+                Milestone.status != MilestoneStatus.decided,
+                Milestone.due_date.is_not(None),
+            )
+        )).scalars().unique().all()
+        def_ids = {m.milestone_definition_id for m in rows if m.milestone_definition_id}
+        names: dict = {}
+        if def_ids:
+            for d in (await self.session.execute(
+                select(MilestoneDefinition).where(MilestoneDefinition.id.in_(def_ids))
+            )).scalars().all():
+                names[d.id] = d.name
+        milestones = sorted(
+            [
+                {
+                    "name": m.name or names.get(m.milestone_definition_id) or "Milestone",
+                    "currentDue": m.due_date.isoformat(),
+                    "projectedDue": (m.due_date + timedelta(days=days_delta)).isoformat(),
+                }
+                for m in rows
+            ],
+            key=lambda x: x["currentDue"],
+        )
+        affected = len(milestones) if days_delta else 0
+
         direction = "extend" if days_delta > 0 else ("shorten" if days_delta < 0 else "keep")
         summary = (
             f"Sets study intensity to {new_pct}% (from {prev_pct}%). "
@@ -328,9 +354,10 @@ class LifecycleService:
                if days_delta else "The expected end does not change.")
         )
         return {
-            "daysDelta": days_delta,
+            **base,
             "projectedEnd": projected_end.isoformat(),
             "milestonesAffected": affected,
+            "milestones": milestones if days_delta else [],
             "summary": summary,
         }
 

@@ -35,11 +35,22 @@ export interface LifecycleEvent {
   impact: IntensityImpact | null
 }
 
+export interface ImpactMilestone {
+  name: string
+  currentDue: string
+  projectedDue: string
+}
+
 export interface IntensityImpact {
   daysDelta: number
   projectedEnd: string | null
   milestonesAffected: number
   summary: string
+  previousPct?: number
+  newPct?: number
+  startDate?: string | null
+  currentEnd?: string | null
+  milestones?: ImpactMilestone[]
 }
 
 export interface IntensityImpactNarrated extends IntensityImpact {

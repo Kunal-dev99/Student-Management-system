@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { CalendarRange, Plus, Sparkles } from 'lucide-react'
+import { CalendarRange, Plus } from 'lucide-react'
 import { PageSection } from '@/components/common/PageSection'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -20,6 +20,7 @@ import { useToast } from '@/components/ui/use-toast'
 import { ApiError } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthContext'
 import type { Student } from '@/features/students/api'
+import { IntensityImpactView } from './IntensityImpactView'
 import {
   useApproveLifecycleEvent, useIntensityImpact, useLifecycleEvents, useRecordReturn,
   useRejectLifecycleEvent, useRequestLifecycleEvent, useStudentIntensity,
@@ -73,9 +74,6 @@ function DecisionDialog({
   // Lazy: only fetch the AI narration once the dialog is actually open.
   const impactQ = useIntensityImpact(intensityEventId ?? '', open)
   const narrated = impactQ.data
-  const impactText =
-    narrated?.narration
-    || (intensityEventId && impactQ.isFetching ? 'Summarising…' : (impactNote ?? ''))
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
@@ -85,24 +83,16 @@ function DecisionDialog({
         <DialogHeader><DialogTitle>{title}</DialogTitle></DialogHeader>
         {(impactNote || intensityEventId) && (
           <div className="rounded-md border border-[hsl(var(--warning)/0.3)] bg-[hsl(var(--warning)/0.08)] p-3 text-sm">
-            <div className="flex items-center gap-1.5 mb-0.5">
-              <p className="font-medium">What this will do</p>
-              {narrated && (
-                <Badge variant={narrated.narrationSource === 'model' ? 'info' : 'secondary'} className="gap-1">
-                  <Sparkles className="h-3 w-3" />
-                  {narrated.narrationSource === 'model' ? 'AI summary' : 'computed'}
-                </Badge>
+            {narrated
+              ? <IntensityImpactView impact={narrated} />
+              : (
+                <>
+                  <p className="font-medium mb-0.5">What this will do</p>
+                  <p key={intensityEventId && impactQ.isFetching ? 'load' : 'note'} className="text-muted-foreground">
+                    {intensityEventId && impactQ.isFetching ? 'Summarising…' : impactNote}
+                  </p>
+                </>
               )}
-            </div>
-            {impactText && (
-              <p key={impactText} className="text-muted-foreground">{impactText}</p>
-            )}
-            {narrated?.projectedEnd && (
-              <p className="text-[11px] text-muted-foreground mt-1 num">
-                New expected end {narrated.projectedEnd} · {narrated.daysDelta > 0 ? '+' : ''}
-                {narrated.daysDelta} days · {narrated.milestonesAffected} milestone(s) shift
-              </p>
-            )}
           </div>
         )}
         <div className="space-y-1.5">
