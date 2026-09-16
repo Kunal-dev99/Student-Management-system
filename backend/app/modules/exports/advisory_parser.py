@@ -49,7 +49,7 @@ _ADD = re.compile(r'^ADD\s+FIELD\s+(\S+)\s+"([^"]*)"\s*(.*)$', re.I)
 _REMOVE_FIELD = re.compile(r"^REMOVE\s+FIELD\s+(\S+)\s*$", re.I)
 _CODING = re.compile(r"^CODING\s+(\S+)\s*=\s*\[([^\]]*)\]\s*$", re.I)
 _DESC = re.compile(r'^DESC\s+(\S+)\s+"([^"]*)"\s*$', re.I)
-_RULE = re.compile(r'^RULE\s+(\S+)\s+(.+?)\s+"([^"]*)"\s*$', re.I)
+_RULE = re.compile(r'^RULE\s+(?:(error|warning)\s+)?(\S+)\s+(.+?)\s+"([^"]*)"\s*$', re.I)
 _REMOVE_RULE = re.compile(r"^REMOVE\s+RULE\s+(\S+)\s+(.+?)\s*$", re.I)
 
 # key=value options on an ADD FIELD line: coding=[...], source=..., transform=..., default=...,
@@ -179,18 +179,19 @@ def parse_advisory(
             continue
 
         if m := _RULE.match(line):
-            kind = m.group(1).lower()
-            rule_fields = m.group(2).split()
-            message = m.group(3)
-            new_rule = {"kind": kind, "fields": rule_fields, "message": message}
+            severity = (m.group(1) or "error").lower()
+            kind = m.group(2).lower()
+            rule_fields = m.group(3).split()
+            message = m.group(4)
+            new_rule = {"kind": kind, "fields": rule_fields, "message": message, "severity": severity}
             if any(_rule_key(r) == _rule_key(new_rule) for r in rules):
                 out.warnings.append(f"line {lineno}: rule {kind} {' '.join(rule_fields)} already present")
                 continue
             rules.append(new_rule)
             out.changes.append({
                 "type": CHANGE_RULE_ADDED, "field": None, "before": None,
-                "after": {"kind": kind, "fields": rule_fields, "message": message},
-                "note": f"New rule: {message}",
+                "after": {"kind": kind, "fields": rule_fields, "message": message, "severity": severity},
+                "note": f"New {severity} rule: {message}",
             })
             out.directive_count += 1
             continue

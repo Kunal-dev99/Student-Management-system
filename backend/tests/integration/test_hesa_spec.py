@@ -91,6 +91,9 @@ async def test_new_profile_from_spec_is_pre_mapped(ctx):
     # …and a field we can't source yet is left for Registry (required, empty source).
     assert fields["SEXID"]["sourceExpression"] == ""
     assert fields["SEXID"]["required"] is True
+    # ICR G5 — each mapping row surfaces where the value is captured on the record (keyed_at).
+    assert fields["SURNAME"]["keyedAt"] == "Person › family name"
+    assert fields["STULOAD"]["keyedAt"] == "Lifecycle › study intensity (ICR G4)"
 
     # Every spec field is mapped, so the compile gate reports nothing missing.
     compiled = (await c.get(f"/api/v1/report-profiles/{detail['id']}/compile", headers=h)).json()
@@ -98,15 +101,15 @@ async def test_new_profile_from_spec_is_pre_mapped(ctx):
 
 
 @pytest.mark.asyncio
-async def test_generate_produces_husid_and_stuload_and_warns_on_bad_dates(ctx):
+async def test_generate_hard_fails_on_a_broken_date_rule(ctx):
     c, h = ctx
     detail = (await c.post("/api/v1/report-profiles/from-spec", headers=h,
                            json={"specKey": "HESA_STUDENT:2026/27"})).json()
     gen = (await c.get(f"/api/v1/report-profiles/{detail['id']}/validate", headers=h)).json()
-    # Unmapped required fields are hard errors (valid=False); date rule is an advisory warning.
+    # ENDDATE < COMDATE is a genuine HESA reject, so the rule is now a hard ERROR that blocks
+    # sign-off (not merely an advisory warning).
     assert gen["validation"]["valid"] is False
-    assert gen["validation"]["warnings"] >= 1
-    assert any(i["field"] == "ENDDATE" and i["severity"] == "warning"
+    assert any(i["field"] == "ENDDATE" and i["severity"] == "error"
                for i in gen["validation"]["issues"])
 
 

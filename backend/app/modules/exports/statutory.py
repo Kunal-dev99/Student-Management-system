@@ -183,8 +183,16 @@ class StatutoryEngine:
 
     async def profile_detail(self, profile_id: uuid.UUID) -> dict:
         p = await self.get_profile(profile_id)
-        return {**self.profile_out(p),
-                "fields": [self.mapping_out(m) for m in await self._mappings(p.id)]}
+        # ICR G5 — surface where each field is captured on the record ("keyed_at"), from the spec,
+        # so Registry can see the record location behind every mapping, not just the source path.
+        from app.modules.exports.spec_resolver import resolve_fields
+        keyed = {f["field"]: f.get("keyed_at") for f in await resolve_fields(self.session, p.code)}
+        fields = []
+        for m in await self._mappings(p.id):
+            row = self.mapping_out(m)
+            row["keyedAt"] = keyed.get(m.target_field)
+            fields.append(row)
+        return {**self.profile_out(p), "fields": fields}
 
     async def create_profile(
         self, *, code: str, name: str, academic_year: str,
@@ -434,17 +442,18 @@ class StatutoryEngine:
                 values[m.target_field] = text
                 out_row.append(text)
 
-            # ICR G5 — spec-level cross-field / format rules (e.g. ENDDATE >= COMDATE).
-            # Cross-field / format issues are advisory (severity "warning"): they surface in the
-            # report for Registry to review but, unlike an unmapped required field or a bad coding
-            # value, they don't block sign-off.
+            # ICR G5 — spec-level cross-field / format rules (e.g. ENDDATE >= COMDATE). Each rule
+            # carries its own severity: an "error" rule is a hard fail that blocks sign-off (HESA
+            # would reject the file); a "warning" rule is advisory and surfaces for review only.
+            # Default is "error" — a rule the Registry bothered to state is normally enforced.
             for rule in spec_rules:
                 flds = rule.get("fields", [])
+                sev = rule.get("severity", "error")
                 if rule["kind"] == "order" and len(flds) == 2:
                     a, b = values.get(flds[0], ""), values.get(flds[1], "")
                     if a and b and a > b:  # YYYYMMDD compares correctly as text
                         issues.append({
-                            "studentRef": ref, "field": flds[1], "severity": "warning",
+                            "studentRef": ref, "field": flds[1], "severity": sev,
                             "message": f"{flds[1]} ({b}) — {rule.get('message', 'ordering rule failed')} "
                                        f"({flds[0]} is {a}).",
                         })
@@ -453,7 +462,7 @@ class StatutoryEngine:
                         v = values.get(fld, "")
                         if v and not re.fullmatch(r"\d{8}", v):
                             issues.append({
-                                "studentRef": ref, "field": fld, "severity": "warning",
+                                "studentRef": ref, "field": fld, "severity": sev,
                                 "message": f"{fld} ('{v}') {rule.get('message', 'must be YYYYMMDD')}.",
                             })
             rows.append(out_row)
@@ -467,7 +476,9 @@ class StatutoryEngine:
                 "errors": sum(1 for i in issues if i["severity"] == "error"),
                 "warnings": sum(1 for i in issues if i["severity"] == "warning"),
                 "issues": issues,
-                # Sign-off blocks on hard errors only; warnings (cross-field/format) are advisory.
+                # Sign-off blocks on any error — an unmapped required field, a bad coding value, or
+                # a failed error-severity rule (e.g. ENDDATE < COMDATE). Warning-severity rules are
+                # advisory and do not block.
                 "valid": not any(i["severity"] == "error" for i in issues),
             },
         }

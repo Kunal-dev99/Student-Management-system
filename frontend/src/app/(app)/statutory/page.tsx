@@ -693,6 +693,7 @@ export default function StatutoryPage() {
                         <TableHead>#</TableHead>
                         <TableHead>Target field</TableHead>
                         <TableHead>Source expression</TableHead>
+                        <TableHead>Keyed on record</TableHead>
                         <TableHead>Transform</TableHead>
                         <TableHead>Required</TableHead>
                         <TableHead>Allowed values</TableHead>
@@ -704,7 +705,8 @@ export default function StatutoryPage() {
                         <TableRow key={f.id}>
                           <TableCell className="num text-muted-foreground">{f.position}</TableCell>
                           <TableCell className="font-mono text-xs font-medium">{f.targetField}</TableCell>
-                          <TableCell className="font-mono text-xs text-muted-foreground">{f.sourceExpression}</TableCell>
+                          <TableCell className="font-mono text-xs text-muted-foreground">{f.sourceExpression || <span className="italic">unmapped</span>}</TableCell>
+                          <TableCell className="text-xs text-muted-foreground">{f.keyedAt ?? '—'}</TableCell>
                           <TableCell className="text-sm">{f.transform ?? '—'}</TableCell>
                           <TableCell>
                             {f.required ? <Badge variant="warning">required</Badge> : <span className="text-muted-foreground text-sm">—</span>}

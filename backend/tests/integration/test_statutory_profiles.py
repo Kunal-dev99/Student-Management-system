@@ -208,14 +208,19 @@ async def test_transforms_are_discoverable(ctx):
 from app.modules.exports.specs import HESA_STUDENT_2026
 
 
+# Date fields carry a valid YYYYMMDD default (ordered so ENDDATE >= COMDATE), so the error-severity
+# format/order rules pass — otherwise 'X' would (correctly) hard-fail those rules and block sign-off.
+_DATE_DEFAULTS = {"BIRTHDTE": "20000101", "COMDATE": "20261001", "ENDDATE": "20290930"}
+
+
 async def _fully_map_hesa(c, h, profile_id):
     """Add a minimal but valid mapping for every mandatory HESA field.
 
     Uses an unresolvable source_expression per field so the ``defaultValue`` is applied — that
-    means every produced row carries the first allowed code (or 'X' for free fields), which
-    passes both the required-not-empty and allowed-values checks."""
+    means every produced row carries the first allowed code (or a valid date, or 'X' for free
+    fields), which passes the required-not-empty, allowed-values and date rule checks."""
     for i, spec in enumerate(HESA_STUDENT_2026, start=1):
-        default = (spec.get("allowed") or [""])[0] or "X"
+        default = _DATE_DEFAULTS.get(spec["field"]) or (spec.get("allowed") or [""])[0] or "X"
         payload = {
             "targetField": spec["field"],
             "sourceExpression": f"student._absent_{spec['field']}",

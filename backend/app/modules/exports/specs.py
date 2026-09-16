@@ -35,6 +35,7 @@ class SpecRule(TypedDict, total=False):
     kind: str               # "order" (fields[0] <= fields[1]) | "format_yyyymmdd"
     fields: list[str]
     message: str
+    severity: str           # "error" (hard fail, blocks sign-off) | "warning" (advisory); default error
 
 
 class SpecPack(TypedDict):
@@ -118,10 +119,12 @@ HESA_STUDENT_2026: list[MandatoryField] = [
      "keyed_at": "Recruitment › entry route"},
 ]
 
+# Both are genuine HESA hard rejects, so they are errors: a return failing them would be
+# refused at submission, so it must not be signable here either.
 HESA_STUDENT_RULES: list[SpecRule] = [
-    {"kind": "order", "fields": ["COMDATE", "ENDDATE"],
+    {"kind": "order", "fields": ["COMDATE", "ENDDATE"], "severity": "error",
      "message": "ENDDATE must be on or after COMDATE"},
-    {"kind": "format_yyyymmdd", "fields": ["BIRTHDTE", "COMDATE", "ENDDATE"],
+    {"kind": "format_yyyymmdd", "fields": ["BIRTHDTE", "COMDATE", "ENDDATE"], "severity": "error",
      "message": "must be a valid YYYYMMDD date"},
 ]
 

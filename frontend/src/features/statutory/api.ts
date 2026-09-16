@@ -38,6 +38,8 @@ export interface FieldMapping {
   defaultValue: string | null
   required: boolean
   allowedValues: string[] | null
+  /** ICR G5 — where this value is captured on the student record (from the spec), if known. */
+  keyedAt?: string | null
 }
 
 export interface ProfileDetail extends ReportProfile {
