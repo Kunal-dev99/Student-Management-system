@@ -271,9 +271,10 @@ class StatutoryEngine:
         sign-off gate and validation flag exactly what Registry still needs to supply. This is the
         honest version of "check the website": HESA publishes the spec, we ship it as data.
         """
-        from app.modules.exports.specs import spec_pack
+        from app.modules.exports.spec_resolver import resolve_pack
 
-        pack = spec_pack(spec_key)
+        # Through the resolver — an accepted advisory's active version supersedes the code baseline.
+        pack = await resolve_pack(self.session, spec_key)
         if pack is None:
             raise NotFoundError(f"No spec pack '{spec_key}'")
         profile = await self.create_profile(
@@ -405,8 +406,8 @@ class StatutoryEngine:
 
         import re
 
-        from app.modules.exports.specs import rules_for
-        spec_rules = rules_for(profile.code)
+        from app.modules.exports.spec_resolver import resolve_rules
+        spec_rules = await resolve_rules(self.session, profile.code)
 
         for record in records:
             out_row, ref = [], record["student"]["ref"]
@@ -479,12 +480,12 @@ class StatutoryEngine:
         A profile can only be signed off when this returns no ``missing`` entries. Each entry names
         the exact spec field and the coding frame (if any) the profile would need to satisfy.
         """
-        from app.modules.exports.specs import spec_for
+        from app.modules.exports.spec_resolver import resolve_fields
 
         profile = await self.get_profile(profile_id)
         mappings = await self._mappings(profile_id)
         mapped = {m.target_field for m in mappings}
-        spec = spec_for(profile.code)
+        spec = await resolve_fields(self.session, profile.code)
         missing = [
             {"field": s["field"], "description": s.get("description", ""),
              "allowed": s.get("allowed")}

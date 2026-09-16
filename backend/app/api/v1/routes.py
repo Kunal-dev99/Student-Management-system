@@ -69,6 +69,7 @@ from app.modules.supervision.messages_router import router as sup_messages_route
 from app.modules.relationship.router import router as relationship_router
 from app.modules.exports.router import router as exports_router
 from app.modules.exports.router import profiles_router as report_profiles_router
+from app.modules.exports.router import advisories_router as report_advisories_router
 from app.modules.documents.router import router as documents_router
 from app.modules.notifications.router import router as notification_prefs_router
 from app.modules.audit.router import router as audit_router
@@ -187,6 +188,7 @@ api_router.include_router(relationship_router)
 # Exports (statutory)
 api_router.include_router(exports_router)
 api_router.include_router(report_profiles_router)
+api_router.include_router(report_advisories_router)
 
 # Phase 4A — documents, notification preferences, audit trail
 api_router.include_router(documents_router)

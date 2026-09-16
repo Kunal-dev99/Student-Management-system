@@ -11,7 +11,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import require_permission
 from app.db.session import get_session
-from app.modules.exports.schemas import ExportJobOut, ExportRequest
+from app.modules.exports.schemas import (
+    AdvisoryDecision,
+    AdvisoryIngestRequest,
+    ExportJobOut,
+    ExportRequest,
+)
 from app.modules.exports.service import ExportService
 
 router = APIRouter(prefix="/exports", tags=["exports"])
@@ -131,10 +136,14 @@ async def list_transforms(_=Depends(require_permission("reporting.read"))) -> di
 
 
 @profiles_router.get("/specs", summary="Published spec packs a profile can be created from")
-async def list_specs(_=Depends(require_permission("reporting.read"))) -> dict:
-    from app.modules.exports.specs import list_spec_packs
+async def list_specs(
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("reporting.read")),
+) -> dict:
+    # Through the resolver so an accepted advisory's version shows in the picker (ICR G5).
+    from app.modules.exports.spec_resolver import resolve_list_packs
 
-    return {"specs": list_spec_packs()}
+    return {"specs": await resolve_list_packs(session)}
 
 
 @profiles_router.post("/from-spec", status_code=201,
@@ -284,3 +293,91 @@ async def unsign_profile(
 ) -> dict:
     eng = _engine(session)
     return eng.profile_out(await eng.unsign(profile_id))
+
+
+# --- ICR G5 — statutory advisory ingestion (ingest → recommend → Registry accepts) ---
+
+advisories_router = APIRouter(prefix="/report-advisories", tags=["exports"])
+
+
+def _advisory_out(advisory) -> dict:
+    from app.modules.exports.schemas import AdvisoryOut
+
+    out = AdvisoryOut.model_validate(advisory).model_dump(by_alias=True)
+    # Echo transient parse warnings when the service attached them (freshly ingested only).
+    warnings = getattr(advisory, "parse_warnings", None)
+    if warnings is not None:
+        out["parseWarnings"] = warnings
+    return out
+
+
+@advisories_router.get("", summary="Ingested statutory advisories")
+async def list_advisories(
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("reporting.read")),
+) -> dict:
+    from app.modules.exports.advisory_service import AdvisoryService
+
+    advisories = await AdvisoryService(session).list_recent()
+    return {"advisories": [_advisory_out(a) for a in advisories]}
+
+
+@advisories_router.post("/ingest", status_code=201,
+                        summary="Ingest a published advisory and diff it against the current pack")
+async def ingest_advisory(
+    body: AdvisoryIngestRequest,
+    session: AsyncSession = Depends(get_session),
+    principal=Depends(require_permission("admin.configure")),
+) -> dict:
+    from app.modules.exports.advisory_service import AdvisoryService
+
+    advisory = await AdvisoryService(session).ingest(
+        pack_code=body.pack_code, academic_year=body.academic_year, title=body.title,
+        raw_text=body.raw_text, source=body.source, created_by=principal.user_id,
+    )
+    return _advisory_out(advisory)
+
+
+@advisories_router.get("/{advisory_id}", summary="One advisory with its proposed changes")
+async def get_advisory(
+    advisory_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("reporting.read")),
+) -> dict:
+    from app.modules.exports.advisory_service import AdvisoryService
+
+    return _advisory_out(await AdvisoryService(session).get(advisory_id))
+
+
+@advisories_router.post("/{advisory_id}/accept",
+                        summary="Accept an advisory — makes its proposed pack the active version")
+async def accept_advisory(
+    advisory_id: uuid.UUID,
+    body: AdvisoryDecision,
+    session: AsyncSession = Depends(get_session),
+    principal=Depends(require_permission("reports.signoff")),
+) -> dict:
+    from app.modules.exports.advisory_service import AdvisoryService
+    from app.modules.exports.schemas import SpecVersionOut
+
+    version = await AdvisoryService(session).accept(
+        advisory_id, user_id=principal.user_id, note=body.note,
+    )
+    out = SpecVersionOut.model_validate(version).model_dump(by_alias=True)
+    out["fieldCount"] = len(version.fields or [])
+    return out
+
+
+@advisories_router.post("/{advisory_id}/reject", summary="Reject an advisory (no change to the pack)")
+async def reject_advisory(
+    advisory_id: uuid.UUID,
+    body: AdvisoryDecision,
+    session: AsyncSession = Depends(get_session),
+    principal=Depends(require_permission("reports.signoff")),
+) -> dict:
+    from app.modules.exports.advisory_service import AdvisoryService
+
+    advisory = await AdvisoryService(session).reject(
+        advisory_id, user_id=principal.user_id, note=body.note,
+    )
+    return _advisory_out(advisory)

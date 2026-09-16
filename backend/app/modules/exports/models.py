@@ -24,7 +24,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, TimestampMixin, UUIDMixin
-from app.modules.exports.constants import ExportStatus
+from app.modules.exports.constants import AdvisoryStatus, ExportStatus, SpecVersionStatus
 
 
 class ExportJob(UUIDMixin, Base):
@@ -83,3 +83,72 @@ class ReportFieldMapping(UUIDMixin, TimestampMixin, Base):
     default_value: Mapped[str | None] = mapped_column(String(200), nullable=True)
     required: Mapped[bool] = mapped_column(Boolean, default=False)
     allowed_values: Mapped[list | None] = mapped_column(JSON, nullable=True)
+
+
+# --- ICR G5 — statutory advisory ingestion ---------------------------------
+
+class StatutoryAdvisory(UUIDMixin, TimestampMixin, Base):
+    """A published statutory advisory the Registry has ingested for review.
+
+    The advisory's raw text is parsed into a deterministic set of proposed ``changes`` diffed
+    against the current spec pack, together with the full ``proposed_fields``/``proposed_rules``
+    that would result. Nothing takes effect until a Registry owner *accepts* it — acceptance
+    materialises a new active ``StatutorySpecVersion``. This is deliberately a human-gated
+    ingest→recommend→accept flow, never a live scraper.
+    """
+    __tablename__ = "statutory_advisory"
+
+    pack_code: Mapped[str] = mapped_column(String(40), index=True)     # e.g. HESA_STUDENT
+    academic_year: Mapped[str] = mapped_column(String(9), index=True)  # e.g. 2027/28
+    title: Mapped[str] = mapped_column(String(200))
+    raw_text: Mapped[str] = mapped_column(Text)                        # the advisory as pasted/uploaded
+    source: Mapped[str] = mapped_column(String(20), default="paste")   # paste | upload
+    status: Mapped[AdvisoryStatus] = mapped_column(
+        Enum(AdvisoryStatus, name="advisory_status"), default=AdvisoryStatus.ingested, index=True
+    )
+    base_version: Mapped[int] = mapped_column(Integer, default=1)      # pack version diffed against
+    parse_source: Mapped[str] = mapped_column(String(20), default="directive")  # directive | model
+    # The deterministic diff and the resulting pack, stored as JSON so the review UI and the
+    # accept step read exactly what was proposed at ingest time.
+    changes: Mapped[list] = mapped_column(JSON, default=list)
+    proposed_fields: Mapped[list] = mapped_column(JSON, default=list)
+    proposed_rules: Mapped[list] = mapped_column(JSON, default=list)
+
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    decided_by: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    decision_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class StatutorySpecVersion(UUIDMixin, TimestampMixin, Base):
+    """A DB-backed spec-pack version — the result of accepting an advisory.
+
+    The code catalogue (``specs.SPEC_PACKS``) is the baseline (version 1). Each accepted advisory
+    writes a new version here; the resolver overlays the latest ``active`` version on the baseline,
+    so ``from_spec``, validation and the sign-off gate all pick it up without a code change.
+    """
+    __tablename__ = "statutory_spec_version"
+
+    pack_code: Mapped[str] = mapped_column(String(40), index=True)
+    academic_year: Mapped[str] = mapped_column(String(9), index=True)
+    version: Mapped[int] = mapped_column(Integer, default=2)
+    name: Mapped[str] = mapped_column(String(200))
+    status: Mapped[SpecVersionStatus] = mapped_column(
+        Enum(SpecVersionStatus, name="spec_version_status"), default=SpecVersionStatus.active, index=True
+    )
+    fields: Mapped[list] = mapped_column(JSON, default=list)
+    rules: Mapped[list] = mapped_column(JSON, default=list)
+    source_advisory_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("statutory_advisory.id", ondelete="SET NULL"), nullable=True
+    )
+    accepted_by: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
+    __table_args__ = (
+        Index("uq_spec_version", "pack_code", "academic_year", "version", unique=True),
+    )
