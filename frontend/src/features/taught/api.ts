@@ -6,6 +6,7 @@ import { api } from '@/shared/api/client'
 // Marks/weights are Decimal server-side and serialize to strings to preserve precision.
 export type AssessmentType = 'essay' | 'exam' | 'coursework' | 'presentation' | 'dissertation'
 export type ModuleEnrolmentStatus = 'enrolled' | 'completed' | 'withdrawn' | 'failed'
+export type ModuleOutcome = 'pending' | 'passed' | 'condoned' | 'failed'
 export type ClassificationBand = 'distinction' | 'merit' | 'pass' | 'fail'
 
 export interface Assessment {
@@ -16,6 +17,9 @@ export interface Assessment {
   weightPct: string
   maxMark: string
   dueDate: string | null
+  passMark: string
+  resitAllowed: boolean
+  resitCap: string | null
 }
 
 export interface TaughtModule {
@@ -25,6 +29,9 @@ export interface TaughtModule {
   title: string
   credits: number
   term: string | null
+  level: number
+  isCore: boolean
+  convenorPersonId: string | null
   assessments: Assessment[]
 }
 
@@ -34,6 +41,8 @@ export interface AssessmentResult {
   mark: string | null
   grade: string | null
   isResit: boolean
+  attemptNumber: number
+  capped: boolean
   submittedAt: string | null
   markedAt: string | null
 }
@@ -48,6 +57,9 @@ export interface Enrolment {
   academicYear: string
   status: ModuleEnrolmentStatus
   moduleMark: string | null
+  outcome: ModuleOutcome
+  creditsAwarded: number | null
+  condoned: boolean
   results: AssessmentResult[]
 }
 
@@ -57,10 +69,15 @@ export interface Dissertation {
   title: string | null
   supervisorPersonId: string | null
   supervisorName: string | null
+  secondMarkerPersonId: string | null
+  secondMarkerName: string | null
   submittedAt: string | null
   markedAt: string | null
+  firstMark: string | null
+  secondMark: string | null
   mark: string | null
   grade: string | null
+  wordCount: number | null
 }
 
 export interface TaughtAward {
@@ -104,13 +121,19 @@ function invalidate(qc: ReturnType<typeof useQueryClient>, studentId: string) {
 
 // --- module / assessment configuration (admin.configure) ---
 
-export interface ModuleInput { code: string; title: string; credits?: number; term?: string }
+export interface ModuleInput {
+  code: string; title: string; credits?: number; term?: string
+  level?: number; isCore?: boolean
+}
 export interface AssessmentInput {
   title: string
   assessmentType: AssessmentType
   weightPct?: string
   maxMark?: string
   dueDate?: string
+  passMark?: string
+  resitAllowed?: boolean
+  resitCap?: string | null
 }
 
 export function useCreateModule(programmeId: string) {
@@ -161,11 +184,23 @@ export function useSetEnrolmentStatus(studentId: string) {
   })
 }
 
+/** Board condonement of a failed module — awards its credits despite the fail. */
+export function useCondoneModule(studentId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ enrolmentId, condoned }: { enrolmentId: string; condoned: boolean }) =>
+      api.patch<Enrolment>(`/module-enrolments/${enrolmentId}/condone`, { condoned }),
+    onSuccess: () => invalidate(qc, studentId),
+  })
+}
+
 export function useUpsertDissertation(studentId: string) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (body: {
-      title?: string; supervisorPersonId?: string; submittedAt?: string; mark?: string; grade?: string
+      title?: string; supervisorPersonId?: string; secondMarkerPersonId?: string
+      submittedAt?: string; firstMark?: string; secondMark?: string; mark?: string
+      grade?: string; wordCount?: number
     }) => api.put<Dissertation>(`/students/${studentId}/dissertation`, body),
     onSuccess: () => invalidate(qc, studentId),
   })

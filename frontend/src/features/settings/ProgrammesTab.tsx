@@ -24,8 +24,18 @@ import { useToast } from '@/components/ui/use-toast'
 import {
   useProgrammesAdmin, useCreateProgramme, useUpdateProgramme,
   useDefinitions, useCreateDefinition, useUpdateDefinition, useDeleteDefinition,
-  type ProgrammeDetail, type ProgrammeType,
+  type ProgrammeDetail, type ProgrammeType, type GradingPolicy,
 } from '@/features/programmes/api'
+
+/** Labels + the platform-default value for each grading-policy field (mirrors DEFAULT_GRADING_POLICY). */
+const POLICY_FIELDS: { key: keyof GradingPolicy; label: string; fallback: number }[] = [
+  { key: 'passMark', label: 'Module pass mark', fallback: 50 },
+  { key: 'resitCap', label: 'Resit cap', fallback: 50 },
+  { key: 'condonementCredits', label: 'Max condonement credits', fallback: 30 },
+  { key: 'distinctionMark', label: 'Distinction from', fallback: 70 },
+  { key: 'meritMark', label: 'Merit from', fallback: 60 },
+  { key: 'passMarkAward', label: 'Award pass from', fallback: 50 },
+]
 
 function num(v: string): number | null {
   const n = parseInt(v, 10)
@@ -182,6 +192,10 @@ function ProgrammeEditor({ programme, onPatch }: {
         </div>
       </div>
 
+      {programme.programmeType === 'taught' && (
+        <GradingPolicyEditor programme={programme} onPatch={onPatch} />
+      )}
+
       <div>
         <h4 className="text-sm font-medium mb-2">Milestone template</h4>
         <div className="card-elevated overflow-hidden">
@@ -236,6 +250,51 @@ function ProgrammeEditor({ programme, onPatch }: {
           offset re-dates non-overridden milestones the next time a student&apos;s schedule is regenerated.
         </p>
       </div>
+    </div>
+  )
+}
+
+/**
+ * Per-programme grading policy — the classification bands, pass mark, resit cap and condonement
+ * limit that the exam board applies. Blank fields fall back to the platform default (shown as the
+ * placeholder). Saved as a partial JSON override on the programme; only the fields set here differ.
+ */
+function GradingPolicyEditor({ programme, onPatch }: {
+  programme: ProgrammeDetail
+  onPatch: (id: string, patch: Record<string, unknown>) => Promise<void>
+}) {
+  const policy = programme.gradingPolicy ?? {}
+
+  const save = (key: keyof GradingPolicy, raw: string) => {
+    const next: GradingPolicy = { ...policy }
+    if (raw.trim() === '') delete next[key]
+    else {
+      const v = parseInt(raw, 10)
+      if (!Number.isFinite(v)) return
+      next[key] = v
+    }
+    // No change → skip the round-trip.
+    if ((policy[key] ?? undefined) === next[key]) return
+    onPatch(programme.id, { gradingPolicy: next })
+  }
+
+  return (
+    <div>
+      <h4 className="text-sm font-medium mb-2">Grading policy</h4>
+      <div className="card-elevated grid gap-3 p-3 sm:grid-cols-3">
+        {POLICY_FIELDS.map((f) => (
+          <div key={f.key} className="space-y-1.5">
+            <Label className="text-xs">{f.label}</Label>
+            <Input className="h-8" type="number" placeholder={`default ${f.fallback}`}
+              defaultValue={policy[f.key] ?? ''}
+              onBlur={(e) => save(f.key, e.target.value)} />
+          </div>
+        ))}
+      </div>
+      <p className="text-helper mt-2">
+        Blank uses the platform default (shown as the placeholder). These drive module pass/fail,
+        capped resits, board condonement and the final classification bands for this programme.
+      </p>
     </div>
   )
 }

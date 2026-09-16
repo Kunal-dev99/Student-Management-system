@@ -6,6 +6,16 @@ import { api } from '@/shared/api/client'
 
 export type ProgrammeType = 'research' | 'taught'
 
+/** Per-programme overrides on the default taught grading policy (all optional). */
+export interface GradingPolicy {
+  passMark?: number
+  resitCap?: number
+  condonementCredits?: number
+  distinctionMark?: number
+  meritMark?: number
+  passMarkAward?: number
+}
+
 export interface ProgrammeDetail {
   id: string
   name: string
@@ -15,6 +25,7 @@ export interface ProgrammeDetail {
   taughtTotalCredits: number | null
   durationMonths: number | null
   supervisionMeetingIntervalDays: number | null
+  gradingPolicy: GradingPolicy | null
 }
 
 export interface ProgrammeInput {

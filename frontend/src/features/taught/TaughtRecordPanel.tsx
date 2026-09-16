@@ -13,9 +13,9 @@ import {
 import { useToast } from '@/components/ui/use-toast'
 import { useCan } from '@/shared/auth/Can'
 import {
-  useAddAssessment, useComputeAward, useCreateModule, useEnrolModule, useProgrammeModules,
-  useRecordResult, useSetEnrolmentStatus, useTaughtRecord, useUpsertDissertation,
-  type AssessmentType, type ClassificationBand, type Enrolment,
+  useAddAssessment, useComputeAward, useCondoneModule, useCreateModule, useEnrolModule,
+  useProgrammeModules, useRecordResult, useSetEnrolmentStatus, useTaughtRecord, useUpsertDissertation,
+  type AssessmentType, type ClassificationBand, type Enrolment, type ModuleOutcome,
 } from './api'
 
 const BAND_VARIANT: Record<ClassificationBand, 'success' | 'info' | 'secondary' | 'destructive'> = {
@@ -23,6 +23,9 @@ const BAND_VARIANT: Record<ClassificationBand, 'success' | 'info' | 'secondary' 
 }
 const STATUS_VARIANT: Record<Enrolment['status'], 'secondary' | 'success' | 'warning' | 'destructive'> = {
   enrolled: 'secondary', completed: 'success', withdrawn: 'warning', failed: 'destructive',
+}
+const OUTCOME_VARIANT: Record<ModuleOutcome, 'secondary' | 'success' | 'info' | 'destructive'> = {
+  pending: 'secondary', passed: 'success', condoned: 'info', failed: 'destructive',
 }
 const ASSESSMENT_TYPES: AssessmentType[] = ['essay', 'exam', 'coursework', 'presentation', 'dissertation']
 
@@ -43,6 +46,7 @@ export function TaughtRecordPanel({ studentId, programmeId }: { studentId: strin
   const enrol = useEnrolModule(studentId)
   const recordResult = useRecordResult(studentId)
   const setStatus = useSetEnrolmentStatus(studentId)
+  const condone = useCondoneModule(studentId)
   const upsertDiss = useUpsertDissertation(studentId)
   const computeAward = useComputeAward(studentId)
 
@@ -51,7 +55,10 @@ export function TaughtRecordPanel({ studentId, programmeId }: { studentId: strin
   const [academicYear, setAcademicYear] = useState(currentAcademicYear())
   const [resultDraft, setResultDraft] = useState<Record<string, { assessmentId: string; mark: string; isResit: boolean }>>({})
   const [dissTitle, setDissTitle] = useState('')
+  const [dissFirst, setDissFirst] = useState('')
+  const [dissSecond, setDissSecond] = useState('')
   const [dissMark, setDissMark] = useState('')
+  const [dissWords, setDissWords] = useState('')
   const [manageOpen, setManageOpen] = useState(false)
 
   const moduleById = useMemo(
@@ -97,15 +104,23 @@ export function TaughtRecordPanel({ studentId, programmeId }: { studentId: strin
               const draft = resultDraft[e.id] ?? { assessmentId: '', mark: '', isResit: false }
               return (
                 <div key={e.id} className="border border-border rounded-md p-3">
-                  <div className="flex items-center justify-between">
-                    <button type="button" className="flex items-center gap-2 hover:text-primary"
+                  <div className="flex items-center justify-between gap-2">
+                    <button type="button" className="flex items-center gap-2 hover:text-primary min-w-0"
                       onClick={() => setExpanded((s) => ({ ...s, [e.id]: !s[e.id] }))}>
-                      {isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                      <span className="text-sm font-medium">{e.moduleCode} — {e.moduleTitle}</span>
-                      <Badge variant={STATUS_VARIANT[e.status]}>{e.status}</Badge>
-                      <span className="text-helper num">{e.credits ?? 0} cr · {e.academicYear}</span>
+                      {isOpen ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />}
+                      <span className="text-sm font-medium truncate">{e.moduleCode} — {e.moduleTitle}</span>
+                      {mod && <Badge variant="outline">L{mod.level}{mod.isCore ? ' · core' : ' · optional'}</Badge>}
+                      <span className="text-helper num whitespace-nowrap">{e.credits ?? 0} cr · {e.academicYear}</span>
                     </button>
-                    <span className="text-sm">Module mark <span className="num font-medium">{num(e.moduleMark)}</span></span>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <Badge variant={OUTCOME_VARIANT[e.outcome]}>
+                        {e.outcome}{e.condoned ? ' (condoned)' : ''}
+                      </Badge>
+                      <span className="text-sm whitespace-nowrap">
+                        <span className="num font-medium">{num(e.moduleMark)}</span>
+                        {e.creditsAwarded != null && <span className="text-helper"> · {e.creditsAwarded} cr awarded</span>}
+                      </span>
+                    </div>
                   </div>
 
                   {isOpen && (
@@ -120,7 +135,12 @@ export function TaughtRecordPanel({ studentId, programmeId }: { studentId: strin
                                 <span className="min-w-[160px]">{a ? a.title : 'assessment'}</span>
                                 {a && <span className="text-helper">{a.assessmentType} · {Number(a.weightPct).toFixed(0)}%</span>}
                                 <span className="num font-medium">{num(r.mark)}</span>
+                                {a && Number(r.mark) < Number(a.passMark) && r.mark != null && (
+                                  <span className="text-[10px] text-[hsl(var(--destructive))]">below pass {Number(a.passMark).toFixed(0)}</span>
+                                )}
+                                {r.attemptNumber > 1 && <span className="text-helper">attempt {r.attemptNumber}</span>}
                                 {r.isResit && <Badge variant="outline">resit</Badge>}
+                                {r.capped && <Badge variant="warning">capped</Badge>}
                               </div>
                             )
                           })}
@@ -156,7 +176,7 @@ export function TaughtRecordPanel({ studentId, programmeId }: { studentId: strin
                       )}
 
                       {canChange && (
-                        <div className="flex items-center gap-2 pt-1">
+                        <div className="flex flex-wrap items-center gap-2 pt-1">
                           <span className="text-helper">Set status:</span>
                           {(['enrolled', 'completed', 'withdrawn', 'failed'] as const).map((st) => (
                             <Button key={st} size="sm" variant={e.status === st ? 'secondary' : 'ghost'} className="h-7"
@@ -165,6 +185,19 @@ export function TaughtRecordPanel({ studentId, programmeId }: { studentId: strin
                               {st}
                             </Button>
                           ))}
+                          {/* Board condonement — only relevant when the module has failed. */}
+                          {(e.outcome === 'failed' || e.condoned) && (
+                            <Button size="sm" variant={e.condoned ? 'ghost' : 'secondary'} className="h-7 ml-2"
+                              disabled={condone.isPending}
+                              onClick={async () => {
+                                try {
+                                  await condone.mutateAsync({ enrolmentId: e.id, condoned: !e.condoned })
+                                  toast({ title: e.condoned ? 'Condonement removed' : 'Module condoned — credits awarded' })
+                                } catch (er) { err(er) }
+                              }}>
+                              {e.condoned ? 'Un-condone' : 'Condone fail'}
+                            </Button>
+                          )}
                         </div>
                       )}
                     </div>
@@ -198,25 +231,38 @@ export function TaughtRecordPanel({ studentId, programmeId }: { studentId: strin
           <div className="space-y-2 border-t border-border/60 pt-4">
             <p className="text-label">Dissertation</p>
             {data?.dissertation ? (
-              <div className="flex flex-wrap items-center gap-3 text-sm">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
                 <span className="font-medium">{data.dissertation.title ?? 'Untitled'}</span>
-                {data.dissertation.supervisorName && <span className="text-helper">supervised by {data.dissertation.supervisorName}</span>}
-                <span>mark <span className="num font-medium">{num(data.dissertation.mark)}</span></span>
+                {data.dissertation.supervisorName && <span className="text-helper">supervisor {data.dissertation.supervisorName}</span>}
+                {data.dissertation.secondMarkerName && <span className="text-helper">2nd marker {data.dissertation.secondMarkerName}</span>}
+                {(data.dissertation.firstMark || data.dissertation.secondMark) && (
+                  <span className="text-helper num">
+                    1st {num(data.dissertation.firstMark)} · 2nd {num(data.dissertation.secondMark)}
+                  </span>
+                )}
+                <span>agreed <span className="num font-medium">{num(data.dissertation.mark)}</span></span>
+                {data.dissertation.wordCount != null && <span className="text-helper num">{data.dissertation.wordCount.toLocaleString()} words</span>}
               </div>
             ) : <p className="text-helper">No dissertation recorded.</p>}
             {canChange && (
               <div className="flex flex-wrap items-center gap-2">
-                <Input className="h-8 w-64" placeholder="Dissertation title"
+                <Input className="h-8 w-56" placeholder="Dissertation title"
                   value={dissTitle || data?.dissertation?.title || ''} onChange={(e) => setDissTitle(e.target.value)} />
-                <Input className="h-8 w-24" type="number" placeholder="Mark" value={dissMark} onChange={(e) => setDissMark(e.target.value)} />
+                <Input className="h-8 w-20" type="number" placeholder="1st" value={dissFirst} onChange={(e) => setDissFirst(e.target.value)} title="First marker's mark" />
+                <Input className="h-8 w-20" type="number" placeholder="2nd" value={dissSecond} onChange={(e) => setDissSecond(e.target.value)} title="Second marker's mark" />
+                <Input className="h-8 w-24" type="number" placeholder="Agreed" value={dissMark} onChange={(e) => setDissMark(e.target.value)} title="Agreed mark (used for classification)" />
+                <Input className="h-8 w-24" type="number" placeholder="Words" value={dissWords} onChange={(e) => setDissWords(e.target.value)} />
                 <Button size="sm" variant="secondary" disabled={upsertDiss.isPending}
                   onClick={async () => {
                     try {
                       await upsertDiss.mutateAsync({
                         title: (dissTitle || data?.dissertation?.title) ?? undefined,
+                        firstMark: dissFirst || undefined,
+                        secondMark: dissSecond || undefined,
                         mark: dissMark || undefined,
+                        wordCount: dissWords ? Number(dissWords) : undefined,
                       })
-                      setDissMark('')
+                      setDissFirst(''); setDissSecond(''); setDissMark(''); setDissWords('')
                       toast({ title: 'Dissertation saved' })
                     } catch (e) { err(e) }
                   }}>Save dissertation</Button>
@@ -246,23 +292,24 @@ function ModuleManager({ programmeId }: { programmeId: string }) {
   const modules = useProgrammeModules(programmeId)
   const createModule = useCreateModule(programmeId)
   const addAssessment = useAddAssessment(programmeId)
-  const [mod, setMod] = useState({ code: '', title: '', credits: '' })
-  const [asmt, setAsmt] = useState<Record<string, { title: string; assessmentType: AssessmentType; weightPct: string }>>({})
+  const [mod, setMod] = useState({ code: '', title: '', credits: '', level: '7', isCore: true })
+  const [asmt, setAsmt] = useState<Record<string, { title: string; assessmentType: AssessmentType; weightPct: string; passMark: string; resitCap: string }>>({})
   const err = (e: unknown) => toast({ title: 'Action failed', description: (e as Error).message, variant: 'destructive' })
 
   return (
     <div className="mt-2 space-y-3">
       {(modules.data ?? []).map((m) => {
-        const a = asmt[m.id] ?? { title: '', assessmentType: 'essay' as AssessmentType, weightPct: '' }
+        const a = asmt[m.id] ?? { title: '', assessmentType: 'essay' as AssessmentType, weightPct: '', passMark: '', resitCap: '' }
         return (
           <div key={m.id} className="rounded-md border border-border/60 p-2 text-sm">
             <div className="flex items-center gap-2">
               <span className="font-medium">{m.code} — {m.title}</span>
               <span className="text-helper num">{m.credits} cr</span>
+              <Badge variant="outline">L{m.level}{m.isCore ? ' · core' : ' · optional'}</Badge>
             </div>
             <div className="mt-1 pl-2 text-helper">
               {m.assessments.length > 0
-                ? m.assessments.map((x) => `${x.title} (${x.assessmentType}, ${Number(x.weightPct).toFixed(0)}%)`).join(' · ')
+                ? m.assessments.map((x) => `${x.title} (${x.assessmentType}, ${Number(x.weightPct).toFixed(0)}%, pass ${Number(x.passMark).toFixed(0)}${x.resitCap ? `, resit cap ${Number(x.resitCap).toFixed(0)}` : x.resitAllowed ? '' : ', no resit'})`).join(' · ')
                 : 'No assessments yet.'}
             </div>
             <div className="mt-1 flex flex-wrap items-center gap-2">
@@ -274,11 +321,18 @@ function ModuleManager({ programmeId }: { programmeId: string }) {
               </Select>
               <Input className="h-7 w-20" type="number" placeholder="weight%" value={a.weightPct}
                 onChange={(e) => setAsmt((s) => ({ ...s, [m.id]: { ...a, weightPct: e.target.value } }))} />
+              <Input className="h-7 w-20" type="number" placeholder="pass" value={a.passMark}
+                onChange={(e) => setAsmt((s) => ({ ...s, [m.id]: { ...a, passMark: e.target.value } }))} />
+              <Input className="h-7 w-24" type="number" placeholder="resit cap" value={a.resitCap}
+                onChange={(e) => setAsmt((s) => ({ ...s, [m.id]: { ...a, resitCap: e.target.value } }))} />
               <Button size="sm" className="h-7" disabled={!a.title || addAssessment.isPending}
                 onClick={async () => {
                   try {
-                    await addAssessment.mutateAsync({ moduleId: m.id, body: { title: a.title, assessmentType: a.assessmentType, weightPct: a.weightPct || undefined } })
-                    setAsmt((s) => ({ ...s, [m.id]: { title: '', assessmentType: 'essay', weightPct: '' } }))
+                    await addAssessment.mutateAsync({ moduleId: m.id, body: {
+                      title: a.title, assessmentType: a.assessmentType, weightPct: a.weightPct || undefined,
+                      passMark: a.passMark || undefined, resitCap: a.resitCap || null,
+                    } })
+                    setAsmt((s) => ({ ...s, [m.id]: { title: '', assessmentType: 'essay', weightPct: '', passMark: '', resitCap: '' } }))
                     toast({ title: 'Assessment added' })
                   } catch (e) { err(e) }
                 }}>Add assessment</Button>
@@ -290,11 +344,18 @@ function ModuleManager({ programmeId }: { programmeId: string }) {
         <Input className="h-8 w-28" placeholder="Code" value={mod.code} onChange={(e) => setMod((s) => ({ ...s, code: e.target.value }))} />
         <Input className="h-8 w-56" placeholder="Module title" value={mod.title} onChange={(e) => setMod((s) => ({ ...s, title: e.target.value }))} />
         <Input className="h-8 w-24" type="number" placeholder="Credits" value={mod.credits} onChange={(e) => setMod((s) => ({ ...s, credits: e.target.value }))} />
+        <Input className="h-8 w-20" type="number" placeholder="Level" value={mod.level} onChange={(e) => setMod((s) => ({ ...s, level: e.target.value }))} />
+        <label className="flex items-center gap-1.5 text-sm text-helper">
+          <input type="checkbox" checked={mod.isCore} onChange={(e) => setMod((s) => ({ ...s, isCore: e.target.checked }))} /> Core
+        </label>
         <Button size="sm" disabled={!mod.code || !mod.title || createModule.isPending}
           onClick={async () => {
             try {
-              await createModule.mutateAsync({ code: mod.code, title: mod.title, credits: mod.credits ? Number(mod.credits) : 0 })
-              setMod({ code: '', title: '', credits: '' })
+              await createModule.mutateAsync({
+                code: mod.code, title: mod.title, credits: mod.credits ? Number(mod.credits) : 0,
+                level: mod.level ? Number(mod.level) : undefined, isCore: mod.isCore,
+              })
+              setMod({ code: '', title: '', credits: '', level: '7', isCore: true })
               toast({ title: 'Module created' })
             } catch (e) { err(e) }
           }}>
