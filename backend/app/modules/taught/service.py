@@ -107,10 +107,7 @@ class TaughtService:
         programme = await self._programme(programme_id)
         if programme is None:
             raise NotFoundError("Programme not found")
-        m = TaughtModule(
-            programme_id=programme_id, code=data.code, title=data.title,
-            credits=data.credits, term=data.term,
-        )
+        m = TaughtModule(programme_id=programme_id, **data.model_dump())
         self.repo.add(m)
         await self.session.commit()
         m = await self.repo.get_module(m.id)
@@ -130,10 +127,7 @@ class TaughtService:
         m = await self.repo.get_module(module_id)
         if m is None:
             raise NotFoundError("Module not found")
-        a = ModuleAssessment(
-            module_id=module_id, title=data.title, assessment_type=data.assessment_type,
-            weight_pct=data.weight_pct, max_mark=data.max_mark, due_date=data.due_date,
-        )
+        a = ModuleAssessment(module_id=module_id, **data.model_dump())
         self.repo.add(a)
         await self.session.commit()
         await self.session.refresh(a)
@@ -203,7 +197,9 @@ class TaughtService:
             marked_at=datetime.now(timezone.utc) if marked else None,
             marked_by_user_id=user_id if marked else None,
         )
-        self.repo.add(r)
+        # Append to the loaded collection (not just session.add) so _module_mark /
+        # _recompute_module_result see the new result in the same transaction.
+        e.results.append(r)
         await self.session.flush()
         await self._recompute_module_result(e)
         await self.session.commit()
@@ -317,17 +313,23 @@ class TaughtService:
     async def _dissertation_out(self, d: Dissertation | None) -> dict | None:
         if d is None:
             return None
-        name = None
-        if d.supervisor_person_id:
-            from app.modules.person.models import Person
-            person = await self.session.get(Person, d.supervisor_person_id)
-            if person:
-                name = f"{person.given_name} {person.family_name}"
+        from app.modules.person.models import Person
+
+        async def _name(pid):
+            if not pid:
+                return None
+            p = await self.session.get(Person, pid)
+            return f"{p.given_name} {p.family_name}" if p else None
+
         return {
             "id": d.id, "student_id": d.student_id, "title": d.title,
-            "supervisor_person_id": d.supervisor_person_id, "supervisor_name": name,
+            "supervisor_person_id": d.supervisor_person_id,
+            "supervisor_name": await _name(d.supervisor_person_id),
+            "second_marker_person_id": d.second_marker_person_id,
+            "second_marker_name": await _name(d.second_marker_person_id),
             "submitted_at": d.submitted_at, "marked_at": d.marked_at,
-            "mark": d.mark, "grade": d.grade,
+            "first_mark": d.first_mark, "second_mark": d.second_mark,
+            "mark": d.mark, "grade": d.grade, "word_count": d.word_count,
         }
 
     async def upsert_dissertation(

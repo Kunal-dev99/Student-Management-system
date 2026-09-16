@@ -20,6 +20,7 @@ from app.modules.taught.schemas import (
     AssessmentCreate,
     AssessmentOut,
     AwardOut,
+    CondoneRequest,
     DissertationOut,
     DissertationUpsert,
     EnrolmentCreate,
@@ -135,6 +136,17 @@ async def set_status(
     _=Depends(require_permission("taught.change")),
 ) -> EnrolmentOut:
     return EnrolmentOut.model_validate(await _svc(session).set_enrolment_status(enrolment_id, body.status))
+
+
+@enrolment_router.patch("/{enrolment_id}/condone", response_model=EnrolmentOut,
+                        summary="Condone (or un-condone) a failed module — a board decision")
+async def condone(
+    enrolment_id: uuid.UUID,
+    body: CondoneRequest,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("taught.change")),
+) -> EnrolmentOut:
+    return EnrolmentOut.model_validate(await _svc(session).condone_module(enrolment_id, condoned=body.condoned))
 
 
 # --- Dissertation ---

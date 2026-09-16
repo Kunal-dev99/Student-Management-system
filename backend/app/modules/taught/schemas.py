@@ -27,6 +27,9 @@ class ModuleCreate(_Camel):
     title: str
     credits: int = 0
     term: str | None = None
+    level: int = 7
+    is_core: bool = True
+    convenor_person_id: uuid.UUID | None = None
 
 
 class ModuleUpdate(_Camel):
@@ -34,6 +37,9 @@ class ModuleUpdate(_Camel):
     title: str | None = None
     credits: int | None = None
     term: str | None = None
+    level: int | None = None
+    is_core: bool | None = None
+    convenor_person_id: uuid.UUID | None = None
 
 
 class AssessmentCreate(_Camel):
@@ -42,6 +48,9 @@ class AssessmentCreate(_Camel):
     weight_pct: Decimal = Decimal("100.00")
     max_mark: Decimal = Decimal("100.00")
     due_date: date | None = None
+    pass_mark: Decimal = Decimal("50.00")
+    resit_allowed: bool = True
+    resit_cap: Decimal | None = None
 
 
 class AssessmentOut(_Camel):
@@ -122,9 +131,13 @@ class EnrolmentOut(_Camel):
 class DissertationUpsert(_Camel):
     title: str | None = None
     supervisor_person_id: uuid.UUID | None = None
+    second_marker_person_id: uuid.UUID | None = None
     submitted_at: datetime | None = None
-    mark: Decimal | None = None
+    first_mark: Decimal | None = None
+    second_mark: Decimal | None = None
+    mark: Decimal | None = None          # agreed mark
     grade: str | None = None
+    word_count: int | None = None
 
 
 class DissertationOut(_Camel):
@@ -133,10 +146,19 @@ class DissertationOut(_Camel):
     title: str | None = None
     supervisor_person_id: uuid.UUID | None = None
     supervisor_name: str | None = None
+    second_marker_person_id: uuid.UUID | None = None
+    second_marker_name: str | None = None
     submitted_at: datetime | None = None
     marked_at: datetime | None = None
+    first_mark: Decimal | None = None
+    second_mark: Decimal | None = None
     mark: Decimal | None = None
     grade: str | None = None
+    word_count: int | None = None
+
+
+class CondoneRequest(_Camel):
+    condoned: bool = True
 
 
 # --- Award / classification ---

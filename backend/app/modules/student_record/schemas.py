@@ -100,6 +100,7 @@ class ProgrammeOut(_Camel):
     taught_total_credits: int | None = None
     duration_months: int | None = None
     supervision_meeting_interval_days: int | None = None
+    grading_policy: dict | None = None
 
 
 class ProgrammeCreate(_Camel):
@@ -110,6 +111,7 @@ class ProgrammeCreate(_Camel):
     taught_total_credits: int | None = None
     duration_months: int | None = None
     supervision_meeting_interval_days: int | None = None
+    grading_policy: dict | None = None
 
 
 class ProgrammeUpdate(_Camel):
@@ -120,6 +122,7 @@ class ProgrammeUpdate(_Camel):
     taught_total_credits: int | None = None
     duration_months: int | None = None
     supervision_meeting_interval_days: int | None = None
+    grading_policy: dict | None = None
 
 
 class EnrolRequest(_Camel):
