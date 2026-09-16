@@ -116,6 +116,9 @@ export function AppShell({ children }: { children: ReactNode }) {
     const visible = (items: NavItem[]) =>
       items.filter((item) => {
         if (!recruitmentOn && RECRUITMENT_ROUTES.has(item.href)) return false
+        // Configurable navigation (runtime park mechanism): an admin can switch a sidebar
+        // feature off tenant-wide. hasFeature defaults to on, so only an explicit `false` hides.
+        if (!hasFeature(`nav:${item.href}`)) return false
         const route = findRouteAccess(item.href)
         return !route || canSeeRoute(route, roles, hasPermission)
       })
@@ -137,7 +140,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     }
     // `roles.join` gives a stable dep instead of the fresh array reference each render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roles.join(','), hasPermission, recruitmentOn])
+  }, [roles.join(','), hasPermission, hasFeature, recruitmentOn])
 
   // Stable callback identities — otherwise Header/Launcher get a fresh function on every
   // AppShell render and can't skip their own re-renders even if they're memoised.

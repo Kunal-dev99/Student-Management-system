@@ -79,6 +79,32 @@ export const ROUTE_ACCESS: RouteAccess[] = [
   { href: '/my-students', perms: [], roles: ['Supervisor'] },
 ]
 
+/**
+ * Configurable-navigation routes (the runtime park mechanism). Mirrors the backend
+ * `settings/nav_features.py` registry: every toggleable sidebar destination. A disabled one is
+ * hidden from the nav and blocked on direct URL. Recruitment funnel routes are governed by the
+ * separate `recruitment.enabled` flag and are intentionally absent here.
+ */
+export const NAV_ROUTES: string[] = [
+  '/dashboard', '/analytics', '/portal', '/documents', '/messages', '/tasks', '/reviews/weekly',
+  '/my-students', '/persons', '/students', '/funding/payments', '/supervision',
+  '/supervision/workforce', '/progression', '/progression/transfer-viva', '/funding', '/thesis',
+  '/completion', '/programmes', '/funding-integrity', '/statutory', '/workflows', '/integration',
+  '/settings', '/audit', '/composer', '/pattern-lab', '/case-explorer', '/policy-compiler',
+  '/change-radar',
+]
+
+/** The most specific nav route that owns this path (longest-prefix), for the nav-feature check. */
+export function navRouteForPath(pathname: string): string | undefined {
+  let best: string | undefined
+  for (const r of NAV_ROUTES) {
+    if (pathname === r || pathname.startsWith(r + '/')) {
+      if (!best || r.length > best.length) best = r
+    }
+  }
+  return best
+}
+
 /** Longest-prefix match so detail routes (/students/{id}) inherit their list route's rules. */
 export function findRouteAccess(pathname: string): RouteAccess | undefined {
   let best: RouteAccess | undefined

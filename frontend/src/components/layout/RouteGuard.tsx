@@ -6,7 +6,7 @@ import { usePathname } from 'next/navigation'
 import { ShieldOff } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useAuth } from '@/shared/auth/AuthContext'
-import { canOpenRoute, findRouteAccess } from '@/shared/auth/routeAccess'
+import { canOpenRoute, findRouteAccess, navRouteForPath } from '@/shared/auth/routeAccess'
 import { homeRoute } from '@/shared/auth/homeRoute'
 
 /**
@@ -33,6 +33,28 @@ export function RouteGuard({ children }: { children: ReactNode }) {
           <p className="text-sm text-muted-foreground">
             This institution manages recruitment in a separate system. Students are added directly
             from the Students register.
+          </p>
+          <Button asChild size="sm" className="mt-2">
+            <Link href={home}>Go to your home screen</Link>
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
+  // Configurable navigation: an admin switched this sidebar feature off tenant-wide. The route
+  // and its screens still exist — they're just parked — so we show a "switched off" note.
+  const navRoute = navRouteForPath(pathname)
+  if (navRoute && hasFeature(`nav:${navRoute}`) === false) {
+    const home = homeRoute(principal?.roles)
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center px-6">
+        <div className="max-w-md text-center space-y-3">
+          <ShieldOff className="mx-auto h-10 w-10 text-muted-foreground" />
+          <h2 className="text-lg font-semibold">This feature is switched off</h2>
+          <p className="text-sm text-muted-foreground">
+            An administrator has turned this area off for your institution. It can be switched back
+            on under Settings → Navigation.
           </p>
           <Button asChild size="sm" className="mt-2">
             <Link href={home}>Go to your home screen</Link>

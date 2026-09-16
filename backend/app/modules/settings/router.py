@@ -55,6 +55,34 @@ async def reset_institution_setting(
     return await SettingsService(session).reset(key)
 
 
+# --- configurable navigation (the runtime park mechanism for the sidebar) ---
+
+class NavFeatureWrite(BaseModel):
+    route: str
+    enabled: bool
+
+
+@settings_router.get("/nav-features", summary="Sidebar features, grouped, with on/off state")
+async def nav_features(
+    session: AsyncSession = Depends(get_read_session),
+    _=Depends(require_permission("admin.configure")),
+) -> dict:
+    from app.modules.settings.nav_features import nav_overview
+
+    return await nav_overview(session)
+
+
+@settings_router.put("/nav-features", summary="Enable or disable a sidebar feature")
+async def set_nav_feature(
+    body: NavFeatureWrite,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_permission("admin.configure")),
+) -> dict:
+    from app.modules.settings.nav_features import set_nav_feature as _set
+
+    return await _set(session, route=body.route, enabled=body.enabled, user_id=principal.user_id)
+
+
 # --- reference data (LOVs) ---
 
 @reference_router.get("", summary="Which reference lists exist, and their editable fields")

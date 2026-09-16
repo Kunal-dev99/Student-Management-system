@@ -39,6 +39,8 @@ interface AuthState {
   hasPermission: (code: string) => boolean
   /** A feature is on unless the institution explicitly turned it off (default-on). */
   hasFeature: (name: string) => boolean
+  /** Re-fetch /me — e.g. after an admin toggles a nav feature, to refresh the sidebar live. */
+  refresh: () => Promise<void>
 }
 
 const AuthCtx = createContext<AuthState | null>(null)
@@ -132,8 +134,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // parent render. Without this, AppShell's auth read cascades a full sidebar re-render
   // on every route change — the perceptible click delay users noticed.
   const value = useMemo(
-    () => ({ principal, loading, login, logout, hasPermission, hasFeature }),
-    [principal, loading, login, logout, hasPermission, hasFeature],
+    () => ({ principal, loading, login, logout, hasPermission, hasFeature, refresh: loadMe }),
+    [principal, loading, login, logout, hasPermission, hasFeature, loadMe],
   )
 
   return <AuthCtx.Provider value={value}>{children}</AuthCtx.Provider>

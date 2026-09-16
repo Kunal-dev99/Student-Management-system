@@ -75,7 +75,14 @@ async def me(
     principal: Principal = Depends(get_current_principal),
     session: AsyncSession = Depends(get_session),
 ) -> MeResponse:
+    from app.modules.settings.nav_features import disabled_nav_map
     from app.modules.settings.service import setting_value
+
+    # Feature flags the client uses to shape the nav. `recruitment` is the funnel master switch;
+    # `nav:<route>` entries are the configurable sidebar (only disabled ones are sent — the client
+    # treats any absent key as on). The API stays the enforcement layer regardless.
+    features = {"recruitment": bool(await setting_value(session, "recruitment.enabled"))}
+    features.update(await disabled_nav_map(session))
 
     return MeResponse(
         authenticated=True,
@@ -84,7 +91,5 @@ async def me(
         person_id=principal.person_id,
         roles=principal.roles,
         permissions=principal.permissions,
-        features={
-            "recruitment": bool(await setting_value(session, "recruitment.enabled")),
-        },
+        features=features,
     )

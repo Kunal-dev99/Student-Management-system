@@ -10,7 +10,7 @@
  */
 
 import { useEffect, useState } from 'react'
-import { Bell, ListChecks, ShieldAlert, SlidersHorizontal, Sparkles, Users } from 'lucide-react'
+import { Bell, Compass, ListChecks, ShieldAlert, SlidersHorizontal, Sparkles, Users } from 'lucide-react'
 import { PageHeader } from '@/components/common/PageHeader'
 import { PageSection } from '@/components/common/PageSection'
 import { Button } from '@/components/ui/button'
@@ -25,6 +25,7 @@ import {
   usePreferences, useUpdatePreferences, type NotificationPreferences,
 } from '@/features/notifications/api'
 import { LovTab } from '@/features/settings/LovTab'
+import { NavigationTab } from '@/features/settings/NavigationTab'
 import { InstitutionPolicyTab } from '@/features/settings/InstitutionPolicyTab'
 import { UsersRolesTab } from '@/features/settings/UsersRolesTab'
 import { DataHygieneTab } from '@/features/settings/DataHygieneTab'
@@ -215,6 +216,7 @@ export default function SettingsPage() {
         <Tabs defaultValue={admin ? 'lov' : 'preferences'}>
           <TabsList>
             {admin && <TabsTrigger value="lov"><ListChecks className="h-4 w-4 mr-1.5" /> List of values</TabsTrigger>}
+            {admin && <TabsTrigger value="navigation"><Compass className="h-4 w-4 mr-1.5" /> Navigation</TabsTrigger>}
             {admin && <TabsTrigger value="policy"><SlidersHorizontal className="h-4 w-4 mr-1.5" /> Institution policy</TabsTrigger>}
             {admin && <TabsTrigger value="users"><Users className="h-4 w-4 mr-1.5" /> Users &amp; roles</TabsTrigger>}
             {admin && <TabsTrigger value="hygiene"><Sparkles className="h-4 w-4 mr-1.5" /> Data hygiene</TabsTrigger>}
@@ -223,6 +225,11 @@ export default function SettingsPage() {
           {admin && (
             <TabsContent value="lov" className="mt-4">
               <LovTab />
+            </TabsContent>
+          )}
+          {admin && (
+            <TabsContent value="navigation" className="mt-4">
+              <NavigationTab />
             </TabsContent>
           )}
           {admin && (
