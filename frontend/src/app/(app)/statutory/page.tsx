@@ -6,7 +6,7 @@
  * The whole point of this screen: a statutory return is **configuration, not code**.
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   CheckCircle2, CopyPlus, Download, FileSpreadsheet, FileUp, ListChecks, Lock, Unlock, Play, Plus, ShieldAlert, ShieldCheck, Sparkles,
 } from 'lucide-react'
@@ -314,9 +314,39 @@ function CloneDialog({ profile }: { profile: ReportProfile }) {
 
 // ---------------------------------------------------------------- validation
 
+const ISSUES_PER_PAGE = 25
+
 function ValidationReportView({ result, rowCount }: { result: ValidationResult; rowCount: number }) {
+  const [severity, setSeverity] = useState<'all' | 'error' | 'warning'>('all')
+  const [field, setField] = useState<string | null>(null)   // filter to one field ("error type")
+  const [page, setPage] = useState(0)
+
+  // Group by field — the natural "error type" (same message repeats per student). Sorted by count.
+  const groups = useMemo(() => {
+    const m = new Map<string, { field: string; count: number; errors: number; warnings: number }>()
+    for (const i of result.issues) {
+      const g = m.get(i.field) ?? { field: i.field, count: 0, errors: 0, warnings: 0 }
+      g.count++
+      if (i.severity === 'warning') g.warnings++; else g.errors++
+      m.set(i.field, g)
+    }
+    return [...m.values()].sort((a, b) => b.count - a.count)
+  }, [result.issues])
+
+  const filtered = useMemo(() => result.issues.filter((i) =>
+    (severity === 'all' || i.severity === severity) && (!field || i.field === field),
+  ), [result.issues, severity, field])
+
+  // Reset to the first page whenever the filter changes.
+  useEffect(() => { setPage(0) }, [severity, field])
+
+  const pageCount = Math.max(1, Math.ceil(filtered.length / ISSUES_PER_PAGE))
+  const clamped = Math.min(page, pageCount - 1)
+  const start = clamped * ISSUES_PER_PAGE
+  const pageItems = filtered.slice(start, start + ISSUES_PER_PAGE)
+
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
         <Badge variant={result.errors > 0 ? 'destructive' : 'success'}>
           {result.errors} error{result.errors === 1 ? '' : 's'}
@@ -325,44 +355,88 @@ function ValidationReportView({ result, rowCount }: { result: ValidationResult; 
           <Badge variant="warning">{result.warnings} warning{result.warnings === 1 ? '' : 's'}</Badge>
         )}
         <span className="text-helper num">{rowCount} row{rowCount === 1 ? '' : 's'} would be produced</span>
+        {/* Severity filter */}
+        {result.issues.length > 0 && (
+          <div className="ml-auto inline-flex rounded-md border border-border p-0.5 text-xs">
+            {(['all', 'error', 'warning'] as const).map((s) => (
+              <button key={s} type="button" onClick={() => setSeverity(s)}
+                className={`px-2 py-0.5 rounded ${severity === s ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+                {s === 'all' ? 'All' : s === 'error' ? 'Errors' : 'Warnings'}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
+
       {result.issues.length === 0 ? (
         <p className="text-sm inline-flex items-center gap-2 text-[hsl(var(--success))]">
           <CheckCircle2 className="h-4 w-4" /> No validation errors.
         </p>
       ) : (
-        <div className="card-elevated overflow-hidden">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Student ref</TableHead>
-                <TableHead>Field</TableHead>
-                <TableHead>Severity</TableHead>
-                <TableHead>Message</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {result.issues.map((i, idx) => (
-                <TableRow key={`${i.studentRef}-${i.field}-${idx}`}>
-                  <TableCell className="font-mono text-xs whitespace-nowrap">{i.studentRef}</TableCell>
-                  <TableCell className="font-mono text-xs whitespace-nowrap">{i.field}</TableCell>
-                  <TableCell>
-                    <Badge variant={i.severity === 'warning' ? 'warning' : 'destructive'}>{i.severity}</Badge>
-                  </TableCell>
-                  <TableCell className="text-sm">
-                    {i.message}
-                    {i.allowed && i.allowed.length > 0 && (
-                      <span className="text-helper"> Allowed: {i.allowed.join(', ')}.</span>
-                    )}
-                    {i.sourceExpression && (
-                      <span className="text-helper font-mono"> ({i.sourceExpression})</span>
-                    )}
-                  </TableCell>
+        <>
+          {/* Grouped by field ("error type") — click to filter to that field. */}
+          <div className="flex flex-wrap gap-1.5">
+            <button type="button" onClick={() => setField(null)}
+              className={`text-xs rounded-full border px-2.5 py-1 ${!field ? 'bg-primary/10 border-primary/40 font-medium' : 'border-border hover:bg-surface-2'}`}>
+              All fields ({result.issues.length})
+            </button>
+            {groups.map((g) => (
+              <button key={g.field} type="button" onClick={() => setField(g.field)}
+                className={`text-xs rounded-full border px-2.5 py-1 inline-flex items-center gap-1.5 ${field === g.field ? 'bg-primary/10 border-primary/40 font-medium' : 'border-border hover:bg-surface-2'}`}>
+                <span className="font-mono">{g.field}</span>
+                <span className={g.errors ? 'text-[hsl(var(--destructive))]' : 'text-[hsl(var(--warning))]'}>{g.count}</span>
+              </button>
+            ))}
+          </div>
+
+          <div className="card-elevated overflow-hidden">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Student ref</TableHead>
+                  <TableHead>Field</TableHead>
+                  <TableHead>Severity</TableHead>
+                  <TableHead>Message</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
+              </TableHeader>
+              <TableBody>
+                {pageItems.map((i, idx) => (
+                  <TableRow key={`${i.studentRef}-${i.field}-${start + idx}`}>
+                    <TableCell className="font-mono text-xs whitespace-nowrap">{i.studentRef}</TableCell>
+                    <TableCell className="font-mono text-xs whitespace-nowrap">{i.field}</TableCell>
+                    <TableCell>
+                      <Badge variant={i.severity === 'warning' ? 'warning' : 'destructive'}>{i.severity}</Badge>
+                    </TableCell>
+                    <TableCell className="text-sm">
+                      {i.message}
+                      {i.allowed && i.allowed.length > 0 && (
+                        <span className="text-helper"> Allowed: {i.allowed.join(', ')}.</span>
+                      )}
+                      {i.sourceExpression && (
+                        <span className="text-helper font-mono"> ({i.sourceExpression})</span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+
+          {/* Pagination */}
+          <div className="flex items-center justify-between text-xs text-muted-foreground">
+            <span>
+              {field ? <>Field <span className="font-mono">{field}</span> · </> : null}
+              Showing {filtered.length === 0 ? 0 : start + 1}–{Math.min(start + ISSUES_PER_PAGE, filtered.length)} of {filtered.length}
+            </span>
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="outline" className="h-7" disabled={clamped <= 0}
+                onClick={() => setPage(clamped - 1)}>Prev</Button>
+              <span>Page {clamped + 1} / {pageCount}</span>
+              <Button size="sm" variant="outline" className="h-7" disabled={clamped >= pageCount - 1}
+                onClick={() => setPage(clamped + 1)}>Next</Button>
+            </div>
+          </div>
+        </>
       )}
     </div>
   )
