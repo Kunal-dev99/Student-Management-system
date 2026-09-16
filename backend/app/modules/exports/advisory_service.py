@@ -21,7 +21,15 @@ from app.modules.exports.advisory_parser import parse_advisory
 from app.modules.exports.constants import AdvisoryStatus, SpecVersionStatus
 from app.modules.exports.models import StatutoryAdvisory, StatutorySpecVersion
 from app.modules.exports.spec_resolver import resolve_fields, resolve_rules
-from app.modules.exports.specs import spec_pack
+from app.modules.exports.specs import SPEC_PACKS, spec_pack
+
+
+def _pack_display_name(code: str) -> str | None:
+    """The human name for a return code from any baseline pack (name is year-independent)."""
+    for pack in SPEC_PACKS.values():
+        if pack["code"] == code:
+            return pack["name"]
+    return None
 
 
 class _DirectiveExtraction(BaseModel):
@@ -181,8 +189,7 @@ class AdvisoryService:
             prior.status = SpecVersionStatus.superseded
 
         new_version = advisory.base_version + 1
-        baseline = spec_pack(f"{advisory.pack_code}:{advisory.academic_year}")
-        name = baseline["name"] if baseline else advisory.pack_code
+        name = _pack_display_name(advisory.pack_code) or advisory.title or advisory.pack_code
 
         version = StatutorySpecVersion(
             pack_code=advisory.pack_code,

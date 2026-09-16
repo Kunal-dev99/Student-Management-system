@@ -8,7 +8,7 @@
 
 import { useEffect, useState } from 'react'
 import {
-  CheckCircle2, CopyPlus, Download, FileSpreadsheet, ListChecks, Lock, Unlock, Play, Plus, ShieldAlert, ShieldCheck, Sparkles,
+  CheckCircle2, CopyPlus, Download, FileSpreadsheet, FileUp, ListChecks, Lock, Unlock, Play, Plus, ShieldAlert, ShieldCheck, Sparkles,
 } from 'lucide-react'
 import { PageHeader } from '@/components/common/PageHeader'
 import { PageSection } from '@/components/common/PageSection'
@@ -30,6 +30,7 @@ import { useToast } from '@/components/ui/use-toast'
 import { ApiError } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthContext'
 import { downloadExport } from '@/features/exports/api'
+import { AdvisoriesPanel } from '@/features/statutory/AdvisoriesPanel'
 import {
   useAddField, useCloneProfile, useCompileProfile, useCreateFromSpec, useCreateProfile,
   useGenerateProfile, useProfile, useProfiles, useSignOffProfile, useSpecs, useTransforms,
@@ -607,6 +608,15 @@ export default function StatutoryPage() {
               no code required.
             </p>
           )}
+        </PageSection>
+
+        <PageSection
+          icon={FileUp}
+          title="Statutory advisories"
+          accent="accent"
+          description="Ingest a published HESA advisory, review the diff against the current pack, and accept it to make the change the active spec version — ingest → recommend → accept, human-gated."
+        >
+          <AdvisoriesPanel canConfigure={canConfigure} canSignOff={canSignOff} />
         </PageSection>
 
         {selectedId && (

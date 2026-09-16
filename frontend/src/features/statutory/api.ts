@@ -259,3 +259,86 @@ export function useUnsignProfile(profileId: string | null) {
     },
   })
 }
+
+
+// -------- ICR G5 — statutory advisory ingestion (ingest → recommend → accept) --------
+
+export type AdvisoryStatus = 'ingested' | 'accepted' | 'rejected'
+export type ChangeType =
+  | 'field_added' | 'field_removed' | 'coding_changed'
+  | 'description_changed' | 'rule_added' | 'rule_removed'
+
+export interface AdvisoryChange {
+  type: ChangeType
+  field: string | null
+  // before/after are shape-dependent (a coding list, a description, a rule object) — the UI
+  // renders them defensively, so they stay loosely typed here.
+  before: unknown
+  after: unknown
+  note: string
+}
+
+export interface Advisory {
+  id: string
+  packCode: string
+  academicYear: string
+  title: string
+  status: AdvisoryStatus
+  source: string
+  baseVersion: number
+  parseSource: string
+  changes: AdvisoryChange[]
+  proposedFields: Record<string, unknown>[]
+  proposedRules: Record<string, unknown>[]
+  createdAt: string
+  decidedAt: string | null
+  decisionNote: string | null
+  /** Present only on a freshly-ingested response. */
+  parseWarnings?: string[]
+}
+
+export const useAdvisories = () =>
+  useQuery({
+    queryKey: ['report-advisories'],
+    queryFn: () => api.get<{ advisories: Advisory[] }>('/report-advisories'),
+  })
+
+export interface IngestInput {
+  packCode: string
+  academicYear?: string
+  title?: string
+  rawText: string
+}
+
+/** Parse a pasted advisory into a diff for review. Admin-configure gated server-side. */
+export function useIngestAdvisory() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: IngestInput) => api.post<Advisory>('/report-advisories/ingest', body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['report-advisories'] }),
+  })
+}
+
+/** Accept an advisory — makes its proposed pack the active spec version (reports.signoff). */
+export function useAcceptAdvisory() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, note }: { id: string; note?: string }) =>
+      api.post<{ id: string; version: number; academicYear: string }>(
+        `/report-advisories/${id}/accept`, { note }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['report-advisories'] })
+      qc.invalidateQueries({ queryKey: ['report-profile-specs'] })
+    },
+  })
+}
+
+/** Reject an advisory — no change to the pack (reports.signoff). */
+export function useRejectAdvisory() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, note }: { id: string; note?: string }) =>
+      api.post<Advisory>(`/report-advisories/${id}/reject`, { note }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['report-advisories'] }),
+  })
+}
