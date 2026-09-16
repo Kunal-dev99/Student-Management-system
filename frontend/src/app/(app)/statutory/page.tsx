@@ -438,6 +438,140 @@ function CloneDialog({ profile }: { profile: ReportProfile }) {
   )
 }
 
+// ---------------------------------------------------------------- statutory field defaults
+//
+// ICR follow-on: most student records don't carry HESA-only demographics (SEXID, ETHNIC, BIRTHDTE
+// etc.), so the return validates with thousands of "required but empty" errors. Rather than editing
+// 8000 student records, an admin sets a **default per statutory field once**; on Generate the
+// backend already substitutes the default when the record's source resolves to empty (see
+// backend/app/modules/exports/statutory.py line 481–482). This section makes that setting inline
+// per required field, with the empty-default rows surfaced first.
+
+function DefaultRow({
+  profileId, field,
+}: { profileId: string; field: FieldMapping }) {
+  const { toast } = useToast()
+  const update = useUpdateField(profileId)
+  const [value, setValue] = useState(field.defaultValue ?? '')
+  // Re-seed when the underlying field changes (e.g. after a save elsewhere).
+  useEffect(() => { setValue(field.defaultValue ?? '') }, [field.defaultValue])
+
+  const dirty = (value || '') !== (field.defaultValue ?? '')
+  const hasDefault = (field.defaultValue ?? '').length > 0
+  const allowed = field.allowedValues ?? []
+
+  const save = async () => {
+    if (!dirty) return
+    try {
+      await update.mutateAsync({ id: field.id, body: { defaultValue: value || undefined } })
+      toast({ title: value ? `Default set for ${field.targetField}` : `Default cleared for ${field.targetField}` })
+    } catch (e) { err(toast, 'Could not save default')(e) }
+  }
+
+  return (
+    <TableRow>
+      <TableCell className="font-mono text-xs font-medium whitespace-nowrap">{field.targetField}</TableCell>
+      <TableCell className="text-xs text-muted-foreground">{field.keyedAt ?? '—'}</TableCell>
+      <TableCell className="text-xs text-muted-foreground max-w-[220px]">
+        {allowed.length > 0 ? (
+          <span className="font-mono">{allowed.join(', ')}</span>
+        ) : (
+          <span className="italic">free text</span>
+        )}
+      </TableCell>
+      <TableCell>
+        {allowed.length > 0 ? (
+          <Select value={value || '__none'} onValueChange={(v) => setValue(v === '__none' ? '' : v)}>
+            <SelectTrigger className="h-8 w-[160px]"><SelectValue placeholder="(no default)" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none"><span className="italic text-muted-foreground">(no default)</span></SelectItem>
+              {allowed.map((v) => <SelectItem key={v} value={v}>{v}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        ) : (
+          <Input
+            className="h-8 w-[160px] font-mono text-xs"
+            value={value}
+            placeholder="(no default)"
+            onChange={(e) => setValue(e.target.value)}
+            onBlur={save}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLInputElement).blur() } }}
+          />
+        )}
+      </TableCell>
+      <TableCell>
+        {hasDefault ? <Badge variant="success">set</Badge> : <Badge variant="warning">empty</Badge>}
+      </TableCell>
+      <TableCell className="text-right">
+        <Button
+          size="sm" variant={dirty ? 'default' : 'outline'} className="h-7"
+          disabled={!dirty || update.isPending}
+          onClick={save}
+        >
+          {update.isPending ? 'Saving…' : dirty ? 'Save' : 'Saved'}
+        </Button>
+      </TableCell>
+    </TableRow>
+  )
+}
+
+function FieldDefaultsSection({
+  profileId, fields,
+}: { profileId: string; fields: FieldMapping[] }) {
+  // Only required fields need a fallback (unmapped optional fields can stay empty on the return).
+  // Sort: empty-default first, then by field code — surfaces the actual work upfront.
+  const required = useMemo(() => {
+    const list = fields.filter((f) => f.required)
+    return [...list].sort((a, b) => {
+      const aEmpty = !(a.defaultValue ?? '').length
+      const bEmpty = !(b.defaultValue ?? '').length
+      if (aEmpty !== bEmpty) return aEmpty ? -1 : 1
+      return a.targetField.localeCompare(b.targetField)
+    })
+  }, [fields])
+
+  const emptyCount = required.filter((f) => !(f.defaultValue ?? '').length).length
+
+  if (required.length === 0) return null
+
+  return (
+    <div className="pt-3 border-t border-border space-y-3">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-label">Statutory field defaults</p>
+          <p className="text-helper max-w-2xl">
+            When a student record has no value for a required field, the return sends the default set here
+            instead of failing validation. Set once per year — the same default applies to every student
+            the return covers. Coded fields pick from their allowed values; free-text fields accept any string.
+          </p>
+        </div>
+        <Badge variant={emptyCount === 0 ? 'success' : 'warning'} className="whitespace-nowrap">
+          {emptyCount === 0
+            ? `${required.length} / ${required.length} covered`
+            : `${emptyCount} of ${required.length} without a default`}
+        </Badge>
+      </div>
+      <div className="card-elevated overflow-hidden">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Field</TableHead>
+              <TableHead>Keyed on record</TableHead>
+              <TableHead>Allowed values</TableHead>
+              <TableHead>Default when empty</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead className="text-right w-[90px]">Save</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {required.map((f) => <DefaultRow key={f.id} profileId={profileId} field={f} />)}
+          </TableBody>
+        </Table>
+      </div>
+    </div>
+  )
+}
+
 // ---------------------------------------------------------------- validation
 
 const ISSUES_PER_PAGE = 25
@@ -1004,6 +1138,12 @@ export default function StatutoryPage() {
                     No fields mapped yet. This profile cannot produce a return until at least one
                     target field is mapped to a source expression.
                   </p>
+                )}
+
+                {/* Institution-wide defaults per required statutory field. Rendered above the
+                   validation report because setting these is the fastest way to make it go green. */}
+                {detail.data && detail.data.fields.length > 0 && !detail.data.signedOff && canConfigure && (
+                  <FieldDefaultsSection profileId={selectedId} fields={detail.data.fields} />
                 )}
 
                 {showValidation && validate.data && (
