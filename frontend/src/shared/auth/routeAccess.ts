@@ -52,6 +52,7 @@ export const ROUTE_ACCESS: RouteAccess[] = [
   // Administration
   { href: '/funding-integrity', perms: ['funding.read'], roles: ADMIN_ROLES },
   { href: '/statutory', perms: ['reporting.read'], roles: ADMIN_ROLES },
+  { href: '/programmes', perms: ['admin.configure'], roles: ADMIN_ROLES },
   { href: '/workflows', perms: ['admin.configure'] },
   { href: '/integration', perms: ['admin.configure'] },
   { href: '/settings', perms: [] },

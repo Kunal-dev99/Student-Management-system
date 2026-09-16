@@ -69,6 +69,7 @@ const mainNav: NavItem[] = [
 ]
 
 const baseAdminNav: NavItem[] = [
+  { href: '/programmes', label: 'Programmes', icon: GraduationCap },
   { href: '/workflows', label: 'Workflows', icon: Workflow },
   { href: '/integration', label: 'Integration', icon: Cable },
   { href: '/settings', label: 'Settings', icon: Settings },

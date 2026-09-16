@@ -10,7 +10,7 @@
  */
 
 import { useEffect, useState } from 'react'
-import { Bell, GraduationCap, ListChecks, ShieldAlert, SlidersHorizontal, Sparkles, Users } from 'lucide-react'
+import { Bell, ListChecks, ShieldAlert, SlidersHorizontal, Sparkles, Users } from 'lucide-react'
 import { PageHeader } from '@/components/common/PageHeader'
 import { PageSection } from '@/components/common/PageSection'
 import { Button } from '@/components/ui/button'
@@ -25,7 +25,6 @@ import {
   usePreferences, useUpdatePreferences, type NotificationPreferences,
 } from '@/features/notifications/api'
 import { LovTab } from '@/features/settings/LovTab'
-import { ProgrammesTab } from '@/features/settings/ProgrammesTab'
 import { InstitutionPolicyTab } from '@/features/settings/InstitutionPolicyTab'
 import { UsersRolesTab } from '@/features/settings/UsersRolesTab'
 import { DataHygieneTab } from '@/features/settings/DataHygieneTab'
@@ -216,17 +215,11 @@ export default function SettingsPage() {
         <Tabs defaultValue={admin ? 'lov' : 'preferences'}>
           <TabsList>
             {admin && <TabsTrigger value="lov"><ListChecks className="h-4 w-4 mr-1.5" /> List of values</TabsTrigger>}
-            {admin && <TabsTrigger value="programmes"><GraduationCap className="h-4 w-4 mr-1.5" /> Programmes</TabsTrigger>}
             {admin && <TabsTrigger value="policy"><SlidersHorizontal className="h-4 w-4 mr-1.5" /> Institution policy</TabsTrigger>}
             {admin && <TabsTrigger value="users"><Users className="h-4 w-4 mr-1.5" /> Users &amp; roles</TabsTrigger>}
             {admin && <TabsTrigger value="hygiene"><Sparkles className="h-4 w-4 mr-1.5" /> Data hygiene</TabsTrigger>}
             <TabsTrigger value="preferences"><Bell className="h-4 w-4 mr-1.5" /> My preferences</TabsTrigger>
           </TabsList>
-          {admin && (
-            <TabsContent value="programmes" className="mt-4">
-              <ProgrammesTab />
-            </TabsContent>
-          )}
           {admin && (
             <TabsContent value="lov" className="mt-4">
               <LovTab />
