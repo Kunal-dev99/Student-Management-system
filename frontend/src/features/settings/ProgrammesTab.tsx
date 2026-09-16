@@ -54,24 +54,29 @@ function RangeField({ label, value, fallback, min, max, unit = '', resettable = 
   onCommit: (v: number | null) => void
 }) {
   const isSet = value != null
-  const [v, setV] = useState<number>(isSet ? (value as number) : fallback)
-  useEffect(() => { setV(isSet ? (value as number) : fallback) }, [value, fallback, isSet])
+  const initial = isSet ? (value as number) : fallback
+  // Uncontrolled: the browser owns the slider during a drag; we mirror its live value into
+  // `display` on every `input` event (fires continuously while dragging). `key={initial}` remounts
+  // the input when the committed value changes (after save/refresh) so the thumb re-seats.
+  const [display, setDisplay] = useState<number>(initial)
+  useEffect(() => { setDisplay(initial) }, [initial])
 
   return (
     <div className="space-y-1.5">
       <div className="flex items-baseline justify-between gap-2">
         <Label className="text-xs">{label}</Label>
         <span className="num text-sm font-semibold tabular-nums">
-          {v}{unit}
-          {!isSet && <span className="text-helper text-[10px] font-normal ml-1">default</span>}
+          {display}{unit}
+          {!isSet && display === fallback && <span className="text-helper text-[10px] font-normal ml-1">default</span>}
         </span>
       </div>
       <input
-        type="range" min={min} max={max} value={v}
-        onChange={(e) => setV(Number(e.target.value))}
-        onInput={(e) => setV(Number((e.target as HTMLInputElement).value))}
-        onPointerUp={() => onCommit(v)}
-        onKeyUp={() => onCommit(v)}
+        key={initial}
+        type="range" min={min} max={max} defaultValue={initial}
+        onInput={(e) => setDisplay(Number((e.target as HTMLInputElement).value))}
+        onChange={(e) => setDisplay(Number(e.target.value))}
+        onPointerUp={(e) => onCommit(Number((e.target as HTMLInputElement).value))}
+        onKeyUp={(e) => onCommit(Number((e.target as HTMLInputElement).value))}
         className="w-full cursor-pointer accent-[hsl(var(--primary))]"
       />
       {resettable && isSet && (
