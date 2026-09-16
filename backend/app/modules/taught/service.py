@@ -440,3 +440,102 @@ class TaughtService:
             "dissertation": await self._dissertation_out(dissertation),
             "award": self._award_out(award),
         }
+
+    # --- AI board assistant (grounded narration + deterministic recommendations) ---
+    async def board_summary(self, student_id: uuid.UUID, *, allowed_ids=None) -> dict:
+        """A grounded, one-glance read of a taught student's standing for the board/supervisor:
+        counts, the credit position, which modules need a resit/condonement, and the projected
+        classification — plus an AI paragraph over exactly those figures (deterministic fallback
+        with the model off). Read-only; advises, never decides."""
+        student = await self._student(student_id, allowed_ids=allowed_ids)
+        programme = await self._programme(student.programme_id)
+        if programme is None or programme.programme_type != ProgrammeType.taught:
+            raise WorkflowError("Board summary only applies to a taught programme")
+
+        enrolments = await self.repo.enrolments_for_student(student_id)
+        total = len(enrolments)
+        passed = condoned = failed = pending = 0
+        failed_codes: list[str] = []
+        pending_codes: list[str] = []
+        credits_achieved = 0
+        for e in enrolments:
+            module = await self.repo.get_module(e.module_id)
+            code = module.code if module else "?"
+            outcome = e.outcome.value if hasattr(e.outcome, "value") else str(e.outcome)
+            credits_achieved += e.credits_awarded or 0
+            if outcome == "passed":
+                passed += 1
+            elif outcome == "condoned":
+                condoned += 1
+            elif outcome == "failed":
+                failed += 1
+                failed_codes.append(code)
+            else:
+                pending += 1
+                pending_codes.append(code)
+
+        target = programme.taught_total_credits
+        award = await self.repo.get_award(student_id)
+        complete = passed + condoned
+
+        figures: dict[str, str] = {
+            "total modules": str(total),
+            "modules complete": str(complete),
+            "modules failed": str(failed),
+            "modules awaiting marks": str(pending),
+            "credits achieved": str(credits_achieved),
+        }
+        if target:
+            figures["credits required"] = str(target)
+        if award and award.classification:
+            figures["projected classification"] = award.classification.value
+            if award.final_mark is not None:
+                figures["final mark"] = f"{float(award.final_mark):.1f}"
+
+        recs: list[str] = []
+        if failed_codes:
+            recs.append(f"Resit or refer for condonement: {', '.join(failed_codes)}.")
+        if pending_codes:
+            recs.append(f"Awaiting marks: {', '.join(pending_codes)}.")
+        if target and credits_achieved < target:
+            recs.append(f"{target - credits_achieved} of {target} credits still outstanding.")
+        if total and complete == total and not (award and award.classification):
+            recs.append("All modules complete — compute the classification.")
+        if not recs:
+            recs.append("On track — no action outstanding.")
+
+        fallback = (
+            f"{complete} of {total} modules complete, {credits_achieved}"
+            + (f" of {target}" if target else "") + " credits achieved"
+            + (f"; {failed} to resit or condone" if failed else "")
+            + (f"; {pending} awaiting marks" if pending else "")
+            + (f". Projected classification: {award.classification.value}."
+               if award and award.classification else ".")
+        )
+
+        from app.ai.narrate import narrate as ai_narrate
+        from app.ai.types import Evidence
+        from app.modules.person.models import Person
+
+        person = await self.session.get(Person, student.person_id)
+        first = person.given_name if person else "the student"
+
+        narration = await ai_narrate(
+            evidence=Evidence(figures=figures, context={"studentFirstName": first}),
+            question=(
+                f"Summarise for the exam board and supervisor, in one or two short sentences, "
+                f"{first}'s standing on this taught programme and the single most important next "
+                "action. State modules complete of the total and the credit position; if any "
+                "modules failed, note they need a resit or condonement; give the projected "
+                "classification if present. Only use the figures given; neutral and factual; no "
+                "metaphors."
+            ),
+            fallback_template=fallback,
+        )
+        return {
+            "figures": figures,
+            "recommendations": recs,
+            "narration": narration.body,
+            "narrationSource": narration.provenance.source,
+            "model": narration.provenance.model,
+        }

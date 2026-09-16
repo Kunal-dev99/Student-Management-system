@@ -107,6 +107,22 @@ export const useTaughtRecord = (studentId: string, enabled = true) =>
     enabled: !!studentId && enabled,
   })
 
+// AI board assistant — grounded standing + recommended actions for the exam board / supervisor.
+export interface BoardSummary {
+  figures: Record<string, string>
+  recommendations: string[]
+  narration: string
+  narrationSource: 'model' | 'fallback'
+  model?: string | null
+}
+
+export const useTaughtBoardSummary = (studentId: string, enabled = true) =>
+  useQuery({
+    queryKey: ['taught', studentId, 'summary'],
+    queryFn: () => api.get<BoardSummary>(`/students/${studentId}/taught/summary`),
+    enabled: !!studentId && enabled,
+  })
+
 export const useProgrammeModules = (programmeId: string | null | undefined) =>
   useQuery({
     queryKey: ['taught-modules', programmeId],

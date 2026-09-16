@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { Award, BookOpen, ChevronDown, ChevronRight, GraduationCap, Plus, Settings2 } from 'lucide-react'
+import { Award, BookOpen, ChevronDown, ChevronRight, GraduationCap, Plus, RotateCcw, Settings2, Sparkles } from 'lucide-react'
 import { PageSection } from '@/components/common/PageSection'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -14,7 +14,8 @@ import { useToast } from '@/components/ui/use-toast'
 import { useCan } from '@/shared/auth/Can'
 import {
   useAddAssessment, useComputeAward, useCondoneModule, useCreateModule, useEnrolModule,
-  useProgrammeModules, useRecordResult, useSetEnrolmentStatus, useTaughtRecord, useUpsertDissertation,
+  useProgrammeModules, useRecordResult, useSetEnrolmentStatus, useTaughtBoardSummary, useTaughtRecord,
+  useUpsertDissertation,
   type AssessmentType, type ClassificationBand, type Enrolment, type ModuleOutcome,
 } from './api'
 
@@ -26,6 +27,20 @@ const STATUS_VARIANT: Record<Enrolment['status'], 'secondary' | 'success' | 'war
 }
 const OUTCOME_VARIANT: Record<ModuleOutcome, 'secondary' | 'success' | 'info' | 'destructive'> = {
   pending: 'secondary', passed: 'success', condoned: 'info', failed: 'destructive',
+}
+// A coloured left border per outcome, so the module list reads at a glance.
+const OUTCOME_ACCENT: Record<ModuleOutcome, string> = {
+  pending: 'border-l-border',
+  passed: 'border-l-[hsl(var(--success))]',
+  condoned: 'border-l-[hsl(var(--info,var(--primary)))]',
+  failed: 'border-l-[hsl(var(--destructive))]',
+}
+// Classification header tint by band.
+const BAND_TINT: Record<ClassificationBand, string> = {
+  distinction: 'bg-[hsl(var(--success)/0.08)] border-[hsl(var(--success)/0.4)]',
+  merit: 'bg-[hsl(var(--success)/0.06)] border-[hsl(var(--success)/0.3)]',
+  pass: 'bg-surface-2/40 border-border/60',
+  fail: 'bg-[hsl(var(--destructive)/0.06)] border-[hsl(var(--destructive)/0.4)]',
 }
 const ASSESSMENT_TYPES: AssessmentType[] = ['essay', 'exam', 'coursework', 'presentation', 'dissertation']
 
@@ -41,6 +56,7 @@ export function TaughtRecordPanel({ studentId, programmeId }: { studentId: strin
   const canChange = useCan('taught.change')
   const canConfigure = useCan('admin.configure')
   const { data, isLoading } = useTaughtRecord(studentId)
+  const summary = useTaughtBoardSummary(studentId)
   const modules = useProgrammeModules(programmeId)
 
   const enrol = useEnrolModule(studentId)
@@ -73,8 +89,31 @@ export function TaughtRecordPanel({ studentId, programmeId }: { studentId: strin
     <PageSection icon={GraduationCap} title="Taught record — modules, assessments & award" accent="primary">
       {isLoading ? <Skeleton className="h-28 w-full" /> : (
         <div className="space-y-5">
+          {/* AI board assistant — grounded standing + recommended next actions. */}
+          {summary.data && (
+            <div className="rounded-md border border-primary/25 bg-primary/[0.04] p-3">
+              <div className="flex items-center gap-2 mb-1">
+                <Sparkles className="h-4 w-4 text-primary" />
+                <span className="text-label text-primary">Board assistant</span>
+                <Badge variant={summary.data.narrationSource === 'model' ? 'info' : 'secondary'} className="text-[10px]">
+                  {summary.data.narrationSource === 'model' ? 'AI summary' : 'summary'}
+                </Badge>
+              </div>
+              <p className="text-sm">{summary.data.narration}</p>
+              {summary.data.recommendations.length > 0 && (
+                <ul className="mt-2 space-y-0.5">
+                  {summary.data.recommendations.map((r, i) => (
+                    <li key={i} className="text-xs text-muted-foreground flex items-start gap-1.5">
+                      <span className="text-primary mt-[3px]">•</span>{r}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
           {/* Award summary */}
-          <div className="flex flex-wrap items-center gap-4 rounded-md border border-border/60 bg-surface-2/30 p-3">
+          <div className={`flex flex-wrap items-center gap-4 rounded-md border p-3 ${data?.award?.classification ? BAND_TINT[data.award.classification] : 'bg-surface-2/30 border-border/60'}`}>
             <div className="flex items-center gap-2">
               <Award className="h-4 w-4 text-primary" />
               <span className="text-label">Classification</span>
@@ -103,7 +142,7 @@ export function TaughtRecordPanel({ studentId, programmeId }: { studentId: strin
               const mod = moduleById.get(e.moduleId)
               const draft = resultDraft[e.id] ?? { assessmentId: '', mark: '', isResit: false }
               return (
-                <div key={e.id} className="border border-border rounded-md p-3">
+                <div key={e.id} className={`border border-border border-l-4 rounded-md p-3 ${OUTCOME_ACCENT[e.outcome]}`}>
                   <div className="flex items-center justify-between gap-2">
                     <button type="button" className="flex items-center gap-2 hover:text-primary min-w-0"
                       onClick={() => setExpanded((s) => ({ ...s, [e.id]: !s[e.id] }))}>
@@ -136,11 +175,20 @@ export function TaughtRecordPanel({ studentId, programmeId }: { studentId: strin
                                 {a && <span className="text-helper">{a.assessmentType} · {Number(a.weightPct).toFixed(0)}%</span>}
                                 <span className="num font-medium">{num(r.mark)}</span>
                                 {a && Number(r.mark) < Number(a.passMark) && r.mark != null && (
-                                  <span className="text-[10px] text-[hsl(var(--destructive))]">below pass {Number(a.passMark).toFixed(0)}</span>
+                                  <span className="text-[10px] font-medium text-[hsl(var(--destructive))]">below pass {Number(a.passMark).toFixed(0)}</span>
                                 )}
                                 {r.attemptNumber > 1 && <span className="text-helper">attempt {r.attemptNumber}</span>}
                                 {r.isResit && <Badge variant="outline">resit</Badge>}
                                 {r.capped && <Badge variant="warning">capped</Badge>}
+                                {/* A failed first sit can be resat: pre-fill the record form (assessment + resit
+                                    ticked) so recording the second attempt is one step. */}
+                                {canChange && a && a.resitAllowed && !r.isResit && Number(r.mark) < Number(a.passMark) && r.mark != null && (
+                                  <Button size="sm" variant="outline" className="h-6 px-2 ml-1"
+                                    title={`Record a resit for ${a.title}. A resit is a second attempt at a failed assessment; its mark is capped at ${a.resitCap ? Number(a.resitCap).toFixed(0) : 'the module cap'}.`}
+                                    onClick={() => setResultDraft((s) => ({ ...s, [e.id]: { assessmentId: r.assessmentId, mark: '', isResit: true } }))}>
+                                    <RotateCcw className="h-3 w-3 mr-1" /> Resit
+                                  </Button>
+                                )}
                               </div>
                             )
                           })}
@@ -159,7 +207,8 @@ export function TaughtRecordPanel({ studentId, programmeId }: { studentId: strin
                           </Select>
                           <Input className="h-8 w-24" type="number" placeholder="Mark" value={draft.mark}
                             onChange={(ev) => setResultDraft((s) => ({ ...s, [e.id]: { ...draft, mark: ev.target.value } }))} />
-                          <label className="flex items-center gap-1 text-helper">
+                          <label className="flex items-center gap-1 text-helper cursor-help"
+                            title="A resit is a second attempt at a failed assessment. Ticking this records the mark as a resit — it counts as the next attempt and is capped at the module's resit cap.">
                             <input type="checkbox" checked={draft.isResit}
                               onChange={(ev) => setResultDraft((s) => ({ ...s, [e.id]: { ...draft, isResit: ev.target.checked } }))} />
                             resit

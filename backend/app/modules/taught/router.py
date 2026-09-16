@@ -97,6 +97,17 @@ async def taught_record(
     return TaughtRecordOut.model_validate(await _svc(session).taught_record(student_id, allowed_ids=allowed))
 
 
+@student_router.get("/{student_id}/taught/summary",
+                    summary="AI board assistant — grounded standing + recommended actions")
+async def taught_board_summary(
+    student_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_permission("taught.read")),
+) -> dict:
+    allowed = await scoped_ids(principal, session)
+    return await _svc(session).board_summary(student_id, allowed_ids=allowed)
+
+
 @student_router.get("/{student_id}/module-enrolments", response_model=list[EnrolmentOut], summary="Student module enrolments")
 async def list_enrolments(
     student_id: uuid.UUID,
