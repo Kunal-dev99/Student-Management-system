@@ -44,17 +44,24 @@ def _t_str(v): return "" if v is None else str(v)
 
 # --- data-cleaning transforms (ICR G5 fix assistant). Non-destructive: they normalise/massage a
 #     value, never blank it. Applied at the RETURN layer (the mapping), so the master record is
-#     untouched and the change is reversible config. ---
+#     untouched and the change is reversible config. Per-field "text profiles" set how strict the
+#     character filter is: a name is strict, a thesis title keeps colons and more punctuation. ---
 import re as _re
 
-# Characters a statutory text field may safely contain; anything else is stripped (accents kept).
-_SAFE_TEXT = _re.compile(r"[^0-9A-Za-zÀ-ÿ .,'\-/()]")
+# profile -> disallowed-character class (everything else is kept; accents kept throughout).
+STRIP_PROFILES = {
+    "name": r"[^A-Za-zÀ-ÿ '\-]",                       # names: letters, space, apostrophe, hyphen
+    "title": r"[^0-9A-Za-zÀ-ÿ '\-.,:;/&()]",           # titles: + digits and richer punctuation
+    "general": r"[^0-9A-Za-zÀ-ÿ .,'\-/()]",            # default for other text fields
+}
 
-def _t_strip_special(v):
-    if v is None:
-        return None
-    cleaned = _SAFE_TEXT.sub("", str(v))
-    return _re.sub(r"\s{2,}", " ", cleaned).strip()
+def _make_strip(profile: str):
+    rx = _re.compile(STRIP_PROFILES[profile])
+    def _fn(v):
+        if v is None:
+            return None
+        return _re.sub(r"\s{2,}", " ", rx.sub("", str(v))).strip()
+    return _fn
 
 def _t_clamp_pct(v):
     """Clamp a percentage-like number into 0–100 (an outlier is corrected, never removed)."""
@@ -72,8 +79,33 @@ TRANSFORMS = {
     "upper": _t_upper, "lower": _t_lower, "date_iso": _t_date_iso,
     "date_compact": _t_date_compact, "year": _t_year, "bool_yn": _t_bool_yn,
     "int": _t_int, "str": _t_str,
-    "strip_special": _t_strip_special, "clamp_pct": _t_clamp_pct,
+    "strip_name": _make_strip("name"), "strip_title": _make_strip("title"),
+    "strip_general": _make_strip("general"),
+    "strip_special": _make_strip("general"),   # back-compat alias for the original single strip
+    "clamp_pct": _t_clamp_pct,
 }
+
+
+def apply_chain(transform: str | None, raw):
+    """Apply a `|`-separated chain of transforms in order (a single name still works). Unknown
+    parts are skipped so a bad chain can't crash a return."""
+    value = raw
+    for name in (transform or "").split("|"):
+        name = name.strip()
+        if name and name in TRANSFORMS:
+            value = TRANSFORMS[name](value)
+    return value
+
+
+def _validate_transform_chain(transform: str | None) -> None:
+    """Every part of a `a|b|c` transform chain must be a known transform."""
+    if not transform:
+        return
+    unknown = [t for t in transform.split("|") if t.strip() and t.strip() not in TRANSFORMS]
+    if unknown:
+        raise WorkflowError(
+            f"Unknown transform(s): {', '.join(unknown)}. Available: {', '.join(sorted(TRANSFORMS))}"
+        )
 
 
 # --- F1 — HESA coding frames. Pure lookups, unknown inputs return None so validation catches it. ---
@@ -259,10 +291,7 @@ class StatutoryEngine:
     ) -> ReportFieldMapping:
         profile = await self.get_profile(profile_id)
         self._refuse_if_signed_off(profile, "add a field")
-        if transform and transform not in TRANSFORMS:
-            raise WorkflowError(
-                f"Unknown transform '{transform}'. Available: {', '.join(sorted(TRANSFORMS))}"
-            )
+        _validate_transform_chain(transform)
         existing = await self._mappings(profile_id)
         if any(m.target_field == target_field for m in existing):
             raise ConflictError(f"Field '{target_field}' is already mapped in this profile")
@@ -451,7 +480,7 @@ class StatutoryEngine:
                 raw = resolve(record, m.source_expression)
                 if raw is None and m.default_value is not None:
                     raw = m.default_value
-                value = TRANSFORMS[m.transform](raw) if m.transform else raw
+                value = apply_chain(m.transform, raw)
                 text = "" if value is None else str(value)
 
                 if m.required and text == "":
@@ -529,17 +558,20 @@ class StatutoryEngine:
                 raw = resolve(record, m.source_expression)
                 if raw is None and m.default_value is not None:
                     raw = m.default_value
-                value = TRANSFORMS[m.transform](raw) if m.transform else raw
+                value = apply_chain(m.transform, raw)
                 text = "" if value is None else str(value)
-                kind = detect(m, text)
-                if not kind:
+                found = detect(m, text)   # {"type", "transform"} per field, or None
+                if not found:
                     continue
+                kind, fix_t = found["type"], found["transform"]
                 g = groups.setdefault((m.target_field, kind), {
-                    "field": m.target_field, "type": kind, "count": 0, "samples": [],
+                    "field": m.target_field, "type": kind, "transform": fix_t, "count": 0, "samples": [],
                 })
                 g["count"] += 1
                 if len(g["samples"]) < 5:
-                    after = TRANSFORMS[RESOLUTIONS[kind]["transform"]](raw)
+                    # Preview the fix chained onto the field's existing transforms, not in isolation.
+                    chained = f"{m.transform}|{fix_t}" if m.transform else fix_t
+                    after = apply_chain(chained, raw)
                     g["samples"].append({
                         "studentRef": ref, "before": text,
                         "after": "" if after is None else str(after),
@@ -549,13 +581,14 @@ class StatutoryEngine:
         for (_field, kind), g in groups.items():
             r = RESOLUTIONS[kind]
             out.append({**g, "label": r["label"], "description": r["description"],
-                        "transform": r["transform"], "applicable": True})
+                        "applicable": True})
         out.sort(key=lambda x: -x["count"])
         return {"profile": self.profile_out(profile), "suggestions": out}
 
     async def apply_fix(self, profile_id: uuid.UUID, *, field: str, transform: str) -> dict:
-        """Apply an accepted fix: set the resolution's transform on that field's mapping. Cleans the
-        return output (non-destructive, reversible); refuses on a signed-off profile."""
+        """Apply an accepted fix by APPENDING its transform to the field's chain (so a cleaning fix
+        adds to, rather than replaces, any existing transform like upper/date). Cleans the return
+        output (non-destructive, reversible); refuses on a signed-off profile."""
         from app.modules.exports.resolutions import VALID_FIX_TRANSFORMS
 
         if transform not in VALID_FIX_TRANSFORMS:
@@ -564,8 +597,12 @@ class StatutoryEngine:
         m = next((x for x in mappings if x.target_field == field), None)
         if m is None:
             raise NotFoundError(f"No mapping for field '{field}'")
-        await self.update_field(profile_id, m.id, transform=transform)
-        return {"field": field, "transform": transform, "applied": True}
+        chain = [t for t in (m.transform or "").split("|") if t]
+        if transform not in chain:
+            chain.append(transform)
+        new_chain = "|".join(chain)
+        await self.update_field(profile_id, m.id, transform=new_chain)
+        return {"field": field, "transform": transform, "chain": new_chain, "applied": True}
 
     # ---------------- F1 — sign-off, immutability, mandatory-spec gates ----------------
 
@@ -608,10 +645,8 @@ class StatutoryEngine:
         )).scalar_one_or_none()
         if m is None:
             raise NotFoundError("Field mapping not found")
-        if changes.get("transform") and changes["transform"] not in TRANSFORMS:
-            raise WorkflowError(
-                f"Unknown transform '{changes['transform']}'. Available: {', '.join(sorted(TRANSFORMS))}"
-            )
+        if changes.get("transform"):
+            _validate_transform_chain(changes["transform"])
         for k, v in changes.items():
             if v is not None:
                 setattr(m, k, v)
