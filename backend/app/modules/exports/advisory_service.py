@@ -109,12 +109,12 @@ class AdvisoryService:
     async def _ai_extract_directives(self, text: str) -> str:
         """Best-effort: turn prose into directive lines via the AI read shape. '' on any failure."""
         try:
-            from app.ai import read  # imported lazily so the module loads with AI off
+            from app.ai.read import read  # the function (not the submodule); lazy for AI-off
         except Exception:
             return ""
         try:
             result = await read(
-                text=text,
+                text=text[:20000],   # keep the extraction call bounded for a long spec document
                 schema=_DirectiveExtraction,
                 hint=(
                     "Extract statutory-return change directives, one per line, using exactly this "

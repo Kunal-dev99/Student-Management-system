@@ -22,7 +22,8 @@ import {
 import { useToast } from '@/components/ui/use-toast'
 import { ApiError } from '@/shared/api/client'
 import {
-  useAcceptAdvisory, useAdvisories, useIngestAdvisory, useRejectAdvisory,
+  useAcceptAdvisory, useAdvisories, useIngestAdvisory, useIngestAdvisoryFromUrl,
+  useIngestAdvisoryUpload, useRejectAdvisory,
   type Advisory, type AdvisoryChange, type ChangeType,
 } from '@/features/statutory/api'
 
@@ -95,16 +96,68 @@ ADD FIELD SEXORT "Sexual orientation" coding=[10,11,12,13,98] keyed_at="Person �
 CODING MODE = [01,02,03,31,99]
 DESC STULOAD "Student instance load (FTE, revised 2027/28)"`
 
+type IngestMode = 'paste' | 'url' | 'upload'
+
 function IngestDialog() {
   const { toast } = useToast()
   const ingest = useIngestAdvisory()
+  const ingestUrl = useIngestAdvisoryFromUrl()
+  const ingestUpload = useIngestAdvisoryUpload()
   const [open, setOpen] = useState(false)
+  const [mode, setMode] = useState<IngestMode>('paste')
   const [packCode, setPackCode] = useState('HESA_STUDENT')
   const [academicYear, setAcademicYear] = useState('')
   const [title, setTitle] = useState('')
   const [rawText, setRawText] = useState('')
+  const [url, setUrl] = useState('')
+  const [file, setFile] = useState<File | null>(null)
 
-  const reset = () => { setPackCode('HESA_STUDENT'); setAcademicYear(''); setTitle(''); setRawText('') }
+  const busy = ingest.isPending || ingestUrl.isPending || ingestUpload.isPending
+  const reset = () => {
+    setMode('paste'); setPackCode('HESA_STUDENT'); setAcademicYear(''); setTitle('')
+    setRawText(''); setUrl(''); setFile(null)
+  }
+
+  const announce = (adv: Advisory) => {
+    const warned = adv.parseWarnings?.length
+      ? ` (${adv.parseWarnings.length} warning${adv.parseWarnings.length === 1 ? '' : 's'})` : ''
+    toast({
+      title: `Parsed ${adv.changes.length} change${adv.changes.length === 1 ? '' : 's'}${warned}`,
+      description: `${adv.packCode} ${adv.academicYear} — review and accept below.`,
+    })
+    setOpen(false); reset()
+  }
+  const fail = (e: unknown) =>
+    toast({ title: 'Could not ingest advisory', description: (e as ApiError).message, variant: 'destructive' })
+
+  const canSubmit = !!packCode.trim() && !busy && (
+    mode === 'paste' ? !!rawText.trim()
+      : mode === 'url' ? (!!url.trim() && !!academicYear.trim())
+        : (!!file && !!academicYear.trim())
+  )
+
+  const submit = async () => {
+    try {
+      if (mode === 'paste') {
+        announce(await ingest.mutateAsync({
+          packCode: packCode.trim(), academicYear: academicYear.trim() || undefined,
+          title: title.trim() || undefined, rawText,
+        }))
+      } else if (mode === 'url') {
+        announce(await ingestUrl.mutateAsync({
+          packCode: packCode.trim(), academicYear: academicYear.trim() || undefined,
+          title: title.trim() || undefined, url: url.trim(),
+        }))
+      } else {
+        const form = new FormData()
+        form.append('packCode', packCode.trim())
+        if (academicYear.trim()) form.append('academicYear', academicYear.trim())
+        if (title.trim()) form.append('title', title.trim())
+        form.append('file', file as File)
+        announce(await ingestUpload.mutateAsync(form))
+      }
+    } catch (e) { fail(e) }
+  }
 
   return (
     <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) reset() }}>
@@ -114,18 +167,28 @@ function IngestDialog() {
       <DialogContent className="max-w-2xl">
         <DialogHeader><DialogTitle>Ingest a published statutory advisory</DialogTitle></DialogHeader>
         <p className="text-helper -mt-1">
-          Paste the advisory as change directives. It is parsed into a diff against the current pack
-          for review — nothing takes effect until a Registry owner accepts it.
+          Bring in a published advisory and see exactly what it changes for the return. Nothing takes
+          effect until a Registry owner accepts it — the machine fetches and drafts, a person approves.
         </p>
+        {/* Source mode: paste directives, fetch a URL, or upload a PDF/notice (both AI-drafted). */}
+        <div className="inline-flex rounded-md border border-border p-0.5 text-sm w-fit">
+          {(['paste', 'url', 'upload'] as IngestMode[]).map((m) => (
+            <button key={m} type="button"
+              onClick={() => setMode(m)}
+              className={`px-3 py-1 rounded ${mode === m ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+              {m === 'paste' ? 'Paste directives' : m === 'url' ? 'From URL' : 'Upload file'}
+            </button>
+          ))}
+        </div>
         <div className="grid grid-cols-2 gap-3 py-1">
           <div className="space-y-1.5">
             <Label htmlFor="a-code">Return code</Label>
             <Input id="a-code" value={packCode} onChange={(e) => setPackCode(e.target.value)} placeholder="HESA_STUDENT" />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="a-year">Academic year (optional)</Label>
+            <Label htmlFor="a-year">Academic year{mode === 'paste' ? ' (optional)' : ''}</Label>
             <Input id="a-year" value={academicYear} onChange={(e) => setAcademicYear(e.target.value)}
-              placeholder="from a YEAR: line, or set here" />
+              placeholder={mode === 'paste' ? 'from a YEAR: line, or set here' : 'e.g. 2028/29'} />
           </div>
         </div>
         <div className="space-y-1.5">
@@ -133,43 +196,48 @@ function IngestDialog() {
           <Input id="a-title" value={title} onChange={(e) => setTitle(e.target.value)}
             placeholder="e.g. HESA Student 2027/28 coding manual changes" />
         </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="a-text">Advisory directives</Label>
-          <Textarea id="a-text" className="min-h-[160px] font-mono text-xs" value={rawText}
-            onChange={(e) => setRawText(e.target.value)} placeholder={SAMPLE} />
-          <p className="text-helper">
-            Grammar: <span className="font-mono">ADD FIELD NAME &quot;desc&quot; coding=[a,b]</span>,{' '}
-            <span className="font-mono">REMOVE FIELD NAME</span>,{' '}
-            <span className="font-mono">CODING NAME = [a,b]</span>,{' '}
-            <span className="font-mono">DESC NAME &quot;desc&quot;</span>,{' '}
-            <span className="font-mono">RULE order F1 F2 &quot;message&quot;</span>. Lines that don&apos;t
-            match become warnings, never silent changes.
-          </p>
-        </div>
+
+        {mode === 'paste' && (
+          <div className="space-y-1.5">
+            <Label htmlFor="a-text">Advisory directives</Label>
+            <Textarea id="a-text" className="min-h-[160px] font-mono text-xs" value={rawText}
+              onChange={(e) => setRawText(e.target.value)} placeholder={SAMPLE} />
+            <p className="text-helper">
+              Grammar: <span className="font-mono">ADD FIELD NAME &quot;desc&quot; coding=[a,b]</span>,{' '}
+              <span className="font-mono">REMOVE FIELD NAME</span>,{' '}
+              <span className="font-mono">CODING NAME = [a,b]</span>,{' '}
+              <span className="font-mono">DESC NAME &quot;desc&quot;</span>,{' '}
+              <span className="font-mono">RULE order F1 F2 &quot;message&quot;</span>. Lines that don&apos;t
+              match become warnings, never silent changes.
+            </p>
+          </div>
+        )}
+        {mode === 'url' && (
+          <div className="space-y-1.5">
+            <Label htmlFor="a-url">Advisory URL</Label>
+            <Input id="a-url" value={url} onChange={(e) => setUrl(e.target.value)}
+              placeholder="https://www.hesa.ac.uk/…/coding-manual" />
+            <p className="text-helper">
+              The platform fetches the page, an AI drafts the change directives from it, and the diff
+              lands below for your review. Set the academic year the changes apply to.
+            </p>
+          </div>
+        )}
+        {mode === 'upload' && (
+          <div className="space-y-1.5">
+            <Label htmlFor="a-file">Advisory document (PDF, HTML or text)</Label>
+            <Input id="a-file" type="file" accept=".pdf,.htm,.html,.txt,application/pdf,text/html,text/plain"
+              onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+            <p className="text-helper">
+              Upload the published notice; the platform reads it, an AI drafts the directives, and the
+              diff lands below for your review. Set the academic year the changes apply to.
+            </p>
+          </div>
+        )}
+
         <DialogFooter>
-          <Button
-            disabled={!packCode.trim() || !rawText.trim() || ingest.isPending}
-            onClick={async () => {
-              try {
-                const adv = await ingest.mutateAsync({
-                  packCode: packCode.trim(),
-                  academicYear: academicYear.trim() || undefined,
-                  title: title.trim() || undefined,
-                  rawText,
-                })
-                const warned = adv.parseWarnings?.length
-                  ? ` (${adv.parseWarnings.length} warning${adv.parseWarnings.length === 1 ? '' : 's'})`
-                  : ''
-                toast({
-                  title: `Parsed ${adv.changes.length} change${adv.changes.length === 1 ? '' : 's'}${warned}`,
-                  description: `${adv.packCode} ${adv.academicYear} — review and accept below.`,
-                })
-                setOpen(false); reset()
-              } catch (e) {
-                toast({ title: 'Could not ingest advisory', description: (e as ApiError).message, variant: 'destructive' })
-              }
-            }}>
-            {ingest.isPending ? 'Parsing…' : 'Parse advisory'}
+          <Button disabled={!canSubmit} onClick={submit}>
+            {busy ? 'Working…' : mode === 'paste' ? 'Parse advisory' : mode === 'url' ? 'Fetch & draft' : 'Upload & draft'}
           </Button>
         </DialogFooter>
       </DialogContent>

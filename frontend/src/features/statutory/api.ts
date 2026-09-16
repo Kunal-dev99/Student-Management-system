@@ -10,7 +10,7 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api } from '@/shared/api/client'
+import { api, uploadFile } from '@/shared/api/client'
 
 export interface ReportProfile {
   id: string
@@ -317,6 +317,25 @@ export function useIngestAdvisory() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (body: IngestInput) => api.post<Advisory>('/report-advisories/ingest', body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['report-advisories'] }),
+  })
+}
+
+/** Assisted ingest — fetch a published advisory from a URL; the server AI-drafts the changes. */
+export function useIngestAdvisoryFromUrl() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: { packCode: string; academicYear?: string; title?: string; url: string }) =>
+      api.post<Advisory>('/report-advisories/ingest-from-url', body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['report-advisories'] }),
+  })
+}
+
+/** Assisted ingest — upload a published advisory (PDF/notice); the server AI-drafts the changes. */
+export function useIngestAdvisoryUpload() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (form: FormData) => uploadFile<Advisory>('/report-advisories/ingest-upload', form),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['report-advisories'] }),
   })
 }

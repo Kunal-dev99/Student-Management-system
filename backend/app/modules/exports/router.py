@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, Form, UploadFile
 from pydantic import BaseModel, ConfigDict
 from pydantic.alias_generators import to_camel
 from fastapi.responses import Response
@@ -334,6 +334,69 @@ async def ingest_advisory(
     advisory = await AdvisoryService(session).ingest(
         pack_code=body.pack_code, academic_year=body.academic_year, title=body.title,
         raw_text=body.raw_text, source=body.source, created_by=principal.user_id,
+    )
+    return _advisory_out(advisory)
+
+
+# --- Assisted ingest: fetch/upload a published HESA doc, AI-draft it, then the same review flow ---
+
+class AdvisoryUrlIngest(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+    pack_code: str = "HESA_STUDENT"
+    academic_year: str | None = None
+    title: str | None = None
+    url: str
+
+
+@advisories_router.post("/ingest-from-url", status_code=201,
+                        summary="Fetch a published advisory from a URL, AI-draft the changes, and diff it")
+async def ingest_from_url(
+    body: AdvisoryUrlIngest,
+    session: AsyncSession = Depends(get_session),
+    principal=Depends(require_permission("admin.configure")),
+) -> dict:
+    from app.core.errors import ValidationAppError
+    from app.modules.exports.advisory_service import AdvisoryService
+    from app.modules.exports.advisory_source import extract_text, fetch_url
+
+    data, content_type = await fetch_url(body.url)
+    text = extract_text(data, content_type=content_type, filename=body.url)
+    if not text.strip():
+        raise ValidationAppError("No readable text was found at that URL")
+    advisory = await AdvisoryService(session).ingest(
+        pack_code=body.pack_code, academic_year=body.academic_year,
+        title=body.title or f"From {body.url[:80]}", raw_text=text, source="url",
+        created_by=principal.user_id,
+    )
+    return _advisory_out(advisory)
+
+
+@advisories_router.post("/ingest-upload", status_code=201,
+                        summary="Upload a published advisory (PDF/notice), AI-draft the changes, and diff it")
+async def ingest_upload(
+    packCode: str = Form("HESA_STUDENT"),
+    academicYear: str | None = Form(None),
+    title: str | None = Form(None),
+    file: UploadFile = File(...),
+    session: AsyncSession = Depends(get_session),
+    principal=Depends(require_permission("admin.configure")),
+) -> dict:
+    from app.core.config import get_settings
+    from app.core.errors import ValidationAppError
+    from app.modules.exports.advisory_service import AdvisoryService
+    from app.modules.exports.advisory_source import extract_text
+
+    data = await file.read()
+    max_bytes = get_settings().max_upload_mb * 1024 * 1024
+    if len(data) > max_bytes:
+        raise ValidationAppError(f"File is larger than the {get_settings().max_upload_mb} MB limit")
+    text = extract_text(data, content_type=file.content_type or "", filename=file.filename or "")
+    if not text.strip():
+        raise ValidationAppError("Could not read any text from that file")
+    advisory = await AdvisoryService(session).ingest(
+        pack_code=packCode, academic_year=academicYear,
+        title=title or f"From {file.filename or 'upload'}", raw_text=text, source="upload",
+        created_by=principal.user_id,
     )
     return _advisory_out(advisory)
 

@@ -158,3 +158,27 @@ async def test_ingest_without_a_year_is_rejected(ctx):
     r = await c.post("/api/v1/report-advisories/ingest", headers=h,
                      json={"packCode": BASE_CODE, "rawText": "REMOVE FIELD TERMTIME\n"})
     assert r.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_assisted_ingest_from_uploaded_file(ctx):
+    c, h = ctx
+    content = b"YEAR: 2030/31\nREMOVE FIELD TERMTIME\nADD FIELD FOO \"bar\" coding=[1,2]\n"
+    r = await c.post(
+        "/api/v1/report-advisories/ingest-upload", headers=h,
+        files={"file": ("advisory.txt", content, "text/plain")},
+        data={"packCode": BASE_CODE, "academicYear": "2030/31"},
+    )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["academicYear"] == "2030/31" and body["source"] == "upload"
+    kinds = {ch["type"] for ch in body["changes"]}
+    assert "field_removed" in kinds and "field_added" in kinds
+
+
+@pytest.mark.asyncio
+async def test_assisted_ingest_from_url_rejects_bad_scheme(ctx):
+    c, h = ctx
+    r = await c.post("/api/v1/report-advisories/ingest-from-url", headers=h,
+                     json={"packCode": BASE_CODE, "academicYear": "2031/32", "url": "ftp://nope"})
+    assert r.status_code == 400
