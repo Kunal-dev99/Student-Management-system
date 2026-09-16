@@ -238,6 +238,13 @@ class StudentService:
         await ProgressionService(
             ProgressionRepository(self.repo.session)
         ).generate_full_schedule(student)
+
+        # ICR G1 — a taught student's core modules flow in on enrol, the same way milestones do,
+        # so the cohort is set up at the group level rather than module-by-module per student.
+        from app.modules.taught.repository import TaughtRepository
+        from app.modules.taught.service import TaughtService
+
+        await TaughtService(TaughtRepository(self.repo.session)).enrol_core_modules(student)
         return student
 
     async def summary(self, student_id: uuid.UUID, *, allowed_ids=None) -> dict:

@@ -11,8 +11,10 @@ small one).
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
+
+from sqlalchemy import select
 
 from app.core.errors import ConflictError, NotFoundError, WorkflowError
 from app.modules.student_record.constants import ProgrammeType
@@ -149,6 +151,83 @@ class TaughtService:
         await self.session.commit()
         e = await self.repo.get_enrolment(e.id)
         return await self._enrolment_out(e)
+
+    # --- group-level enrolment: the programme's modules flow to students like milestones do ---
+
+    @staticmethod
+    def _academic_year_for(start: date | None) -> str:
+        """The UK academic year (Sept–Aug) a date falls in, as 'YYYY/YY'."""
+        d = start or date.today()
+        sy = d.year if d.month >= 9 else d.year - 1
+        return f"{sy}/{str((sy + 1) % 100).zfill(2)}"
+
+    async def enrol_core_modules(
+        self, student: Student, *, academic_year: str | None = None,
+        only_core: bool = True, commit: bool = True,
+    ) -> int:
+        """Enrol one taught student on their programme's modules (core by default), idempotently.
+
+        Mirrors milestone auto-instantiation: a taught student's core modules are laid down the
+        moment they enrol, and the same call re-runs safely to fill any gaps. Returns how many new
+        enrolments were created.
+        """
+        if student.programme_id is None:
+            return 0
+        programme = await self._programme(student.programme_id)
+        if programme is None or programme.programme_type != ProgrammeType.taught:
+            return 0
+        year = academic_year or self._academic_year_for(getattr(student, "start_date", None))
+        modules = await self.repo.modules_for_programme(student.programme_id)
+        created = 0
+        for m in modules:
+            if only_core and not m.is_core:
+                continue
+            if await self.repo.existing_enrolment(student.id, m.id, year):
+                continue
+            self.repo.add(ModuleEnrolment(
+                student_id=student.id, module_id=m.id, academic_year=year,
+                status=ModuleEnrolmentStatus.enrolled,
+            ))
+            created += 1
+        if created and commit:
+            await self.session.commit()
+        return created
+
+    async def bulk_enrol_core(
+        self, programme_id: uuid.UUID, *, academic_year: str | None = None,
+        student_ids: list[uuid.UUID] | None = None, only_core: bool = True,
+    ) -> dict:
+        """Enrol a group of the programme's taught students on its modules in one action.
+
+        With ``student_ids`` it targets that set; without, every student on the programme. This is
+        the 'do it for the cohort' companion to per-student enrolment — the taught parallel to
+        regenerating a milestone schedule for a group.
+        """
+        programme = await self._programme(programme_id)
+        if programme is None or programme.programme_type != ProgrammeType.taught:
+            raise WorkflowError("Cohort enrolment only applies to a taught programme")
+
+        stmt = select(Student).where(Student.programme_id == programme_id)
+        if student_ids:
+            stmt = stmt.where(Student.id.in_(student_ids))
+        students = (await self.session.execute(stmt)).scalars().all()
+
+        total_created = 0
+        affected = 0
+        for s in students:
+            n = await self.enrol_core_modules(
+                s, academic_year=academic_year, only_core=only_core, commit=False,
+            )
+            total_created += n
+            if n:
+                affected += 1
+        if total_created:
+            await self.session.commit()
+        return {
+            "studentsConsidered": len(students),
+            "studentsEnrolled": affected,
+            "enrolmentsCreated": total_created,
+        }
 
     async def set_enrolment_status(
         self, enrolment_id: uuid.UUID, status: ModuleEnrolmentStatus

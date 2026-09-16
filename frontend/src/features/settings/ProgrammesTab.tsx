@@ -26,6 +26,7 @@ import {
   useDefinitions, useCreateDefinition, useUpdateDefinition, useDeleteDefinition,
   type ProgrammeDetail, type ProgrammeType, type GradingPolicy,
 } from '@/features/programmes/api'
+import { ProgrammeModulesEditor } from '@/features/taught/ProgrammeModulesEditor'
 
 /** Labels + the platform-default value for each grading-policy field (mirrors DEFAULT_GRADING_POLICY). */
 const POLICY_FIELDS: { key: keyof GradingPolicy; label: string; fallback: number }[] = [
@@ -193,7 +194,10 @@ function ProgrammeEditor({ programme, onPatch }: {
       </div>
 
       {programme.programmeType === 'taught' && (
-        <GradingPolicyEditor programme={programme} onPatch={onPatch} />
+        <>
+          <ProgrammeModulesEditor programmeId={programme.id} />
+          <GradingPolicyEditor programme={programme} onPatch={onPatch} />
+        </>
       )}
 
       <div>

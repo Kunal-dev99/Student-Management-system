@@ -9,6 +9,8 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel, ConfigDict
+from pydantic.alias_generators import to_camel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import require_permission
@@ -63,6 +65,27 @@ async def create_module(
     _=Depends(require_permission("admin.configure")),
 ) -> ModuleOut:
     return ModuleOut.model_validate(await _svc(session).create_module(programme_id, body))
+
+
+class CohortEnrolRequest(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+    academic_year: str | None = None
+    student_ids: list[uuid.UUID] | None = None   # None = every student on the programme
+    only_core: bool = True
+
+
+@programme_router.post("/{programme_id}/enrol-cohort",
+                       summary="Enrol a group of the programme's students on its (core) modules")
+async def enrol_cohort(
+    programme_id: uuid.UUID,
+    body: CohortEnrolRequest,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("taught.change")),
+) -> dict:
+    return await _svc(session).bulk_enrol_core(
+        programme_id, academic_year=body.academic_year,
+        student_ids=body.student_ids, only_core=body.only_core,
+    )
 
 
 @module_router.patch("/{module_id}", response_model=ModuleOut, summary="Update a taught module")

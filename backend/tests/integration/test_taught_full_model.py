@@ -97,6 +97,53 @@ async def _record(c, h, eid, aid, mark, *, is_resit=False):
     return r.json()
 
 
+async def _module_named(c, h, pid, code, *, is_core=True, credits=30):
+    r = await c.post(f"/api/v1/programmes/{pid}/modules", headers=h, json={
+        "code": code, "title": code, "credits": credits, "level": 7, "isCore": is_core,
+    })
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+@pytest.mark.asyncio
+async def test_core_modules_auto_enrol_on_student_enrol(ctx):
+    c, h, ids = ctx
+    pid = ids["programme"]
+    await _module_named(c, h, pid, "CORE1", is_core=True)
+    await _module_named(c, h, pid, "CORE2", is_core=True)
+    await _module_named(c, h, pid, "OPT1", is_core=False)
+    sid = await _enrol_student(c, h, pid)
+    rec = (await c.get(f"/api/v1/students/{sid}/taught", headers=h)).json()
+    codes = {e["moduleCode"] for e in rec["enrolments"]}
+    assert codes == {"CORE1", "CORE2"}  # optional is not auto-enrolled
+
+
+@pytest.mark.asyncio
+async def test_bulk_enrol_cohort_is_idempotent(ctx):
+    c, h, ids = ctx
+    pid = ids["programme"]
+    # Enrol two students before any modules exist — so nothing auto-enrols yet.
+    s1 = await _enrol_student(c, h, pid)
+    s2 = await _enrol_student(c, h, pid)
+    await _module_named(c, h, pid, "CORE1", is_core=True)
+    await _module_named(c, h, pid, "OPT1", is_core=False)
+
+    r = await c.post(f"/api/v1/programmes/{pid}/enrol-cohort", headers=h, json={})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["studentsEnrolled"] == 2 and body["enrolmentsCreated"] == 2  # one core each
+
+    # Re-running enrols nobody new.
+    r2 = await c.post(f"/api/v1/programmes/{pid}/enrol-cohort", headers=h, json={})
+    assert r2.json()["enrolmentsCreated"] == 0
+
+    # Targeting a single student works too (still idempotent → 0).
+    r3 = await c.post(f"/api/v1/programmes/{pid}/enrol-cohort", headers=h,
+                      json={"studentIds": [s1]})
+    assert r3.json()["studentsConsidered"] == 1 and r3.json()["enrolmentsCreated"] == 0
+    _ = s2
+
+
 @pytest.mark.asyncio
 async def test_module_level_and_core_persist(ctx):
     c, h, ids = ctx
@@ -108,7 +155,7 @@ async def test_module_level_and_core_persist(ctx):
 async def test_fail_then_capped_resit_passes_the_module(ctx):
     c, h, ids = ctx
     pid = ids["programme"]
-    m = await _module(c, h, pid, credits=30)
+    m = await _module(c, h, pid, credits=30, is_core=False)
     a = await _assessment(c, h, m["id"], pass_mark=50, resit_cap=50)
     sid = await _enrol_student(c, h, pid)
     enr = await _enrol_module(c, h, sid, m["id"])
@@ -130,7 +177,7 @@ async def test_fail_then_capped_resit_passes_the_module(ctx):
 async def test_condone_a_failed_module_awards_its_credits(ctx):
     c, h, ids = ctx
     pid = ids["programme"]
-    m = await _module(c, h, pid, credits=30)
+    m = await _module(c, h, pid, credits=30, is_core=False)
     a = await _assessment(c, h, m["id"], pass_mark=50, resit_cap=None, resit_allowed=False)
     sid = await _enrol_student(c, h, pid)
     enr = await _enrol_module(c, h, sid, m["id"])
@@ -151,7 +198,7 @@ async def test_grading_policy_override_changes_classification(ctx):
     # Raise the distinction cut-off to 80 for this programme.
     await c.patch(f"/api/v1/programmes/{pid}", headers=h,
                   json={"gradingPolicy": {"distinctionMark": 80, "meritMark": 60, "passMarkAward": 50}})
-    m = await _module(c, h, pid, credits=30)
+    m = await _module(c, h, pid, credits=30, is_core=False)
     a = await _assessment(c, h, m["id"])
     sid = await _enrol_student(c, h, pid)
     enr = await _enrol_module(c, h, sid, m["id"])

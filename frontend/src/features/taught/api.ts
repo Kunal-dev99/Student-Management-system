@@ -169,6 +169,23 @@ export function useAddAssessment(programmeId: string) {
   })
 }
 
+/** Enrol a group of the programme's students on its (core) modules — the taught parallel to
+ * regenerating a milestone schedule for a cohort. */
+export interface CohortEnrolResult {
+  studentsConsidered: number
+  studentsEnrolled: number
+  enrolmentsCreated: number
+}
+
+export function useEnrolCohort(programmeId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: { academicYear?: string; studentIds?: string[]; onlyCore?: boolean }) =>
+      api.post<CohortEnrolResult>(`/programmes/${programmeId}/enrol-cohort`, body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['taught-modules', programmeId] }),
+  })
+}
+
 // --- enrolments / results / dissertation / award (taught.change) ---
 
 export function useEnrolModule(studentId: string) {
