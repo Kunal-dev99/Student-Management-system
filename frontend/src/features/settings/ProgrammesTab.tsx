@@ -7,7 +7,7 @@
  * auto-instantiates for every student on it; editing an offset here re-dates non-overridden
  * milestones on the next "Regenerate schedule" for a student.
  */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { GraduationCap, Plus, Trash2 } from 'lucide-react'
 import { PageSection } from '@/components/common/PageSection'
 import { Badge } from '@/components/ui/badge'
@@ -28,15 +28,58 @@ import {
 } from '@/features/programmes/api'
 import { ProgrammeModulesEditor } from '@/features/taught/ProgrammeModulesEditor'
 
-/** Labels + the platform-default value for each grading-policy field (mirrors DEFAULT_GRADING_POLICY). */
-const POLICY_FIELDS: { key: keyof GradingPolicy; label: string; fallback: number }[] = [
-  { key: 'passMark', label: 'Module pass mark', fallback: 50 },
-  { key: 'resitCap', label: 'Resit cap', fallback: 50 },
-  { key: 'condonementCredits', label: 'Max condonement credits', fallback: 30 },
-  { key: 'distinctionMark', label: 'Distinction from', fallback: 70 },
-  { key: 'meritMark', label: 'Merit from', fallback: 60 },
-  { key: 'passMarkAward', label: 'Award pass from', fallback: 50 },
+/** Labels, range and default for each grading-policy field (mirrors DEFAULT_GRADING_POLICY). */
+const POLICY_FIELDS: { key: keyof GradingPolicy; label: string; fallback: number; min: number; max: number; unit: string }[] = [
+  { key: 'passMark', label: 'Module pass mark', fallback: 50, min: 0, max: 100, unit: '%' },
+  { key: 'resitCap', label: 'Resit cap', fallback: 50, min: 0, max: 100, unit: '%' },
+  { key: 'condonementCredits', label: 'Max condonement credits', fallback: 30, min: 0, max: 180, unit: ' cr' },
+  { key: 'distinctionMark', label: 'Distinction from', fallback: 70, min: 0, max: 100, unit: '%' },
+  { key: 'meritMark', label: 'Merit from', fallback: 60, min: 0, max: 100, unit: '%' },
+  { key: 'passMarkAward', label: 'Award pass from', fallback: 50, min: 0, max: 100, unit: '%' },
 ]
+
+/**
+ * A labelled range slider that commits on release. Shows the live value; when the value equals the
+ * platform default it is marked "default" and (when `resettable`) offers a reset that clears the
+ * per-programme override. No dependency — a styled native range input.
+ */
+function RangeField({ label, value, fallback, min, max, unit = '', resettable = true, onCommit }: {
+  label: string
+  value: number | null | undefined
+  fallback: number
+  min: number
+  max: number
+  unit?: string
+  resettable?: boolean
+  onCommit: (v: number | null) => void
+}) {
+  const isSet = value != null
+  const [v, setV] = useState<number>(isSet ? (value as number) : fallback)
+  useEffect(() => { setV(isSet ? (value as number) : fallback) }, [value, fallback, isSet])
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-baseline justify-between gap-2">
+        <Label className="text-xs">{label}</Label>
+        <span className="num text-sm font-semibold tabular-nums">
+          {v}{unit}
+          {!isSet && <span className="text-helper text-[10px] font-normal ml-1">default</span>}
+        </span>
+      </div>
+      <input
+        type="range" min={min} max={max} value={v}
+        onChange={(e) => setV(Number(e.target.value))}
+        onPointerUp={() => onCommit(v)}
+        onKeyUp={() => onCommit(v)}
+        className="w-full h-1.5 cursor-pointer appearance-none rounded-full bg-border accent-[hsl(var(--primary))]"
+      />
+      {resettable && isSet && (
+        <button type="button" className="text-[10px] text-muted-foreground hover:text-foreground underline"
+          onClick={() => onCommit(null)}>reset to default</button>
+      )}
+    </div>
+  )
+}
 
 function num(v: string): number | null {
   const n = parseInt(v, 10)
@@ -175,21 +218,19 @@ function ProgrammeEditor({ programme, onPatch }: {
 
   return (
     <div className="space-y-5">
-      <div className="grid gap-3 md:grid-cols-2">
+      <div className="card-elevated p-4 space-y-4">
         <div className="space-y-1.5">
           <Label>Name</Label>
           <Input defaultValue={programme.name}
             onBlur={(e) => { if (e.target.value.trim() && e.target.value !== programme.name) onPatch(programme.id, { name: e.target.value.trim() }) }} />
         </div>
-        <div className="space-y-1.5">
-          <Label>Expected duration (months)</Label>
-          <Input type="number" defaultValue={programme.durationMonths ?? ''}
-            onBlur={(e) => { const v = e.target.value === '' ? null : parseInt(e.target.value, 10); if (v !== programme.durationMonths) onPatch(programme.id, { durationMonths: v }) }} />
-        </div>
-        <div className="space-y-1.5">
-          <Label>Supervision meeting interval (days)</Label>
-          <Input type="number" placeholder="uses institution default" defaultValue={programme.supervisionMeetingIntervalDays ?? ''}
-            onBlur={(e) => { const v = e.target.value === '' ? null : parseInt(e.target.value, 10); if (v !== programme.supervisionMeetingIntervalDays) onPatch(programme.id, { supervisionMeetingIntervalDays: v }) }} />
+        <div className="grid gap-6 sm:grid-cols-2">
+          <RangeField label="Expected duration (months)"
+            value={programme.durationMonths} fallback={36} min={6} max={72} unit=" mo" resettable={false}
+            onCommit={(v) => onPatch(programme.id, { durationMonths: v })} />
+          <RangeField label="Supervision meeting interval (days)"
+            value={programme.supervisionMeetingIntervalDays} fallback={90} min={7} max={365} unit=" d"
+            onCommit={(v) => onPatch(programme.id, { supervisionMeetingIntervalDays: v })} />
         </div>
       </div>
 
@@ -269,35 +310,28 @@ function GradingPolicyEditor({ programme, onPatch }: {
 }) {
   const policy = programme.gradingPolicy ?? {}
 
-  const save = (key: keyof GradingPolicy, raw: string) => {
+  const save = (key: keyof GradingPolicy, val: number | null) => {
     const next: GradingPolicy = { ...policy }
-    if (raw.trim() === '') delete next[key]
-    else {
-      const v = parseInt(raw, 10)
-      if (!Number.isFinite(v)) return
-      next[key] = v
-    }
-    // No change → skip the round-trip.
-    if ((policy[key] ?? undefined) === next[key]) return
+    if (val === null) delete next[key]
+    else next[key] = val
+    if ((policy[key] ?? null) === (val ?? null)) return   // no change → skip the round-trip
     onPatch(programme.id, { gradingPolicy: next })
   }
 
   return (
     <div>
       <h4 className="text-sm font-medium mb-2">Grading policy</h4>
-      <div className="card-elevated grid gap-3 p-3 sm:grid-cols-3">
+      <div className="card-elevated grid gap-x-6 gap-y-5 p-4 sm:grid-cols-2 lg:grid-cols-3">
         {POLICY_FIELDS.map((f) => (
-          <div key={f.key} className="space-y-1.5">
-            <Label className="text-xs">{f.label}</Label>
-            <Input className="h-8" type="number" placeholder={`default ${f.fallback}`}
-              defaultValue={policy[f.key] ?? ''}
-              onBlur={(e) => save(f.key, e.target.value)} />
-          </div>
+          <RangeField key={f.key} label={f.label}
+            value={policy[f.key]} fallback={f.fallback} min={f.min} max={f.max} unit={f.unit}
+            onCommit={(v) => save(f.key, v)} />
         ))}
       </div>
       <p className="text-helper mt-2">
-        Blank uses the platform default (shown as the placeholder). These drive module pass/fail,
-        capped resits, board condonement and the final classification bands for this programme.
+        Each value defaults to the platform standard until you move its slider; reset returns it to
+        the default. These drive module pass/fail, capped resits, board condonement and the final
+        classification bands for this programme.
       </p>
     </div>
   )
