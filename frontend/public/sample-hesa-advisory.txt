@@ -1,0 +1,13 @@
+HESA Student Record — Notification of Changes (SAMPLE for testing, not a real HESA document)
+
+Applies to the 2028/29 collection.
+
+Summary of changes to the Student record specification:
+
+1. A new field SEXORT (Sexual orientation) is introduced, with valid codes 10, 11, 12, 13 and 98.
+
+2. The MODE (mode of study) coding frame gains a new value 99 (Not in attendance).
+
+3. The field TERMTIME (term-time accommodation) is withdrawn from the return.
+
+4. A validation rule is confirmed: ENDDATE must be on or after COMDATE.
