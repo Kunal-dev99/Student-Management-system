@@ -285,6 +285,44 @@ export function useApplyFix(profileId: string | null) {
   })
 }
 
+// ---------------------------------------------------------------- intelligent default suggestions
+
+export interface DefaultSuggestion {
+  field: string
+  mappingId: string
+  keyedAt: string | null
+  required: boolean
+  current: string | null
+  allowedValues: string[]
+  suggested: string | null
+  reason: string
+  source: 'model' | 'fallback' | 'skip'
+  applicable: boolean
+}
+
+/** GET grounded per-field default suggestions (AI classify + rule fallback). */
+export const useSuggestDefaults = (profileId: string | null) =>
+  useQuery({
+    queryKey: ['report-profile', profileId, 'suggest-defaults'],
+    queryFn: () => api.get<{ suggestions: DefaultSuggestion[]; applicableCount: number }>(
+      `/report-profiles/${profileId}/suggest-defaults`,
+    ),
+    enabled: false,
+    gcTime: 0,
+  })
+
+/** Apply the accepted default picks in one call. */
+export function useApplyDefaults(profileId: string | null) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (picks: { field: string; value: string }[]) =>
+      api.post<{ applied: string[]; count: number }>(`/report-profiles/${profileId}/apply-defaults`, { picks }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['report-profile', profileId] })
+    },
+  })
+}
+
 export function useUnsignProfile(profileId: string | null) {
   const qc = useQueryClient()
   return useMutation({

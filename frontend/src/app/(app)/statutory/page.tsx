@@ -36,7 +36,9 @@ import {
   useGenerateProfile, useProfile, useProfiles, useSignOffProfile, useSpecs, useTransforms,
   useUnsignProfile, useValidateProfile, useFixSuggestions, useApplyFix,
   useUpdateField, useDeleteField,
+  useSuggestDefaults, useApplyDefaults,
   type GenerateResult, type ReportProfile, type ValidationResult, type FieldMapping,
+  type DefaultSuggestion,
 } from '@/features/statutory/api'
 
 function err(toast: ReturnType<typeof useToast>['toast'], title: string) {
@@ -469,6 +471,24 @@ function DefaultRow({
   const hasDefault = (field.defaultValue ?? '').length > 0
   const allowed = field.allowedValues ?? []
   const unmapped = !(field.sourceExpression ?? '').trim()
+  // Recognise date-shape fields so we can render a real picker. Two signals: the transform chain
+  // includes a date normaliser, OR the field code ends with DATE/DTE/DOB (HESA convention).
+  const transformParts = new Set((field.transform ?? '').split('|').map((s) => s.trim()).filter(Boolean))
+  const isDate = transformParts.has('date_compact') || transformParts.has('date_iso') || transformParts.has('year')
+    || /^(?:.*)(DATE|DTE|DOB)$/i.test(field.targetField)
+  // HESA usually stores dates as YYYYMMDD (date_compact). Convert to/from YYYY-MM-DD so the native
+  // <input type="date"> is usable — we save back in the storage format.
+  const isCompact = transformParts.has('date_compact') || /^\d{8}$/.test(value || '')
+  const toPickerValue = (s: string) => {
+    if (!s) return ''
+    if (isCompact && /^\d{8}$/.test(s)) return `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`
+    return s   // date_iso already YYYY-MM-DD
+  }
+  const fromPickerValue = (s: string) => {
+    if (!s) return ''
+    if (isCompact) return s.replaceAll('-', '')   // YYYY-MM-DD → YYYYMMDD
+    return s
+  }
 
   const save = async () => {
     if (!dirty) return
@@ -511,6 +531,15 @@ function DefaultRow({
               {allowed.map((v) => <SelectItem key={v} value={v}>{v}</SelectItem>)}
             </SelectContent>
           </Select>
+        ) : isDate ? (
+          <Input
+            ref={inputRef}
+            type="date"
+            className="h-8 w-[160px] font-mono text-xs"
+            value={toPickerValue(value)}
+            onChange={(e) => setValue(fromPickerValue(e.target.value))}
+            onBlur={save}
+          />
         ) : (
           <Input
             ref={inputRef}
@@ -536,6 +565,140 @@ function DefaultRow({
         </Button>
       </TableCell>
     </TableRow>
+  )
+}
+
+function SuggestDefaultsDialog({ profileId }: { profileId: string }) {
+  const { toast } = useToast()
+  const suggest = useSuggestDefaults(profileId)
+  const apply = useApplyDefaults(profileId)
+  const [open, setOpen] = useState(false)
+  const [picks, setPicks] = useState<Record<string, boolean>>({})   // field -> selected
+
+  const openDialog = async () => {
+    setOpen(true)
+    const res = await suggest.refetch()
+    if (res.data) {
+      // Pre-check every applicable suggestion — user unchecks the ones they don't want.
+      const pre: Record<string, boolean> = {}
+      res.data.suggestions.forEach((s) => { if (s.applicable && s.suggested) pre[s.field] = true })
+      setPicks(pre)
+    }
+  }
+
+  const suggestions = suggest.data?.suggestions ?? []
+  const applicable = suggestions.filter((s) => s.applicable)
+  const skipped = suggestions.filter((s) => !s.applicable)
+  const checkedCount = Object.values(picks).filter(Boolean).length
+
+  const applySelected = async () => {
+    const chosen = applicable
+      .filter((s) => picks[s.field] && s.suggested)
+      .map((s) => ({ field: s.field, value: s.suggested as string }))
+    if (chosen.length === 0) { setOpen(false); return }
+    try {
+      const res = await apply.mutateAsync(chosen)
+      toast({ title: `Applied ${res.count} default${res.count === 1 ? '' : 's'}` })
+      setOpen(false); setPicks({})
+    } catch (e) { err(toast, 'Could not apply defaults')(e) }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) setPicks({}) }}>
+      <DialogTrigger asChild>
+        <Button size="sm" variant="outline" onClick={openDialog}>
+          <Sparkles className="h-4 w-4 mr-1" /> Suggest defaults
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>Suggested defaults</DialogTitle>
+        </DialogHeader>
+        <p className="text-helper">
+          For each coded field with no default, we pick the frame's "not known" / "prefer not to say"
+          value — grounded on the spec's allowed values, so nothing is invented. Date fields and
+          unrestricted free-text fields are skipped (a made-up value would falsify the return).
+        </p>
+        {suggest.isFetching && !suggest.data ? (
+          <Skeleton className="h-40 w-full" />
+        ) : suggest.isError ? (
+          <p className="text-sm text-[hsl(var(--destructive))]">
+            {(suggest.error as ApiError)?.message ?? 'Could not fetch suggestions.'}
+          </p>
+        ) : (
+          <div className="space-y-3 max-h-[420px] overflow-y-auto pr-2">
+            {applicable.length > 0 ? (
+              <div className="card-elevated overflow-hidden">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-[36px]"></TableHead>
+                      <TableHead>Field</TableHead>
+                      <TableHead>Value</TableHead>
+                      <TableHead>Why</TableHead>
+                      <TableHead className="w-[70px]">Source</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {applicable.map((s) => (
+                      <TableRow key={s.field}>
+                        <TableCell>
+                          <Checkbox
+                            checked={!!picks[s.field]}
+                            onCheckedChange={(c) => setPicks((p) => ({ ...p, [s.field]: c === true }))}
+                          />
+                        </TableCell>
+                        <TableCell className="font-mono text-xs font-medium whitespace-nowrap">
+                          {s.field}
+                          {s.required && <Badge variant="warning" className="ml-1.5 text-[10px] py-0 px-1.5">req</Badge>}
+                        </TableCell>
+                        <TableCell className="font-mono text-xs">{s.suggested}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground">{s.reason}</TableCell>
+                        <TableCell>
+                          <Badge variant={s.source === 'model' ? 'success' : 'secondary'} className="text-[10px]">
+                            {s.source === 'model' ? 'AI' : 'rule'}
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            ) : (
+              <p className="text-helper italic">
+                No safe defaults to suggest — all applicable fields already have one, or the remaining
+                fields can't be safely defaulted (dates, unrestricted free text).
+              </p>
+            )}
+            {skipped.length > 0 && (
+              <details className="text-xs">
+                <summary className="cursor-pointer text-muted-foreground">
+                  {skipped.length} skipped (dates / free text / already set)
+                </summary>
+                <ul className="mt-2 space-y-1 pl-4">
+                  {skipped.map((s) => (
+                    <li key={s.field}>
+                      <span className="font-mono">{s.field}</span>
+                      {s.current && <span className="text-[hsl(var(--success))]"> · already set to {s.current}</span>}
+                      <span className="text-muted-foreground"> — {s.reason}</span>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+          </div>
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+          <Button
+            disabled={checkedCount === 0 || apply.isPending}
+            onClick={applySelected}
+          >
+            {apply.isPending ? 'Applying…' : `Apply ${checkedCount} default${checkedCount === 1 ? '' : 's'}`}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -593,11 +756,14 @@ function FieldDefaultsSection({
             the return covers. Coded fields pick from their allowed values; free-text fields accept any string.
           </p>
         </div>
-        <Badge variant={emptyCount === 0 ? 'success' : 'warning'} className="whitespace-nowrap">
-          {emptyCount === 0
-            ? `${rows.length} / ${rows.length} covered`
-            : `${emptyCount} of ${rows.length} without a default`}
-        </Badge>
+        <div className="flex items-center gap-2 whitespace-nowrap">
+          <SuggestDefaultsDialog profileId={profileId} />
+          <Badge variant={emptyCount === 0 ? 'success' : 'warning'}>
+            {emptyCount === 0
+              ? `${rows.length} / ${rows.length} covered`
+              : `${emptyCount} of ${rows.length} without a default`}
+          </Badge>
+        </div>
       </div>
       <div className="inline-flex rounded-md border border-border p-0.5 text-xs">
         {([

@@ -604,6 +604,130 @@ class StatutoryEngine:
         await self.update_field(profile_id, m.id, transform=new_chain)
         return {"field": field, "transform": transform, "chain": new_chain, "applied": True}
 
+    # ---------------- ICR — intelligent default suggestions ----------------
+
+    async def suggest_defaults(self, profile_id: uuid.UUID) -> dict:
+        """Suggest a safe default value per required/coded field, so the whole return can be plugged
+        in one action instead of setting each default by hand.
+
+        Design constraints, per the ICR "no hallucination" rule:
+          - For a **coded field** (spec-published allowed values), we prefer a "Not known"-style
+            code that HESA already publishes (98/99/ZZ/00/etc.). Detection is by keyword rule
+            over the allowed-values list — deterministic. The AI layer (``classify``) is called
+            with the same allowed values as its label set and keyword rules as its fallback, so
+            the picked value is always in the frame and the reasoning line explains WHY it's safe.
+          - For a **date field** we never suggest a default (a made-up date would falsify the
+            return). Same for **required free-text** fields where any suggestion would be a guess.
+          - Fields with a default already set are returned as ``skip`` (with the current value) so
+            the UI can show them as "already covered".
+        """
+        from app.ai.classify import classify
+        from app.modules.exports.spec_resolver import resolve_fields
+
+        profile = await self.get_profile(profile_id)
+        mappings = await self._mappings(profile_id)
+        # `keyed_at` isn't a column on the mapping — it's derived from the spec pack, same as in
+        # profile_detail. Look it up per field.
+        keyed = {f["field"]: f.get("keyed_at") for f in await resolve_fields(self.session, profile.code)}
+
+        # HESA/ONS conventions: the "not known" / "prefer not to say" codes across the coding
+        # frames. We match any allowed value against these substrings, in order.
+        NOT_KNOWN_HINTS = ["98", "99", "ZZ", "00", "unknown", "not known", "prefer not", "other"]
+
+        def pick_not_known(allowed: list[str]) -> str | None:
+            for hint in NOT_KNOWN_HINTS:
+                for v in allowed:
+                    if hint.lower() in str(v).lower():
+                        return v
+            return None
+
+        DATE_TRANSFORMS = {"date_compact", "date_iso", "year"}
+
+        suggestions = []
+        for m in mappings:
+            allowed = list(m.allowed_values or [])
+            transform_parts = {t.strip() for t in (m.transform or "").split("|") if t.strip()}
+            is_date = bool(transform_parts & DATE_TRANSFORMS) or m.target_field.upper().endswith(("DATE", "DTE", "DOB"))
+
+            keyed_at = keyed.get(m.target_field)
+            entry = {
+                "field": m.target_field,
+                "mappingId": str(m.id),
+                "keyedAt": keyed_at,
+                "required": m.required,
+                "current": m.default_value,
+                "allowedValues": allowed,
+            }
+
+            # Already covered — nothing to suggest.
+            if m.default_value:
+                suggestions.append({**entry, "suggested": None, "reason": "Already has a default.",
+                                    "source": "skip", "applicable": False})
+                continue
+
+            # Real dates can't be safely defaulted.
+            if is_date:
+                suggestions.append({**entry, "suggested": None, "source": "skip",
+                                    "reason": "Date field — a fixed default would falsify the return; leave it empty or fix per record.",
+                                    "applicable": False})
+                continue
+
+            # Coded field: keyword-rule pick, then AI to explain (or fall back to the same pick).
+            if allowed:
+                rule_pick = pick_not_known(allowed)
+                if rule_pick is None:
+                    # No obvious "not known" code in this frame — don't guess.
+                    suggestions.append({**entry, "suggested": None, "source": "skip",
+                                        "reason": "No 'not known' style code in the frame — pick manually.",
+                                        "applicable": False})
+                    continue
+                # Ask the model to CONFIRM (grounded on the frame; keyword rule is the fallback).
+                keyword_rules = {rule_pick: NOT_KNOWN_HINTS}
+                context = (f"HESA field {m.target_field} ({keyed_at or 'no description'}). "
+                           f"Pick the code that means 'not known / prefer not to say / other', "
+                           f"so an empty record still validates.")
+                result = await classify(
+                    text=", ".join(allowed),
+                    labels=allowed,
+                    keyword_rules=keyword_rules,
+                    fallback_label=rule_pick,
+                    context=context,
+                )
+                suggestions.append({**entry, "suggested": result.label,
+                                    "reason": result.reasoning,
+                                    "source": result.provenance.source, "applicable": True})
+                continue
+
+            # Free-text field with no coding frame: refuse to guess if required (a made-up
+            # SURNAME would be worse than an empty one); skip silently if optional.
+            reason = ("Free-text field — no safe default; set one manually if the record's source is empty."
+                      if m.required
+                      else "Optional free-text field — empty is fine.")
+            suggestions.append({**entry, "suggested": None, "source": "skip",
+                                "reason": reason, "applicable": False})
+
+        applicable = [s for s in suggestions if s["applicable"]]
+        return {
+            "profile": self.profile_out(profile),
+            "suggestions": sorted(suggestions, key=lambda s: (not s["applicable"], s["field"])),
+            "applicableCount": len(applicable),
+        }
+
+    async def apply_defaults(self, profile_id: uuid.UUID, picks: list[dict]) -> dict:
+        """Apply the accepted suggestions in one call. Each pick is ``{field, value}``. Refused
+        for a signed-off profile (via the underlying update_field guard). Returns the count applied."""
+        mappings = await self._mappings(profile_id)
+        by_field = {m.target_field: m for m in mappings}
+        applied: list[str] = []
+        for pick in picks:
+            fld, val = pick.get("field"), pick.get("value")
+            m = by_field.get(fld)
+            if m is None or not val:
+                continue
+            await self.update_field(profile_id, m.id, default_value=str(val))
+            applied.append(fld)
+        return {"applied": applied, "count": len(applied)}
+
     # ---------------- F1 — sign-off, immutability, mandatory-spec gates ----------------
 
     async def compile(self, profile_id: uuid.UUID) -> dict:

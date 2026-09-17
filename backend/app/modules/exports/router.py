@@ -246,6 +246,40 @@ async def apply_fix(
     return await _engine(session).apply_fix(profile_id, field=body.field, transform=body.transform)
 
 
+@profiles_router.get("/{profile_id}/suggest-defaults",
+                     summary="Intelligent per-field default suggestions (AI + rule fallback)")
+async def suggest_defaults(
+    profile_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("reporting.read")),
+) -> dict:
+    return await _engine(session).suggest_defaults(profile_id)
+
+
+class ApplyDefaultsPick(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+    field: str
+    value: str
+
+
+class ApplyDefaultsRequest(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+    picks: list[ApplyDefaultsPick]
+
+
+@profiles_router.post("/{profile_id}/apply-defaults",
+                      summary="Apply accepted default suggestions in one call (refused if signed off)")
+async def apply_defaults(
+    profile_id: uuid.UUID,
+    body: ApplyDefaultsRequest,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("admin.configure")),
+) -> dict:
+    return await _engine(session).apply_defaults(
+        profile_id, [{"field": p.field, "value": p.value} for p in body.picks],
+    )
+
+
 @profiles_router.post("/{profile_id}/generate", status_code=201, summary="Produce the statutory extract")
 async def generate_profile(
     profile_id: uuid.UUID,
