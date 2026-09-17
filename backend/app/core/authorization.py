@@ -25,6 +25,11 @@ UNRESTRICTED_STUDENT_ROLES = {
     "Research Office",
     "Academic or Panel",
     "Admissions or Recruitment",
+    # The `dev` role has the wildcard permission `*` plus the exclusive `platform.configure`, so
+    # they can hit every read endpoint. Leaving them off this list meant `student.read` returned
+    # zero rows — visible in the UI as "0 of N students" for a role that's meant to be able to
+    # inspect anything the platform can show an admin.
+    "dev",
 }
 
 
