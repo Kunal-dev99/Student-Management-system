@@ -1799,8 +1799,11 @@ function computeTabStatuses(
   return {
     fields: {
       done: compileLoaded && detailLoaded && missing === 0 && totalFields > 0,
+      // Empty label ('') during load — with `placeholderData: keepPreviousData` this only shows
+      // on the very first page load before ANY compile/detail landed, and the empty pill is far
+      // less noisy than the previous amber "loading…" that flashed on every mutation.
       label: !compileLoaded || !detailLoaded
-        ? 'loading…'
+        ? ''
         : missing === 0 && totalFields > 0
           ? `${totalFields} mapped`
           : `${missing} unmapped`,
@@ -1810,7 +1813,7 @@ function computeTabStatuses(
     },
     defaults: {
       done: detailLoaded && emptyDefaults === 0,
-      label: !detailLoaded ? 'loading…' : emptyDefaults === 0 ? 'all covered' : `${emptyDefaults} empty`,
+      label: !detailLoaded ? '' : emptyDefaults === 0 ? 'all covered' : `${emptyDefaults} empty`,
       tone: !detailLoaded ? 'idle' : emptyDefaults === 0 ? 'ok' : 'warn',
     },
     validation: {
@@ -1887,7 +1890,12 @@ function StatutoryTabsBar({
                 )}
                 {t.icon && t.n === undefined && <t.icon className="h-4 w-4" />}
                 <span>{t.label}</span>
-                <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${toneClass}`}>
+                {st.label && (
+                  <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${toneClass}`}>
+                    {st.label}
+                  </span>
+                )}
+                <span className="sr-only">
                   {st.label}
                 </span>
               </button>
@@ -2020,7 +2028,14 @@ export default function StatutoryPage() {
               <div className="flex items-baseline justify-between gap-3 pb-2">
                 <div>
                   <h2 className="text-section-title">
-                    {detail.data ? `${detail.data.code} — ${detail.data.academicYear}` : 'Loading…'}
+                    {(() => {
+                      // Prefer the profile row from the list (loaded first), so switching or
+                      // refetching never flashes the title to "Loading…". Fall back to detail
+                      // when the list hasn't landed yet (very rare — same page load).
+                      const fromList = profiles.data?.find((p) => p.id === selectedId)
+                      const name = detail.data ?? fromList
+                      return name ? `${name.code} — ${name.academicYear}` : ' '
+                    })()}
                   </h2>
                   <p className="text-helper">
                     {tab === 'fields'     && <>Target field ← source expression + transform + validation.</>}

@@ -9,7 +9,7 @@
  * year's return means editing configuration, not shipping Python.
  */
 
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, uploadFile } from '@/shared/api/client'
 
 export interface ReportProfile {
@@ -124,6 +124,10 @@ export const useProfile = (profileId: string | null) =>
     queryKey: ['report-profile', profileId],
     queryFn: () => api.get<ProfileDetail>(`/report-profiles/${profileId}`),
     enabled: !!profileId,
+    // Keep the previous profile's rendered data visible while a new profile / a refetch lands,
+    // so switching profiles or invalidating after a mutation doesn't flash the whole page to
+    // "Loading…" for a beat.
+    placeholderData: keepPreviousData,
   })
 
 /** The transforms a mapping may name. Server-owned, so never hard-coded here. */
@@ -280,6 +284,9 @@ export const useCompileProfile = (profileId: string | null) =>
     queryKey: ['report-profile', profileId, 'compile'],
     queryFn: () => api.get<CompileReport>(`/report-profiles/${profileId}/compile`),
     enabled: !!profileId,
+    // Same no-flash treatment as useProfile — the tab pills read from this and used to flash
+    // "loading…" on every mutation.
+    placeholderData: keepPreviousData,
   })
 
 export function useUpdateField(profileId: string | null) {
