@@ -9,6 +9,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   CheckCircle2, CopyPlus, Download, FileSpreadsheet, FileUp, ListChecks, Lock, Unlock, Play, Plus, Pencil, Trash2, ShieldAlert, ShieldCheck, Sparkles,
+  type LucideIcon,
 } from 'lucide-react'
 import { PageHeader } from '@/components/common/PageHeader'
 import { PageSection } from '@/components/common/PageSection'
@@ -40,7 +41,7 @@ import {
   useSuggestDefaults, useApplyDefaults, useSuppressRule, useRemoveSuppression,
   type GenerateResult, type ReportProfile, type ValidationResult, type FieldMapping,
   type DefaultSuggestion, type ValidationIssue, type RuleAnalysis, type RuleSuppression,
-  type ProfileDetail, type ValidationReport,
+  type ProfileDetail, type ValidationReport, type CompileReport,
 } from '@/features/statutory/api'
 
 function err(toast: ReturnType<typeof useToast>['toast'], title: string) {
@@ -768,7 +769,7 @@ function FieldDefaultsSection({
   if (fields.length === 0) return null
 
   return (
-    <div id={SECTION_IDS.defaults} className="pt-3 border-t border-border space-y-3 scroll-mt-4 rounded-md">
+    <div className="space-y-3">
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-label inline-flex items-center gap-1.5">
@@ -1480,165 +1481,127 @@ function SignOffCard({ profileId, canSignOff }: { profileId: string; canSignOff:
   )
 }
 
-// ---------------------------------------------------------------- guided flow
+// ---------------------------------------------------------------- guided flow (as tabs)
 //
-// UX pass: /statutory got noisy — 9 stacked sections, jargon everywhere, no story about what to
-// do first. This checklist sits at the top when a profile is selected and turns "what am I
-// looking at?" into an ordered 5-step flow. Each step has live status, an action button that
-// scrolls-and-highlights the relevant section, and only lights up when the prior step is done.
-// The advanced sections below remain — this is progressive disclosure, not deletion.
+// UX v2: the "Get this return ready" guided flow now IS the tab bar. Each tab is a step —
+// numbered, with a live status pill on the label so the user sees progress without scrolling.
+// One tab visible at a time replaces the old nine-stacked-sections firehose. Advisories is a
+// sibling tab (same UI grammar, direct jump).
 
-const SECTION_IDS = {
-  signoff: 'section-signoff',
-  fields: 'section-fields',
-  defaults: 'section-defaults',
-  validation: 'section-validation',
-} as const
+type StatutoryTab = 'fields' | 'defaults' | 'validation' | 'signoff' | 'advisories'
 
-/** Scroll to a section and briefly highlight it so the user's eye lands in the right place. */
-function scrollToSection(id: string) {
-  const el = document.getElementById(id)
-  if (!el) return
-  el.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  el.classList.add('ring-2', 'ring-primary/40', 'transition-shadow')
-  window.setTimeout(() => el.classList.remove('ring-2', 'ring-primary/40'), 2000)
+interface TabStatuses {
+  fields: { done: boolean; label: string; tone: 'ok' | 'warn' | 'idle' }
+  defaults: { done: boolean; label: string; tone: 'ok' | 'warn' | 'idle' }
+  validation: { done: boolean; label: string; tone: 'ok' | 'warn' | 'error' | 'idle' }
+  signoff: { done: boolean; label: string; tone: 'ok' | 'warn' | 'idle' }
+  advisories: { done: boolean; label: string; tone: 'ok' | 'warn' | 'idle' }
 }
 
-function ReturnReadyChecklist({
-  profileId, detail, validate, onRunValidate,
-}: {
-  profileId: string
-  detail: ProfileDetail | undefined
-  validate: ValidationReport | undefined
-  onRunValidate: () => Promise<unknown>
-}) {
-  const compile = useCompileProfile(profileId)
-  const r = compile.data
-  const [runningValidate, setRunningValidate] = useState(false)
-
-  if (!r || !detail) return null
-
-  // --- compute step statuses from live data (no extra fetch) ---
-  const missingCount = r.missing.length
-  const step1Done = missingCount === 0 && detail.fields.length > 0
-
-  // "Needs a default" = required fields OR unmapped fields with no defaultValue set. Same rule
-  // the defaults section uses so counts match.
-  const emptyDefaults = detail.fields.filter((f) =>
+/** Compute the live status pill for every tab from the same queries the sections use. Kept as a
+ *  pure function so the tab bar can render without owning any state itself. */
+function computeTabStatuses(
+  detail: ProfileDetail | undefined,
+  compile: CompileReport | undefined,
+  validate: ValidationReport | undefined,
+  advisoryPendingCount: number,
+): TabStatuses {
+  const missing = compile?.missing.length ?? 0
+  const emptyDefaults = detail?.fields.filter((f) =>
     (f.required || !f.sourceExpression?.trim()) && !(f.defaultValue ?? '').length,
-  ).length
-  const step2Done = emptyDefaults === 0
+  ).length ?? 0
+  const errors = validate?.validation.errors ?? null
+  const suppressions = compile?.suppressions?.length ?? 0
+  const signed = compile?.profile.signedOff ?? false
+  const ready = compile?.signOffReady ?? false
 
-  const validation = validate?.validation
-  const step3Done = !!validation && validation.errors === 0
-
-  const suppressions = r.suppressions ?? []
-  const step4Show = suppressions.length > 0
-
-  const signed = r.profile.signedOff
-  const step5Ready = r.signOffReady && step3Done
-
-  const allDone = step1Done && step2Done && step3Done && step5Ready
-
-  return (
-    <PageSection
-      icon={ListChecks}
-      title={signed ? 'Signed off ✓' : 'Get this return ready'}
-      accent={signed ? 'success' : allDone ? 'success' : 'primary'}
-      description={
-        signed
-          ? 'This profile is locked. Unsign it to make changes.'
-          : 'Five steps to a submittable return. Each step lights up when the one before it is done.'
-      }
-    >
-      <ol className="space-y-2">
-        <ChecklistStep n={1} title="Map every mandatory field" done={step1Done}
-          statusOk={`${detail.fields.length} fields mapped — all mandatory fields covered.`}
-          statusTodo={`${missingCount} mandatory field${missingCount === 1 ? '' : 's'} still unmapped.`}
-          actionLabel={step1Done ? 'Show mappings' : 'Map fields'}
-          onAction={() => scrollToSection(SECTION_IDS.fields)}
-        />
-        <ChecklistStep n={2} title="Set defaults for empty fields" done={step2Done}
-          statusOk="Every required-or-unmapped field has a default — empty records will use it."
-          statusTodo={`${emptyDefaults} field${emptyDefaults === 1 ? '' : 's'} without a default — records with no source data will fail validation.`}
-          actionLabel="Set defaults"
-          onAction={() => scrollToSection(SECTION_IDS.defaults)}
-        />
-        <ChecklistStep n={3} title="Run validation" done={step3Done}
-          statusOk="Validation is clean — no errors."
-          statusTodo={validation
-            ? `${validation.errors} error${validation.errors === 1 ? '' : 's'}${validation.warnings ? `, ${validation.warnings} warning${validation.warnings === 1 ? '' : 's'}` : ''} on ${validate?.rowCount ?? 0} rows.`
-            : 'Not yet checked. Run validation to see what would ship today.'}
-          actionLabel={validation ? 'Show report' : (runningValidate ? 'Checking…' : 'Run validation')}
-          actionDisabled={runningValidate}
-          onAction={async () => {
-            if (!validation) {
-              setRunningValidate(true)
-              try { await onRunValidate() } finally { setRunningValidate(false) }
-            }
-            scrollToSection(SECTION_IDS.validation)
-          }}
-        />
-        {step4Show && (
-          <ChecklistStep n={4} title="Review rule suppressions" done={false} attention
-            statusOk=""
-            statusTodo={`${suppressions.length} rule${suppressions.length === 1 ? '' : 's'} suppressed — sign-off will show reasons and who suppressed them.`}
-            actionLabel="Review"
-            onAction={() => scrollToSection(SECTION_IDS.signoff)}
-          />
-        )}
-        <ChecklistStep n={step4Show ? 5 : 4} title="Sign off" done={signed}
-          statusOk="Signed off — return is locked and reproducible."
-          statusTodo={step5Ready
-            ? 'Ready to sign off — every mandatory field is mapped and validation is green.'
-            : 'Waiting on the previous steps.'}
-          actionLabel={signed ? 'Show sign-off' : (step5Ready ? 'Go to sign off' : 'Not yet')}
-          actionDisabled={!signed && !step5Ready}
-          onAction={() => scrollToSection(SECTION_IDS.signoff)}
-        />
-      </ol>
-    </PageSection>
-  )
+  return {
+    fields: {
+      done: missing === 0 && (detail?.fields.length ?? 0) > 0,
+      label: missing === 0 ? `${detail?.fields.length ?? 0} mapped` : `${missing} unmapped`,
+      tone: missing === 0 && (detail?.fields.length ?? 0) > 0 ? 'ok' : 'warn',
+    },
+    defaults: {
+      done: emptyDefaults === 0,
+      label: emptyDefaults === 0 ? 'all covered' : `${emptyDefaults} empty`,
+      tone: emptyDefaults === 0 ? 'ok' : 'warn',
+    },
+    validation: {
+      done: errors === 0,
+      label: errors === null ? 'not run' : errors === 0 ? 'clean' : `${errors.toLocaleString()} errors`,
+      tone: errors === null ? 'idle' : errors === 0 ? 'ok' : 'error',
+    },
+    signoff: {
+      done: signed,
+      label: signed ? 'signed' : suppressions > 0 ? `${suppressions} suppressed` : ready ? 'ready' : 'blocked',
+      tone: signed ? 'ok' : suppressions > 0 ? 'warn' : ready ? 'ok' : 'idle',
+    },
+    advisories: {
+      done: advisoryPendingCount === 0,
+      label: advisoryPendingCount === 0 ? '—' : `${advisoryPendingCount} pending`,
+      tone: advisoryPendingCount === 0 ? 'idle' : 'warn',
+    },
+  }
 }
 
-function ChecklistStep({
-  n, title, done, statusOk, statusTodo, actionLabel, onAction, actionDisabled, attention,
+const TAB_DEFS: Array<{ id: StatutoryTab; n?: number; label: string; icon?: LucideIcon; group: 'flow' | 'aux' }> = [
+  { id: 'fields',     n: 1, label: 'Fields',      icon: ListChecks,   group: 'flow' },
+  { id: 'defaults',   n: 2, label: 'Defaults',    icon: Sparkles,     group: 'flow' },
+  { id: 'validation', n: 3, label: 'Validate',    icon: ShieldAlert,  group: 'flow' },
+  { id: 'signoff',    n: 4, label: 'Sign-off',    icon: ShieldCheck,  group: 'flow' },
+  { id: 'advisories',       label: 'Advisories',  icon: FileUp,       group: 'aux' },
+]
+
+function StatutoryTabsBar({
+  active, onSelect, statuses,
 }: {
-  n: number
-  title: string
-  done: boolean
-  statusOk: string
-  statusTodo: string
-  actionLabel: string
-  onAction: () => void
-  actionDisabled?: boolean
-  attention?: boolean
+  active: StatutoryTab
+  onSelect: (t: StatutoryTab) => void
+  statuses: TabStatuses
 }) {
   return (
-    <li className={`flex items-start gap-3 p-3 rounded-md border ${
-      done ? 'border-[hsl(var(--success)/0.35)] bg-[hsl(var(--success)/0.04)]'
-        : attention ? 'border-[hsl(var(--warning)/0.4)] bg-[hsl(var(--warning)/0.04)]'
-        : 'border-border bg-background'
-    }`}>
-      <div className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-medium ${
-        done ? 'bg-[hsl(var(--success))] text-white'
-          : attention ? 'bg-[hsl(var(--warning))] text-white'
-          : 'bg-surface-2 text-muted-foreground'
-      }`}>
-        {done ? '✓' : n}
+    <div className="border-b border-border overflow-x-auto -mx-6 px-6">
+      <div role="tablist" className="inline-flex gap-1 min-w-full">
+        {TAB_DEFS.map((t, i) => {
+          const st = statuses[t.id]
+          const isActive = active === t.id
+          const prevGroup = i > 0 ? TAB_DEFS[i - 1].group : t.group
+          const isFirstAux = t.group === 'aux' && prevGroup === 'flow'
+          const toneClass =
+            st.tone === 'ok' ? 'bg-[hsl(var(--success)/0.15)] text-[hsl(var(--success))]' :
+            st.tone === 'warn' ? 'bg-[hsl(var(--warning)/0.15)] text-[hsl(var(--warning))]' :
+            st.tone === 'error' ? 'bg-[hsl(var(--destructive)/0.15)] text-[hsl(var(--destructive))]' :
+            'bg-surface-2 text-muted-foreground'
+          return (
+            <div key={t.id} className={isFirstAux ? 'ml-4 pl-4 border-l border-border' : ''}>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={isActive}
+                onClick={() => onSelect(t.id)}
+                className={`group inline-flex items-center gap-2 px-4 py-3 text-sm font-medium
+                  border-b-2 transition-colors -mb-px whitespace-nowrap
+                  ${isActive
+                    ? 'border-primary text-foreground'
+                    : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'}`}
+              >
+                {t.n !== undefined && (
+                  <span className={`inline-flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-semibold
+                    ${st.done ? 'bg-[hsl(var(--success))] text-white' : isActive ? 'bg-primary text-primary-foreground' : 'bg-surface-2 text-muted-foreground'}`}>
+                    {st.done ? '✓' : t.n}
+                  </span>
+                )}
+                {t.icon && t.n === undefined && <t.icon className="h-4 w-4" />}
+                <span>{t.label}</span>
+                <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${toneClass}`}>
+                  {st.label}
+                </span>
+              </button>
+            </div>
+          )
+        })}
       </div>
-      <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium">{title}</p>
-        <p className="text-xs text-muted-foreground mt-0.5">{done ? statusOk : statusTodo}</p>
-      </div>
-      <Button
-        size="sm" variant={done ? 'ghost' : 'default'} className="h-7 shrink-0"
-        disabled={actionDisabled}
-        onClick={onAction}
-      >
-        {actionLabel}
-      </Button>
-    </li>
+    </div>
   )
 }
 
@@ -1654,8 +1617,10 @@ export default function StatutoryPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const detail = useProfile(selectedId)
   const validate = useValidateProfile(selectedId)
+  const compile = useCompileProfile(selectedId)
   const generate = useGenerateProfile()
   const [generated, setGenerated] = useState<GenerateResult | null>(null)
+  const [tab, setTab] = useState<StatutoryTab>('fields')
 
   // Pick the first profile once the list arrives so the screen is never empty for no reason.
   useEffect(() => {
@@ -1665,10 +1630,18 @@ export default function StatutoryPage() {
   const selectProfile = (id: string) => {
     setSelectedId(id)
     setGenerated(null)
+    setTab('fields')
   }
 
   const showValidation = validate.data && validate.data.profile.id === selectedId
   const showGenerated = generated && generated.profile.id === selectedId
+
+  const statuses = computeTabStatuses(
+    detail.data ?? undefined,
+    compile.data ?? undefined,
+    validate.data ?? undefined,
+    0,   // TODO: wire real pending-advisory count if useful; 0 keeps the pill idle
+  )
 
   return (
     <>
@@ -1744,99 +1717,80 @@ export default function StatutoryPage() {
           )}
         </PageSection>
 
-        {/* Guided flow: sits above the advanced sections so a first-time admin knows what to do
-           next. The advanced sections below remain — this is progressive disclosure, not deletion. */}
-        {selectedId && (
-          <ReturnReadyChecklist
-            profileId={selectedId}
-            detail={detail.data ?? undefined}
-            validate={validate.data ?? undefined}
-            onRunValidate={async () => {
-              const res = await validate.refetch()
-              if (res.error) err(toast, 'Could not validate')(res.error)
-            }}
-          />
-        )}
-
-        <PageSection
-          icon={FileUp}
-          title="Statutory advisories"
-          accent="accent"
-          description="Ingest a published HESA advisory, review the diff against the current pack, and accept it to make the change the active spec version — ingest → recommend → accept, human-gated."
-        >
-          <AdvisoriesPanel canConfigure={canConfigure} canSignOff={canSignOff} />
-        </PageSection>
-
-        {selectedId && (
-          <PageSection
-            id={SECTION_IDS.signoff}
-            icon={ShieldCheck}
-            title="Sign-off &amp; mandatory-field readiness"
-            accent="primary"
-            description="A profile can be signed off only when every mandatory field in the return's published spec is mapped and the current cohort validates. Signed-off profiles are immutable until unsigned."
-          >
-            <SignOffCard profileId={selectedId} canSignOff={canSignOff} />
-          </PageSection>
-        )}
-
-        {selectedId && (
-          <PageSection
-            id={SECTION_IDS.fields}
-            icon={ListChecks}
-            title={detail.data ? `${detail.data.code} — ${detail.data.academicYear}` : 'Field mappings'}
-            accent="accent"
-            description="Target field ← source expression + transform + validation."
-            actions={
-              <div className="flex flex-wrap items-center gap-2">
-                {canConfigure && !detail.data?.signedOff && <AddFieldDialog profileId={selectedId} />}
-                <Button
-                  size="sm" variant="outline"
-                  disabled={validate.isFetching}
-                  onClick={async () => {
-                    const res = await validate.refetch()
-                    if (res.error) { err(toast, 'Could not validate')(res.error); return }
-                    const v = res.data?.validation
-                    toast({
-                      title: v?.valid ? 'No validation errors' : `${v?.errors ?? 0} validation error(s)`,
-                      description: `${res.data?.rowCount ?? 0} rows checked.`,
-                      variant: v?.valid ? undefined : 'destructive',
-                    })
-                  }}
-                >
-                  <ListChecks className="h-4 w-4 mr-1" />
-                  {validate.isFetching ? 'Validating…' : 'Validate'}
-                </Button>
-                <Button
-                  size="sm"
-                  disabled={generate.isPending}
-                  onClick={async () => {
-                    try {
-                      const res = await generate.mutateAsync(selectedId)
-                      setGenerated(res)
-                      toast({
-                        title: `Generated ${res.job.rowCount ?? 0} row(s)`,
-                        description: res.validation.valid
-                          ? 'No validation errors — the file is ready to download.'
-                          : `${res.validation.errors} validation error(s) travelled with the file.`,
-                      })
-                    } catch (e) { err(toast, 'Could not generate')(e) }
-                  }}
-                >
-                  <Play className="h-4 w-4 mr-1" />
-                  {generate.isPending ? 'Generating…' : 'Generate'}
-                </Button>
-                {/* Cloning creates a new profile — admin.configure, like New profile. */}
-                {canConfigure && detail.data && <CloneDialog profile={detail.data} />}
+        {/* Tabs replace the old nine-stacked-sections firehose. Each tab is a step in the flow
+           (fields → defaults → validate → sign-off) plus Advisories as a sibling admin action.
+           Tab labels carry live status pills so progress is visible without scrolling. */}
+        {selectedId ? (
+          <>
+            <div className="pt-1">
+              <div className="flex items-baseline justify-between gap-3 pb-2">
+                <div>
+                  <h2 className="text-section-title">
+                    {detail.data ? `${detail.data.code} — ${detail.data.academicYear}` : 'Loading…'}
+                  </h2>
+                  <p className="text-helper">
+                    {tab === 'fields'     && <>Target field ← source expression + transform + validation.</>}
+                    {tab === 'defaults'   && <>What the return should send when a record's source column is empty.</>}
+                    {tab === 'validation' && <>Every problem the return would ship with today — with a fix path per row.</>}
+                    {tab === 'signoff'    && <>Attest that the mappings are complete. Signed-off profiles are locked until unsigned.</>}
+                    {tab === 'advisories' && <>Ingest a published HESA advisory, review the diff, and accept it to make the change the active spec version.</>}
+                  </p>
+                </div>
+                {tab === 'validation' && (
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm" variant="outline"
+                      disabled={validate.isFetching}
+                      onClick={async () => {
+                        const res = await validate.refetch()
+                        if (res.error) { err(toast, 'Could not validate')(res.error); return }
+                        const v = res.data?.validation
+                        toast({
+                          title: v?.valid ? 'No validation errors' : `${v?.errors ?? 0} validation error(s)`,
+                          description: `${res.data?.rowCount ?? 0} rows checked.`,
+                          variant: v?.valid ? undefined : 'destructive',
+                        })
+                      }}
+                    >
+                      <ListChecks className="h-4 w-4 mr-1" />
+                      {validate.isFetching ? 'Validating…' : 'Validate'}
+                    </Button>
+                    <Button
+                      size="sm"
+                      disabled={generate.isPending}
+                      onClick={async () => {
+                        try {
+                          const res = await generate.mutateAsync(selectedId)
+                          setGenerated(res)
+                          toast({
+                            title: `Generated ${res.job.rowCount ?? 0} row(s)`,
+                            description: res.validation.valid
+                              ? 'No validation errors — the file is ready to download.'
+                              : `${res.validation.errors} validation error(s) travelled with the file.`,
+                          })
+                        } catch (e) { err(toast, 'Could not generate')(e) }
+                      }}
+                    >
+                      <Play className="h-4 w-4 mr-1" />
+                      {generate.isPending ? 'Generating…' : 'Generate'}
+                    </Button>
+                  </div>
+                )}
+                {tab === 'fields' && (
+                  <div className="flex items-center gap-2">
+                    {canConfigure && !detail.data?.signedOff && <AddFieldDialog profileId={selectedId} />}
+                    {canConfigure && detail.data && <CloneDialog profile={detail.data} />}
+                  </div>
+                )}
               </div>
-            }
-          >
-            {detail.isLoading ? (
-              <Skeleton className="h-24 w-full" />
-            ) : detail.isError ? (
-              <p className="text-sm text-[hsl(var(--destructive))]">{(detail.error as ApiError)?.message}</p>
-            ) : (
-              <div className="space-y-4">
-                {detail.data && detail.data.fields.length > 0 ? (
+              <StatutoryTabsBar active={tab} onSelect={setTab} statuses={statuses} />
+            </div>
+
+            <div className="pt-4">
+              {tab === 'fields' && (
+                detail.isLoading ? <Skeleton className="h-24 w-full" /> :
+                detail.isError ? <p className="text-sm text-[hsl(var(--destructive))]">{(detail.error as ApiError)?.message}</p> :
+                detail.data && detail.data.fields.length > 0 ? (
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -1889,54 +1843,83 @@ export default function StatutoryPage() {
                     No fields mapped yet. This profile cannot produce a return until at least one
                     target field is mapped to a source expression.
                   </p>
-                )}
+                )
+              )}
 
-                {/* Institution-wide defaults per required statutory field. Rendered above the
-                   validation report because setting these is the fastest way to make it go green. */}
-                {detail.data && detail.data.fields.length > 0 && !detail.data.signedOff && canConfigure && (
-                  <FieldDefaultsSection profileId={selectedId} fields={detail.data.fields} />
-                )}
+              {tab === 'defaults' && (
+                detail.data && detail.data.fields.length > 0 ? (
+                  detail.data.signedOff || !canConfigure ? (
+                    <p className="text-helper">Defaults are read-only on a signed-off profile.</p>
+                  ) : (
+                    <FieldDefaultsSection profileId={selectedId} fields={detail.data.fields} />
+                  )
+                ) : (
+                  <p className="text-helper">Map at least one field first — defaults are per field.</p>
+                )
+              )}
 
-                {showValidation && validate.data && (
-                  <div id={SECTION_IDS.validation} className="pt-3 border-t border-border scroll-mt-4 rounded-md">
-                    <p className="text-label mb-2 inline-flex items-center gap-1.5">
-                      Validation report <JargonTip term="validation report" />
-                    </p>
-                    <ValidationReportView
-                      result={validate.data.validation}
-                      rowCount={validate.data.rowCount}
-                      profileId={selectedId}
-                    />
-                  </div>
-                )}
-
-                {detail.data && detail.data.fields.length > 0 && !detail.data.signedOff && (
-                  <SuggestedFixes profileId={selectedId} canApply={canConfigure} />
-                )}
-
-                {showGenerated && generated && (
-                  <div className="pt-3 border-t border-border space-y-2">
-                    <p className="text-label">Last generated</p>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-sm font-mono">{generated.job.filename ?? 'export.csv'}</span>
-                      <Badge variant="secondary">{generated.job.status}</Badge>
-                      <span className="text-helper num">{generated.job.rowCount ?? 0} rows</span>
-                      <Badge variant={generated.validation.valid ? 'success' : 'destructive'}>
-                        {generated.validation.errors} error{generated.validation.errors === 1 ? '' : 's'}
-                      </Badge>
-                      <Button size="sm" variant="outline" onClick={() => downloadExport(generated.job)}>
-                        <Download className="h-4 w-4 mr-1" /> Download
-                      </Button>
+              {tab === 'validation' && (
+                <div className="space-y-4">
+                  {showValidation && validate.data ? (
+                    <div>
+                      <p className="text-label mb-2 inline-flex items-center gap-1.5">
+                        Validation report <JargonTip term="validation report" />
+                      </p>
+                      <ValidationReportView
+                        result={validate.data.validation}
+                        rowCount={validate.data.rowCount}
+                        profileId={selectedId}
+                      />
                     </div>
-                    <ValidationReportView
-                      result={generated.validation}
-                      rowCount={generated.job.rowCount ?? 0}
-                      profileId={selectedId}
-                    />
-                  </div>
-                )}
-              </div>
-            )}
+                  ) : (
+                    <p className="text-helper">Not yet checked. Click Validate above to see what would ship today.</p>
+                  )}
+
+                  {detail.data && detail.data.fields.length > 0 && !detail.data.signedOff && (
+                    <SuggestedFixes profileId={selectedId} canApply={canConfigure} />
+                  )}
+
+                  {showGenerated && generated && (
+                    <div className="pt-3 border-t border-border space-y-2">
+                      <p className="text-label">Last generated</p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-mono">{generated.job.filename ?? 'export.csv'}</span>
+                        <Badge variant="secondary">{generated.job.status}</Badge>
+                        <span className="text-helper num">{generated.job.rowCount ?? 0} rows</span>
+                        <Badge variant={generated.validation.valid ? 'success' : 'destructive'}>
+                          {generated.validation.errors} error{generated.validation.errors === 1 ? '' : 's'}
+                        </Badge>
+                        <Button size="sm" variant="outline" onClick={() => downloadExport(generated.job)}>
+                          <Download className="h-4 w-4 mr-1" /> Download
+                        </Button>
+                      </div>
+                      <ValidationReportView
+                        result={generated.validation}
+                        rowCount={generated.job.rowCount ?? 0}
+                        profileId={selectedId}
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {tab === 'signoff' && (
+                <SignOffCard profileId={selectedId} canSignOff={canSignOff} />
+              )}
+
+              {tab === 'advisories' && (
+                <AdvisoriesPanel canConfigure={canConfigure} canSignOff={canSignOff} />
+              )}
+            </div>
+          </>
+        ) : (
+          <PageSection
+            icon={FileUp}
+            title="Statutory advisories"
+            accent="accent"
+            description="Ingest a published HESA advisory, review the diff against the current pack, and accept it to make the change the active spec version — ingest → recommend → accept, human-gated."
+          >
+            <AdvisoriesPanel canConfigure={canConfigure} canSignOff={canSignOff} />
           </PageSection>
         )}
       </div>
