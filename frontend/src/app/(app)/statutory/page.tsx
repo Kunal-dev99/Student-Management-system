@@ -41,7 +41,7 @@ import {
   useSuggestDefaults, useApplyDefaults, useSuppressRule, useRemoveSuppression,
   type GenerateResult, type ReportProfile, type ValidationResult, type FieldMapping,
   type DefaultSuggestion, type ValidationIssue, type RuleAnalysis, type RuleSuppression,
-  type ProfileDetail, type ValidationReport, type CompileReport,
+  type ProfileDetail, type ValidationReport, type CompileReport, type CompileMissing,
 } from '@/features/statutory/api'
 
 function err(toast: ReturnType<typeof useToast>['toast'], title: string) {
@@ -170,18 +170,49 @@ function NewProfileDialog() {
   )
 }
 
-function AddFieldDialog({ profileId }: { profileId: string }) {
+interface AddFieldInitial {
+  targetField?: string
+  allowedValues?: string[]
+  required?: boolean
+}
+
+function AddFieldDialog({
+  profileId, initial, trigger, open: openProp, onOpenChange,
+}: {
+  profileId: string
+  /** Prefill when opened from a "Map this field" affordance elsewhere. */
+  initial?: AddFieldInitial
+  /** Custom trigger. Omit for the default "+ Add field" button. */
+  trigger?: React.ReactNode
+  /** Controlled open state — pass this when the caller wants to drive the dialog. */
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+}) {
   const { toast } = useToast()
   const add = useAddField(profileId)
   const transforms = useTransforms()
-  const [open, setOpen] = useState(false)
-  const [targetField, setTargetField] = useState('')
+  const [openUncontrolled, setOpenUncontrolled] = useState(false)
+  const open = openProp ?? openUncontrolled
+  const setOpen = (o: boolean) => { onOpenChange ? onOpenChange(o) : setOpenUncontrolled(o) }
+
+  const [targetField, setTargetField] = useState(initial?.targetField ?? '')
   const [sourceExpression, setSourceExpression] = useState('')
   const [transform, setTransform] = useState('')
   const [defaultValue, setDefaultValue] = useState('')
   const [position, setPosition] = useState('')
-  const [required, setRequired] = useState(false)
-  const [allowedValues, setAllowedValues] = useState('')
+  const [required, setRequired] = useState(initial?.required ?? false)
+  const [allowedValues, setAllowedValues] = useState((initial?.allowedValues ?? []).join(', '))
+
+  // Re-seed from `initial` every time the dialog OPENS, so multiple "Map this" clicks in a row
+  // each hydrate the form for their own missing field rather than showing stale data.
+  useEffect(() => {
+    if (open) {
+      setTargetField(initial?.targetField ?? '')
+      setAllowedValues((initial?.allowedValues ?? []).join(', '))
+      setRequired(initial?.required ?? false)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, initial?.targetField])
 
   const reset = () => {
     setTargetField(''); setSourceExpression(''); setTransform(''); setDefaultValue('')
@@ -190,9 +221,13 @@ function AddFieldDialog({ profileId }: { profileId: string }) {
 
   return (
     <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) reset() }}>
-      <DialogTrigger asChild>
-        <Button size="sm"><Plus className="h-4 w-4 mr-1" /> Add field</Button>
-      </DialogTrigger>
+      {trigger !== undefined ? (
+        trigger
+      ) : (
+        <DialogTrigger asChild>
+          <Button size="sm"><Plus className="h-4 w-4 mr-1" /> Add field</Button>
+        </DialogTrigger>
+      )}
       <DialogContent>
         <DialogHeader><DialogTitle>Map a field</DialogTitle></DialogHeader>
         <div className="space-y-3">
@@ -1355,8 +1390,88 @@ function SuppressionsPanel({
   )
 }
 
+/** The "Missing field" list on the Sign-off tab is the ONE place a user with sign-off
+ *  responsibility lands when a profile is Not Ready. It has to answer the obvious question — "how
+ *  do I map this?" — right there, not "go to another tab and find the right button". Each row now
+ *  has a Map button that opens the Add-field dialog pre-filled with the field code + coding
+ *  frame + required=true, so it's one click and a source-expression away from resolved. */
+function MissingFieldsTable({
+  profileId, missing, canConfigure,
+}: {
+  profileId: string
+  missing: CompileMissing[]
+  canConfigure: boolean
+}) {
+  const [openField, setOpenField] = useState<string | null>(null)
+  const target = missing.find((m) => m.field === openField) ?? null
+  return (
+    <div className="card-elevated overflow-hidden">
+      <div className="flex items-center justify-between gap-3 px-3 py-2 border-b border-border bg-surface-2">
+        <p className="text-xs text-muted-foreground">
+          These fields are required by the spec but not yet in your mapping. Map each one so the
+          return covers every mandatory column.
+        </p>
+        {canConfigure && (
+          <Button size="sm" onClick={() => setOpenField(missing[0]?.field ?? null)}
+            className="whitespace-nowrap">
+            <Plus className="h-4 w-4 mr-1" /> Map first
+          </Button>
+        )}
+      </div>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Missing field</TableHead>
+            <TableHead>Description</TableHead>
+            <TableHead>Coding frame</TableHead>
+            {canConfigure && <TableHead className="text-right w-[100px]">Action</TableHead>}
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {missing.map((m) => (
+            <TableRow key={m.field}>
+              <TableCell className="font-mono text-xs font-medium">{m.field}</TableCell>
+              <TableCell className="text-sm">{m.description}</TableCell>
+              <TableCell className="text-xs text-muted-foreground">
+                {m.allowed && m.allowed.length > 0
+                  ? <span className="font-mono">{m.allowed.join(', ')}</span>
+                  : <span className="italic">free text</span>}
+              </TableCell>
+              {canConfigure && (
+                <TableCell className="text-right">
+                  <Button size="sm" variant="outline" className="h-7 text-xs"
+                    onClick={() => setOpenField(m.field)}>
+                    <Plus className="h-3.5 w-3.5 mr-1" /> Map
+                  </Button>
+                </TableCell>
+              )}
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+      {/* A single controlled AddFieldDialog we open with the row's field pre-filled. Keeps the
+         dialog code path unified with the "Fields" tab's Add-field button — no divergent dialog. */}
+      {canConfigure && (
+        <AddFieldDialog
+          profileId={profileId}
+          trigger={null}
+          open={openField !== null}
+          onOpenChange={(o) => { if (!o) setOpenField(null) }}
+          initial={target ? {
+            targetField: target.field,
+            allowedValues: target.allowed ?? undefined,
+            required: true,
+          } : undefined}
+        />
+      )}
+    </div>
+  )
+}
+
 function SignOffCard({ profileId, canSignOff }: { profileId: string; canSignOff: boolean }) {
   const { toast } = useToast()
+  const { hasPermission } = useAuth()
+  const canManageFields = hasPermission('admin.configure')
   const compile = useCompileProfile(profileId)
   const signOff = useSignOffProfile(profileId)
   const unsign = useUnsignProfile(profileId)
@@ -1423,28 +1538,11 @@ function SignOffCard({ profileId, canSignOff }: { profileId: string; canSignOff:
       ) : (
         <>
           {r.missing.length > 0 && (
-            <div className="card-elevated overflow-hidden">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Missing field</TableHead>
-                    <TableHead>Description</TableHead>
-                    <TableHead>Coding frame</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {r.missing.map((m) => (
-                    <TableRow key={m.field}>
-                      <TableCell className="font-mono text-xs font-medium">{m.field}</TableCell>
-                      <TableCell className="text-sm">{m.description}</TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
-                        {m.allowed && m.allowed.length > 0 ? m.allowed.join(', ') : 'free text'}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
+            <MissingFieldsTable
+              profileId={profileId}
+              missing={r.missing}
+              canConfigure={canManageFields}
+            />
           )}
           {canSignOff && (
             <div className="flex items-center gap-2">
