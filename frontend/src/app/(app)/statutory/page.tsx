@@ -633,8 +633,14 @@ function CloneDialog({ profile }: { profile: ReportProfile }) {
 // per required field, with the empty-default rows surfaced first.
 
 function DefaultRow({
-  profileId, field, highlighted,
-}: { profileId: string; field: FieldMapping; highlighted?: boolean }) {
+  profileId, field, highlighted, rejectionCount, onGoToFields,
+}: {
+  profileId: string
+  field: FieldMapping
+  highlighted?: boolean
+  rejectionCount?: number
+  onGoToFields?: () => void
+}) {
   const { toast } = useToast()
   const update = useUpdateField(profileId)
   const [value, setValue] = useState(field.defaultValue ?? '')
@@ -737,6 +743,24 @@ function DefaultRow({
       </TableCell>
       <TableCell>
         {hasDefault ? <Badge variant="success">set</Badge> : <Badge variant="warning">empty</Badge>}
+        {hasDefault && (rejectionCount ?? 0) > 0 && (
+          <div className="mt-1 text-[11px] leading-snug text-[hsl(var(--warning))] max-w-[220px]">
+            ⚠ {rejectionCount} record{rejectionCount === 1 ? '' : 's'} produced a value that failed validation.
+            Defaults only apply when the source column is empty.
+            {onGoToFields && (
+              <>
+                {' '}
+                <button
+                  type="button"
+                  onClick={onGoToFields}
+                  className="underline underline-offset-2 hover:text-foreground"
+                >
+                  Edit mapping →
+                </button>
+              </>
+            )}
+          </div>
+        )}
       </TableCell>
       <TableCell className="text-right">
         <Button
@@ -906,8 +930,27 @@ function SuggestDefaultsDialog({ profileId }: { profileId: string }) {
 }
 
 function FieldDefaultsSection({
-  profileId, fields,
-}: { profileId: string; fields: FieldMapping[] }) {
+  profileId, fields, onGoToFields, validationIssues,
+}: {
+  profileId: string
+  fields: FieldMapping[]
+  onGoToFields?: () => void
+  validationIssues?: ValidationIssue[] | null
+}) {
+  // Per-field count of records where a value was produced but rejected. These are records where
+  // the default does NOT help — the source column is populated, so the default never applies.
+  // (Defaults only fill in for EMPTY source values; a wrong non-empty value needs a mapping edit.)
+  const rejectionsByField = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const i of validationIssues ?? []) {
+      if (i.severity !== 'error') continue
+      // "empty" errors ARE fixable by a default; skip those. Any other error means a value was
+      // produced and rejected — a real mismatch the default can't fix.
+      if (/\bempty\b/i.test(i.message)) continue
+      m.set(i.field, (m.get(i.field) ?? 0) + 1)
+    }
+    return m
+  }, [validationIssues])
   // Focus filter — required-only surfaces the sign-off blockers; "needs one" adds unmapped
   // fields (no source expression means the produced value is always empty); "all" is every field.
   const [focus, setFocus] = useState<'needs' | 'required' | 'all'>('needs')
@@ -956,9 +999,10 @@ function FieldDefaultsSection({
             Statutory field defaults <JargonTip term="default when empty" />
           </p>
           <p className="text-helper max-w-2xl">
-            When a student record has no value for a field, the return sends the default set here
-            instead of leaving it blank. Set once per year — the same default applies to every student
-            the return covers. Coded fields pick from their allowed values; free-text fields accept any string.
+            Defaults apply <strong>only when the record's source column is empty</strong>. If a source
+            column is populated but the produced value fails validation, the default won't help — fix
+            the mapping's transform or allowed values on the <em>Fields</em> tab instead. Set once
+            per year; the same default applies to every student the return covers.
           </p>
         </div>
         <div className="flex items-center gap-2 whitespace-nowrap">
@@ -1001,6 +1045,8 @@ function FieldDefaultsSection({
                 profileId={profileId}
                 field={f}
                 highlighted={highlight === f.targetField}
+                rejectionCount={rejectionsByField.get(f.targetField) ?? 0}
+                onGoToFields={onGoToFields}
               />
             ))}
           </TableBody>
@@ -2246,7 +2292,12 @@ export default function StatutoryPage() {
                   detail.data.signedOff || !canConfigure ? (
                     <p className="text-helper">Defaults are read-only on a signed-off profile.</p>
                   ) : (
-                    <FieldDefaultsSection profileId={selectedId} fields={detail.data.fields} />
+                    <FieldDefaultsSection
+                      profileId={selectedId}
+                      fields={detail.data.fields}
+                      onGoToFields={() => setTab('fields')}
+                      validationIssues={validate.data?.validation.issues ?? null}
+                    />
                   )
                 ) : (
                   <p className="text-helper">Map at least one field first — defaults are per field.</p>
