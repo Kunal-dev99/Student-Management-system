@@ -228,6 +228,12 @@ export interface CompileMissing {
   field: string
   description: string
   allowed: string[] | null
+  /** The spec pack's recommended source expression for this field, when it knows one — lets the
+   *  sign-off UI offer a one-click "Map to <path>" instead of a full form. Null for fields the
+   *  spec has no default source for (typically institution-specific identifiers). */
+  specDefaultSource?: string | null
+  specDefaultTransform?: string | null
+  specDefaultValue?: string | null
 }
 
 export interface CompileReport {

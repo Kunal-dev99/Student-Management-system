@@ -939,9 +939,18 @@ class StatutoryEngine:
         mappings = await self._mappings(profile_id)
         mapped = {m.target_field for m in mappings}
         spec = await resolve_fields(self.session, profile.code)
+        # Carry the spec's recommended source/transform/default through so the "Map" affordance
+        # on the sign-off tab can offer a one-click map for fields the spec pack already knows how
+        # to source (avoids the modal-and-a-form-for-every-row UX complaint from ICR testing).
         missing = [
-            {"field": s["field"], "description": s.get("description", ""),
-             "allowed": s.get("allowed")}
+            {
+                "field": s["field"],
+                "description": s.get("description", ""),
+                "allowed": s.get("allowed"),
+                "specDefaultSource": s.get("source") or None,
+                "specDefaultTransform": s.get("transform") or None,
+                "specDefaultValue": s.get("default") or None,
+            }
             for s in spec if s["field"] not in mapped
         ]
         return {

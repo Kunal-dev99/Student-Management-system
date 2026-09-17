@@ -174,6 +174,9 @@ interface AddFieldInitial {
   targetField?: string
   allowedValues?: string[]
   required?: boolean
+  sourceExpression?: string
+  transform?: string
+  defaultValue?: string
 }
 
 function AddFieldDialog({
@@ -196,9 +199,9 @@ function AddFieldDialog({
   const setOpen = (o: boolean) => { onOpenChange ? onOpenChange(o) : setOpenUncontrolled(o) }
 
   const [targetField, setTargetField] = useState(initial?.targetField ?? '')
-  const [sourceExpression, setSourceExpression] = useState('')
-  const [transform, setTransform] = useState('')
-  const [defaultValue, setDefaultValue] = useState('')
+  const [sourceExpression, setSourceExpression] = useState(initial?.sourceExpression ?? '')
+  const [transform, setTransform] = useState(initial?.transform ?? '')
+  const [defaultValue, setDefaultValue] = useState(initial?.defaultValue ?? '')
   const [position, setPosition] = useState('')
   const [required, setRequired] = useState(initial?.required ?? false)
   const [allowedValues, setAllowedValues] = useState((initial?.allowedValues ?? []).join(', '))
@@ -208,6 +211,9 @@ function AddFieldDialog({
   useEffect(() => {
     if (open) {
       setTargetField(initial?.targetField ?? '')
+      setSourceExpression(initial?.sourceExpression ?? '')
+      setTransform(initial?.transform ?? '')
+      setDefaultValue(initial?.defaultValue ?? '')
       setAllowedValues((initial?.allowedValues ?? []).join(', '))
       setRequired(initial?.required ?? false)
     }
@@ -310,7 +316,15 @@ function AddFieldDialog({
   )
 }
 
-function EditFieldDialog({ profileId, field }: { profileId: string; field: FieldMapping }) {
+function EditFieldDialog({
+  profileId, field, trigger,
+}: {
+  profileId: string
+  field: FieldMapping
+  /** Custom trigger — passing one replaces the default Pencil icon button, so ANY element on the
+   *  page (e.g. the source-expression cell) can behave like an "edit this mapping" hyperlink. */
+  trigger?: React.ReactNode
+}) {
   const { toast } = useToast()
   const update = useUpdateField(profileId)
   const [open, setOpen] = useState(false)
@@ -331,9 +345,11 @@ function EditFieldDialog({ profileId, field }: { profileId: string; field: Field
   return (
     <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (o) seed() }}>
       <DialogTrigger asChild>
-        <Button size="icon" variant="ghost" className="h-8 w-8" title={`Edit ${field.targetField}`}>
-          <Pencil className="h-4 w-4" />
-        </Button>
+        {trigger ?? (
+          <Button size="icon" variant="ghost" className="h-8 w-8" title={`Edit ${field.targetField}`}>
+            <Pencil className="h-4 w-4" />
+          </Button>
+        )}
       </DialogTrigger>
       <DialogContent>
         <DialogHeader><DialogTitle>Map {field.targetField}</DialogTitle></DialogHeader>
@@ -1392,9 +1408,12 @@ function SuppressionsPanel({
 
 /** The "Missing field" list on the Sign-off tab is the ONE place a user with sign-off
  *  responsibility lands when a profile is Not Ready. It has to answer the obvious question — "how
- *  do I map this?" — right there, not "go to another tab and find the right button". Each row now
- *  has a Map button that opens the Add-field dialog pre-filled with the field code + coding
- *  frame + required=true, so it's one click and a source-expression away from resolved. */
+ *  do I map this?" — right there, not "go to another tab and find the right button".
+ *
+ *  UX v3: for fields the spec pack knows a default source for (the common case), the row shows a
+ *  one-click "Map to <path>" — instant map, no dialog, no form. Fields with no spec-suggested
+ *  source keep the "Map…" button that opens the full form. Progressive disclosure by row.
+ */
 function MissingFieldsTable({
   profileId, missing, canConfigure,
 }: {
@@ -1402,19 +1421,49 @@ function MissingFieldsTable({
   missing: CompileMissing[]
   canConfigure: boolean
 }) {
+  const { toast } = useToast()
+  const add = useAddField(profileId)
   const [openField, setOpenField] = useState<string | null>(null)
+  const [pendingField, setPendingField] = useState<string | null>(null)
   const target = missing.find((m) => m.field === openField) ?? null
+
+  const oneClickMap = async (m: CompileMissing) => {
+    if (!m.specDefaultSource) return
+    setPendingField(m.field)
+    try {
+      await add.mutateAsync({
+        targetField: m.field,
+        sourceExpression: m.specDefaultSource,
+        transform: m.specDefaultTransform ?? undefined,
+        defaultValue: m.specDefaultValue ?? undefined,
+        required: true,
+        allowedValues: m.allowed ?? undefined,
+      })
+      toast({ title: `Mapped ${m.field} → ${m.specDefaultSource}` })
+    } catch (e) { err(toast, `Could not map ${m.field}`)(e) }
+    finally { setPendingField(null) }
+  }
+
+  // A "Map every suggested" pill lets the user resolve every missing field the spec has an answer
+  // for in one action — the fastest path from "Not Ready" to a real conversation about the rest.
+  const withSuggestion = missing.filter((m) => !!m.specDefaultSource)
+  const mapAllSuggested = async () => {
+    for (const m of withSuggestion) await oneClickMap(m)
+  }
+
   return (
     <div className="card-elevated overflow-hidden">
-      <div className="flex items-center justify-between gap-3 px-3 py-2 border-b border-border bg-surface-2">
-        <p className="text-xs text-muted-foreground">
-          These fields are required by the spec but not yet in your mapping. Map each one so the
-          return covers every mandatory column.
+      <div className="flex flex-wrap items-center justify-between gap-3 px-3 py-2 border-b border-border bg-surface-2">
+        <p className="text-xs text-muted-foreground max-w-xl">
+          Required by the spec, not yet in your mapping. Rows the spec knows a source for get a one-click
+          Map; the rest open a short form.
         </p>
-        {canConfigure && (
-          <Button size="sm" onClick={() => setOpenField(missing[0]?.field ?? null)}
+        {canConfigure && withSuggestion.length > 0 && (
+          <Button size="sm" onClick={mapAllSuggested}
+            disabled={add.isPending || pendingField !== null}
             className="whitespace-nowrap">
-            <Plus className="h-4 w-4 mr-1" /> Map first
+            <Sparkles className="h-4 w-4 mr-1" />
+            Map every suggested ({withSuggestion.length})
           </Button>
         )}
       </div>
@@ -1423,34 +1472,65 @@ function MissingFieldsTable({
           <TableRow>
             <TableHead>Missing field</TableHead>
             <TableHead>Description</TableHead>
-            <TableHead>Coding frame</TableHead>
-            {canConfigure && <TableHead className="text-right w-[100px]">Action</TableHead>}
+            <TableHead>Suggested source</TableHead>
+            {canConfigure && <TableHead className="text-right w-[220px]">Map</TableHead>}
           </TableRow>
         </TableHeader>
         <TableBody>
-          {missing.map((m) => (
-            <TableRow key={m.field}>
-              <TableCell className="font-mono text-xs font-medium">{m.field}</TableCell>
-              <TableCell className="text-sm">{m.description}</TableCell>
-              <TableCell className="text-xs text-muted-foreground">
-                {m.allowed && m.allowed.length > 0
-                  ? <span className="font-mono">{m.allowed.join(', ')}</span>
-                  : <span className="italic">free text</span>}
-              </TableCell>
-              {canConfigure && (
-                <TableCell className="text-right">
-                  <Button size="sm" variant="outline" className="h-7 text-xs"
-                    onClick={() => setOpenField(m.field)}>
-                    <Plus className="h-3.5 w-3.5 mr-1" /> Map
-                  </Button>
+          {missing.map((m) => {
+            const suggestion = m.specDefaultSource
+            const busy = pendingField === m.field
+            return (
+              <TableRow key={m.field}>
+                <TableCell className="font-mono text-xs font-medium whitespace-nowrap">{m.field}</TableCell>
+                <TableCell className="text-sm">
+                  {m.description}
+                  {m.allowed && m.allowed.length > 0 && (
+                    <div className="text-[11px] text-muted-foreground font-mono mt-0.5">
+                      allowed: {m.allowed.slice(0, 8).join(', ')}{m.allowed.length > 8 ? ', …' : ''}
+                    </div>
+                  )}
                 </TableCell>
-              )}
-            </TableRow>
-          ))}
+                <TableCell className="text-xs">
+                  {suggestion
+                    ? <span className="font-mono text-foreground">{suggestion}</span>
+                    : <span className="italic text-muted-foreground">no default — needs the form</span>}
+                </TableCell>
+                {canConfigure && (
+                  <TableCell className="text-right">
+                    {suggestion ? (
+                      <div className="inline-flex items-center gap-1">
+                        <Button
+                          size="sm" variant="default" className="h-7 text-xs whitespace-nowrap"
+                          disabled={busy || add.isPending}
+                          onClick={() => oneClickMap(m)}
+                        >
+                          {busy ? 'Mapping…' : `→ ${suggestion}`}
+                        </Button>
+                        <Button
+                          size="sm" variant="ghost" className="h-7 text-xs"
+                          disabled={busy}
+                          title="Open the form to tweak the source, transform or default before saving"
+                          onClick={() => setOpenField(m.field)}
+                        >
+                          edit…
+                        </Button>
+                      </div>
+                    ) : (
+                      <Button size="sm" variant="outline" className="h-7 text-xs"
+                        onClick={() => setOpenField(m.field)}>
+                        <Plus className="h-3.5 w-3.5 mr-1" /> Map…
+                      </Button>
+                    )}
+                  </TableCell>
+                )}
+              </TableRow>
+            )
+          })}
         </TableBody>
       </Table>
-      {/* A single controlled AddFieldDialog we open with the row's field pre-filled. Keeps the
-         dialog code path unified with the "Fields" tab's Add-field button — no divergent dialog. */}
+      {/* A single controlled AddFieldDialog for the "no suggestion" or "edit before save" paths.
+         Same dialog the Fields tab uses — no divergent code path. */}
       {canConfigure && (
         <AddFieldDialog
           profileId={profileId}
@@ -1461,6 +1541,9 @@ function MissingFieldsTable({
             targetField: target.field,
             allowedValues: target.allowed ?? undefined,
             required: true,
+            sourceExpression: target.specDefaultSource ?? undefined,
+            transform: target.specDefaultTransform ?? undefined,
+            defaultValue: target.specDefaultValue ?? undefined,
           } : undefined}
         />
       )}
@@ -1955,7 +2038,28 @@ export default function StatutoryPage() {
                         <TableRow key={f.id}>
                           <TableCell className="num text-muted-foreground">{f.position}</TableCell>
                           <TableCell className="font-mono text-xs font-medium">{f.targetField}</TableCell>
-                          <TableCell className="font-mono text-xs text-muted-foreground">{f.sourceExpression || <span className="italic">unmapped</span>}</TableCell>
+                          <TableCell className="font-mono text-xs">
+                            {/* The source expression IS the affordance to change the mapping — click it
+                               to open the editor. When there's no admin permission or the profile is
+                               signed off, render as static text (no dialog attached). */}
+                            {canConfigure && !detail.data!.signedOff ? (
+                              <EditFieldDialog
+                                profileId={selectedId}
+                                field={f}
+                                trigger={
+                                  <button
+                                    type="button"
+                                    className={`text-left text-primary hover:underline focus:underline focus:outline-none ${!f.sourceExpression ? 'italic text-muted-foreground' : ''}`}
+                                    title="Edit this mapping"
+                                  >
+                                    {f.sourceExpression || 'unmapped — set source'}
+                                  </button>
+                                }
+                              />
+                            ) : (
+                              <span className="text-muted-foreground">{f.sourceExpression || <span className="italic">unmapped</span>}</span>
+                            )}
+                          </TableCell>
                           <TableCell className="text-xs text-muted-foreground">{f.keyedAt ?? '—'}</TableCell>
                           <TableCell className="text-sm">{f.transform ?? '—'}</TableCell>
                           <TableCell>
