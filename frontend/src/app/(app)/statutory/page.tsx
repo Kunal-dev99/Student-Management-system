@@ -1275,16 +1275,22 @@ function SuppressionsPanel({
   const { toast } = useToast()
   const remove = useRemoveSuppression(profileId)
 
+  // UX fix (2026-09-17): the panel used to be amber-ringed with a prominent Undo button per
+  // row, which read as "unresolved item, take action". That's misleading — a suppression is a
+  // DECISION already made; sign-off is never blocked by one (only unmapped mandatory fields
+  // block). Tone-down: neutral surface, small reassurance line, Undo demoted to a tiny link.
   return (
-    <div className="rounded-md border border-[hsl(var(--warning)/0.4)] bg-[hsl(var(--warning)/0.05)] p-3 space-y-2">
-      <div className="flex items-center gap-2 text-sm">
-        <ShieldAlert className="h-4 w-4 text-[hsl(var(--warning))]" />
-        <span className="font-medium">
-          {suppressions.length} rule{suppressions.length === 1 ? '' : 's'} suppressed
-        </span>
-        <span className="text-helper">
-          — visible to whoever attests to sign-off. Undo any suppression to re-enable the check.
-        </span>
+    <div className="rounded-md border border-border bg-surface-2 p-3 space-y-2">
+      <div className="flex items-start gap-2 text-sm">
+        <ShieldCheck className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-baseline gap-x-2">
+            <span className="font-medium">
+              {suppressions.length} suppression{suppressions.length === 1 ? '' : 's'} — attested at sign-off
+            </span>
+            <span className="text-helper">These don't block sign-off. Undo any row only if you want to re-enable the check.</span>
+          </div>
+        </div>
       </div>
       <div className="card-elevated overflow-hidden bg-background">
         <Table>
@@ -1295,7 +1301,7 @@ function SuppressionsPanel({
               <TableHead>Reason</TableHead>
               <TableHead>By</TableHead>
               <TableHead>When</TableHead>
-              {canManage && !signed && <TableHead className="text-right w-[80px]">Undo</TableHead>}
+              {canManage && !signed && <TableHead className="text-right w-[80px]"></TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -1303,12 +1309,18 @@ function SuppressionsPanel({
               <TableRow key={`${s.scope}-${s.ruleKey}`}>
                 <TableCell className="font-mono text-xs">{s.ruleKey}</TableCell>
                 <TableCell>
-                  <Badge variant={s.scope === 'pack' ? 'warning' : 'secondary'} className="text-[10px]">
+                  <Badge
+                    variant="secondary"
+                    className="text-[10px] font-normal"
+                    title={s.scope === 'pack'
+                      ? "Suppressed at the spec-pack level — applies to every profile using this pack version. Stable admin decision."
+                      : "Suppressed for this profile only. The shared spec pack is unaffected."}
+                  >
                     {s.scope === 'pack' ? 'spec pack' : 'this profile'}
                   </Badge>
                 </TableCell>
                 <TableCell className="text-xs">
-                  {s.reason ?? <span className="italic text-muted-foreground">no reason recorded</span>}
+                  {s.reason ?? <span className="italic text-muted-foreground">no reason recorded (legacy)</span>}
                 </TableCell>
                 <TableCell className="text-xs text-muted-foreground">{s.byUserName ?? '—'}</TableCell>
                 <TableCell className="text-xs text-muted-foreground">
@@ -1316,18 +1328,22 @@ function SuppressionsPanel({
                 </TableCell>
                 {canManage && !signed && (
                   <TableCell className="text-right">
-                    <Button
-                      size="sm" variant="ghost" className="h-7 text-xs"
+                    <button
+                      type="button"
+                      className="text-[11px] text-muted-foreground hover:text-foreground hover:underline"
                       disabled={remove.isPending}
                       onClick={async () => {
+                        if (!window.confirm(
+                          `Re-enable the ${s.ruleKey} rule for ${s.scope === 'pack' ? 'every profile on this spec pack' : 'this profile'}? The suppression will be removed.`,
+                        )) return
                         try {
                           await remove.mutateAsync({ ruleKey: s.ruleKey, scope: s.scope })
                           toast({ title: `Suppression removed (${s.scope}) — re-validate to see the rule fire again.` })
                         } catch (e) { err(toast, 'Could not remove suppression')(e) }
                       }}
                     >
-                      Undo
-                    </Button>
+                      undo
+                    </button>
                   </TableCell>
                 )}
               </TableRow>
@@ -1471,6 +1487,7 @@ function SignOffCard({ profileId, canSignOff }: { profileId: string; canSignOff:
               {!r.signOffReady && (
                 <span className="text-helper">
                   Map the missing mandatory fields above, then sign-off will unlock.
+                  <br />Suppressions below don't block — they're attested to as part of sign-off.
                 </span>
               )}
             </div>
@@ -1506,25 +1523,40 @@ function computeTabStatuses(
   validate: ValidationReport | undefined,
   advisoryPendingCount: number,
 ): TabStatuses {
+  // Bug fix: previously `missing === 0` was treated as "done" even before compile.data had
+  // loaded (default `??0` on `missing` made a still-loading profile look complete). Now we
+  // require both compile AND detail to have arrived; while loading, tabs render "loading…" idle.
+  const compileLoaded = compile !== undefined
+  const detailLoaded = detail !== undefined
   const missing = compile?.missing.length ?? 0
+  const totalFields = detail?.fields.length ?? 0
   const emptyDefaults = detail?.fields.filter((f) =>
     (f.required || !f.sourceExpression?.trim()) && !(f.defaultValue ?? '').length,
   ).length ?? 0
   const errors = validate?.validation.errors ?? null
-  const suppressions = compile?.suppressions?.length ?? 0
+  // Only PROFILE-scope suppressions count on the Sign-off tab pill. Pack-scope suppressions are
+  // an administrator-level decision that applies to every profile on the pack — they don't
+  // represent unfinished work on THIS return, so they don't need to attract attention here.
+  const profileSuppressions = compile?.suppressions?.filter((s) => s.scope === 'profile').length ?? 0
   const signed = compile?.profile.signedOff ?? false
   const ready = compile?.signOffReady ?? false
 
   return {
     fields: {
-      done: missing === 0 && (detail?.fields.length ?? 0) > 0,
-      label: missing === 0 ? `${detail?.fields.length ?? 0} mapped` : `${missing} unmapped`,
-      tone: missing === 0 && (detail?.fields.length ?? 0) > 0 ? 'ok' : 'warn',
+      done: compileLoaded && detailLoaded && missing === 0 && totalFields > 0,
+      label: !compileLoaded || !detailLoaded
+        ? 'loading…'
+        : missing === 0 && totalFields > 0
+          ? `${totalFields} mapped`
+          : `${missing} unmapped`,
+      tone: !compileLoaded || !detailLoaded
+        ? 'idle'
+        : missing === 0 && totalFields > 0 ? 'ok' : 'warn',
     },
     defaults: {
-      done: emptyDefaults === 0,
-      label: emptyDefaults === 0 ? 'all covered' : `${emptyDefaults} empty`,
-      tone: emptyDefaults === 0 ? 'ok' : 'warn',
+      done: detailLoaded && emptyDefaults === 0,
+      label: !detailLoaded ? 'loading…' : emptyDefaults === 0 ? 'all covered' : `${emptyDefaults} empty`,
+      tone: !detailLoaded ? 'idle' : emptyDefaults === 0 ? 'ok' : 'warn',
     },
     validation: {
       done: errors === 0,
@@ -1533,8 +1565,15 @@ function computeTabStatuses(
     },
     signoff: {
       done: signed,
-      label: signed ? 'signed' : suppressions > 0 ? `${suppressions} suppressed` : ready ? 'ready' : 'blocked',
-      tone: signed ? 'ok' : suppressions > 0 ? 'warn' : ready ? 'ok' : 'idle',
+      label: signed
+        ? 'signed'
+        : profileSuppressions > 0
+          ? `${profileSuppressions} to attest`
+          : ready ? 'ready' : 'blocked',
+      // Profile-scope suppressions are amber (they need attestation at sign-off).
+      // Pack-scope suppressions no longer amber-flag the tab — they're stable admin decisions,
+      // not per-return work items.
+      tone: signed ? 'ok' : profileSuppressions > 0 ? 'warn' : ready ? 'ok' : 'idle',
     },
     advisories: {
       done: advisoryPendingCount === 0,
