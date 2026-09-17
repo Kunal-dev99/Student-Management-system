@@ -53,6 +53,25 @@ export interface ValidationIssue {
   message: string
   sourceExpression?: string
   allowed?: string[]
+  /** Stable id of the cross-field/format rule that fired (present only for rule-based issues). */
+  ruleKey?: string
+  /** Machine-actionable fix hint the Fix button uses to build a smart dialog. */
+  fix?:
+    | { kind: 'order'; otherField: string; otherValue: string; thisField: string; thisValue: string }
+    | { kind: 'format_date'; field: string; value: string }
+}
+
+export interface RuleAnalysis {
+  ruleKey: string
+  kind: string
+  fields: string[]
+  message: string
+  severity: string
+  violations: number
+  total: number
+  share: number   // 0..1
+  likelyMisconfigured: boolean
+  muted: boolean
 }
 
 export interface ValidationResult {
@@ -60,6 +79,9 @@ export interface ValidationResult {
   warnings?: number
   issues: ValidationIssue[]
   valid: boolean
+  /** Per-rule roll-up so a UI can spot "85% of records violate — rule is probably wrong". */
+  ruleAnalysis?: RuleAnalysis[]
+  mutedRuleKeys?: string[]
 }
 
 export interface SpecPack {
@@ -325,6 +347,18 @@ export function useApplyDefaults(profileId: string | null) {
   return useMutation({
     mutationFn: (picks: { field: string; value: string }[]) =>
       api.post<{ applied: string[]; count: number }>(`/report-profiles/${profileId}/apply-defaults`, { picks }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['report-profile', profileId] })
+    },
+  })
+}
+
+/** Mute (or unmute) a cross-field/format rule for a profile. Refused if signed off. */
+export function useMuteRule(profileId: string | null) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: { ruleKey: string; muted: boolean }) =>
+      api.post<{ profileId: string; mutedRuleKeys: string[] }>(`/report-profiles/${profileId}/mute-rule`, body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['report-profile', profileId] })
     },

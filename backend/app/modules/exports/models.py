@@ -66,6 +66,11 @@ class ReportProfile(UUIDMixin, TimestampMixin, Base):
     signed_off_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     signed_off_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Cross-field / format rules the admin has muted for THIS profile only. Each entry is a stable
+    # rule key like "order:ENDDATE:COMDATE" (see statutory.py::_rule_key). Muting is per-profile,
+    # not per-pack — the pack stays intact so old returns can still be regenerated exactly.
+    muted_rule_keys: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+
     __table_args__ = (Index("uq_report_profile_version", "code", "academic_year", "version", unique=True),)
 
 

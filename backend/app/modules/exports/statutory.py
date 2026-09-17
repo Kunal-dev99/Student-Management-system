@@ -32,6 +32,13 @@ def _t_upper(v): return str(v).upper() if v is not None else None
 def _t_lower(v): return str(v).lower() if v is not None else None
 def _t_date_iso(v): return v.isoformat() if isinstance(v, (date, datetime)) else v
 def _t_date_compact(v): return v.strftime("%Y%m%d") if isinstance(v, (date, datetime)) else v
+
+
+def _rule_key(rule: dict) -> str:
+    """Stable id for a cross-field/format rule. Format: '<kind>:<field1>:<field2>...'.
+    Ordering rules with reversed fields get distinct keys so an admin can mute one direction
+    without disabling a legitimate rule that happens to share the same kind."""
+    return f"{rule['kind']}:" + ":".join(rule.get("fields", []))
 def _t_year(v): return str(v.year) if isinstance(v, (date, datetime)) else v
 def _t_bool_yn(v): return ("Y" if v else "N") if v is not None else None
 def _t_int(v):
@@ -502,14 +509,23 @@ class StatutoryEngine:
             # carries its own severity: an "error" rule is a hard fail that blocks sign-off (HESA
             # would reject the file); a "warning" rule is advisory and surfaces for review only.
             # Default is "error" — a rule the Registry bothered to state is normally enforced.
+            # A rule whose key is in profile.muted_rule_keys is skipped entirely (admin opted out).
+            muted = set(profile.muted_rule_keys or [])
             for rule in spec_rules:
                 flds = rule.get("fields", [])
                 sev = rule.get("severity", "error")
+                key = _rule_key(rule)
+                if key in muted:
+                    continue
                 if rule["kind"] == "order" and len(flds) == 2:
                     a, b = values.get(flds[0], ""), values.get(flds[1], "")
                     if a and b and a > b:  # YYYYMMDD compares correctly as text
                         issues.append({
                             "studentRef": ref, "field": flds[1], "severity": sev,
+                            "ruleKey": key,
+                            "fix": {"kind": "order",
+                                    "otherField": flds[0], "otherValue": a,
+                                    "thisField": flds[1], "thisValue": b},
                             "message": f"{flds[1]} ({b}) — {rule.get('message', 'ordering rule failed')} "
                                        f"({flds[0]} is {a}).",
                         })
@@ -519,9 +535,31 @@ class StatutoryEngine:
                         if v and not re.fullmatch(r"\d{8}", v):
                             issues.append({
                                 "studentRef": ref, "field": fld, "severity": sev,
+                                "ruleKey": key,
+                                "fix": {"kind": "format_date", "field": fld, "value": v},
                                 "message": f"{fld} ('{v}') {rule.get('message', 'must be YYYYMMDD')}.",
                             })
             rows.append(out_row)
+
+        # ruleAnalysis lets the UI say "85% of records violate this rule — probably the rule is
+        # wrong (from an accepted advisory)" and offer a one-click mute, instead of hunting through
+        # 8000 error rows.
+        rule_analysis: dict[str, dict] = {}
+        for rule in spec_rules:
+            key = _rule_key(rule)
+            violations = sum(1 for i in issues if i.get("ruleKey") == key)
+            if violations == 0:
+                continue
+            share = violations / len(rows) if rows else 0
+            rule_analysis[key] = {
+                "ruleKey": key, "kind": rule["kind"], "fields": rule.get("fields", []),
+                "message": rule.get("message", ""), "severity": rule.get("severity", "error"),
+                "violations": violations, "total": len(rows), "share": share,
+                # Heuristic: if a rule fails on more than half the population, it's almost
+                # certainly misconfigured (a genuine rule catches outliers, not the majority).
+                "likelyMisconfigured": share > 0.5,
+                "muted": key in (profile.muted_rule_keys or []),
+            }
 
         return {
             "profile": self.profile_out(profile),
@@ -536,8 +574,30 @@ class StatutoryEngine:
                 # a failed error-severity rule (e.g. ENDDATE < COMDATE). Warning-severity rules are
                 # advisory and do not block.
                 "valid": not any(i["severity"] == "error" for i in issues),
+                "ruleAnalysis": list(rule_analysis.values()),
+                "mutedRuleKeys": list(profile.muted_rule_keys or []),
             },
         }
+
+    async def set_muted_rule(self, profile_id: uuid.UUID, *, rule_key: str, muted: bool) -> dict:
+        """Add or remove a rule key from this profile's mute list. Refused on a signed-off profile
+        (rule state is part of the return; touching it needs the sign-off to be released first)."""
+        from sqlalchemy.orm.attributes import flag_modified
+
+        profile = await self.get_profile(profile_id)
+        if profile.signed_off_at is not None:
+            raise WorkflowError(f"Profile {profile.code} is signed off — unsign first.")
+        current = list(profile.muted_rule_keys or [])
+        if muted and rule_key not in current:
+            current.append(rule_key)
+        elif not muted and rule_key in current:
+            current.remove(rule_key)
+        profile.muted_rule_keys = current
+        # JSON column mutations aren't auto-detected — mark it dirty explicitly.
+        flag_modified(profile, "muted_rule_keys")
+        await self.session.commit()
+        await self.session.refresh(profile)
+        return {"profileId": str(profile.id), "mutedRuleKeys": current}
 
     # ---------------- ICR G5 — data-quality fix assistant (suggest → accept → apply) ----------------
 

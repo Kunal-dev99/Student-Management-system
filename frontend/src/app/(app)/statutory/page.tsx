@@ -36,9 +36,9 @@ import {
   useGenerateProfile, useProfile, useProfiles, useSignOffProfile, useSpecs, useTransforms,
   useUnsignProfile, useValidateProfile, useFixSuggestions, useApplyFix,
   useUpdateField, useDeleteField,
-  useSuggestDefaults, useApplyDefaults,
+  useSuggestDefaults, useApplyDefaults, useMuteRule,
   type GenerateResult, type ReportProfile, type ValidationResult, type FieldMapping,
-  type DefaultSuggestion,
+  type DefaultSuggestion, type ValidationIssue, type RuleAnalysis,
 } from '@/features/statutory/api'
 
 function err(toast: ReturnType<typeof useToast>['toast'], title: string) {
@@ -853,7 +853,7 @@ function useHighlightedField() {
 
 const ISSUES_PER_PAGE = 25
 
-function ValidationReportView({ result, rowCount }: { result: ValidationResult; rowCount: number }) {
+function ValidationReportView({ result, rowCount, profileId }: { result: ValidationResult; rowCount: number; profileId: string }) {
   const [severity, setSeverity] = useState<'all' | 'error' | 'warning'>('all')
   const [field, setField] = useState<string | null>(null)   // filter to one field ("error type")
   const [page, setPage] = useState(0)
@@ -953,45 +953,13 @@ function ValidationReportView({ result, rowCount }: { result: ValidationResult; 
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {pageItems.map((i, idx) => {
-                  // Only "empty" / "not in allowed" are fixable via a default — cross-field rule
-                  // failures (e.g. ENDDATE < COMDATE) can't be fixed by setting a static default,
-                  // so we hide the button rather than mislead.
-                  const canDefault = /is required.*but is empty|is not an accepted value/.test(i.message)
-                  return (
-                    <TableRow key={`${i.studentRef}-${i.field}-${start + idx}`}>
-                      <TableCell className="font-mono text-xs whitespace-nowrap">{i.studentRef}</TableCell>
-                      <TableCell className="font-mono text-xs whitespace-nowrap">{i.field}</TableCell>
-                      <TableCell>
-                        <Badge variant={i.severity === 'warning' ? 'warning' : 'destructive'}>{i.severity}</Badge>
-                      </TableCell>
-                      <TableCell className="text-sm">
-                        {i.message}
-                        {i.allowed && i.allowed.length > 0 && (
-                          <span className="text-helper"> Allowed: {i.allowed.join(', ')}.</span>
-                        )}
-                        {i.sourceExpression && (
-                          <span className="text-helper font-mono"> ({i.sourceExpression})</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {canDefault ? (
-                          <Button
-                            size="sm" variant="ghost" className="h-7 text-xs"
-                            title={`Jump to the default for ${i.field} (fixes this and every other row with the same error)`}
-                            onClick={() => setHighlightedField(i.field)}
-                          >
-                            Set default →
-                          </Button>
-                        ) : (
-                          <span className="text-[10px] text-muted-foreground" title="Cross-field rule — set on the student record itself, not from a default">
-                            per record
-                          </span>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  )
-                })}
+                {pageItems.map((i, idx) => (
+                  <ValidationRow key={`${i.studentRef}-${i.field}-${start + idx}`}
+                    issue={i}
+                    analysis={result.ruleAnalysis?.find((a) => a.ruleKey === i.ruleKey)}
+                    profileId={profileId}
+                  />
+                ))}
               </TableBody>
             </Table>
           </div>
@@ -1016,6 +984,164 @@ function ValidationReportView({ result, rowCount }: { result: ValidationResult; 
         </>
       )}
     </div>
+  )
+}
+
+// ---- per-row smart Fix ----
+//
+// One "Fix" button per validation row that picks the right action for the error type:
+//   * required-but-empty / not-in-allowed  →  quick-jump to the field's default input
+//   * cross-field ordering (kind='order')  →  small dialog with EVIDENCE (X of Y records
+//                                             violate this rule) and, when the rule is
+//                                             clearly misconfigured (share > 50%), a
+//                                             one-click "Mute this rule for this profile"
+//   * date format issue                    →  jump to the field's default input (a valid
+//                                             default at least stops the format explosion)
+
+function ValidationRow({
+  issue: i, analysis, profileId,
+}: {
+  issue: ValidationIssue
+  analysis: RuleAnalysis | undefined
+  profileId: string
+}) {
+  const canDefault = /is required.*but is empty|is not an accepted value/.test(i.message)
+  const isOrder = i.fix?.kind === 'order'
+  const isDate = i.fix?.kind === 'format_date'
+  const [orderOpen, setOrderOpen] = useState(false)
+
+  return (
+    <TableRow>
+      <TableCell className="font-mono text-xs whitespace-nowrap">{i.studentRef}</TableCell>
+      <TableCell className="font-mono text-xs whitespace-nowrap">{i.field}</TableCell>
+      <TableCell>
+        <Badge variant={i.severity === 'warning' ? 'warning' : 'destructive'}>{i.severity}</Badge>
+      </TableCell>
+      <TableCell className="text-sm">
+        {i.message}
+        {i.allowed && i.allowed.length > 0 && (
+          <span className="text-helper"> Allowed: {i.allowed.join(', ')}.</span>
+        )}
+        {i.sourceExpression && (
+          <span className="text-helper font-mono"> ({i.sourceExpression})</span>
+        )}
+        {analysis?.likelyMisconfigured && (
+          <div className="mt-1">
+            <Badge variant="warning" className="text-[10px]">
+              rule violated on {analysis.violations} of {analysis.total} records ({Math.round(analysis.share * 100)}%)
+            </Badge>
+          </div>
+        )}
+      </TableCell>
+      <TableCell className="text-right">
+        {isOrder ? (
+          <>
+            <Button
+              size="sm" variant={analysis?.likelyMisconfigured ? 'default' : 'ghost'} className="h-7 text-xs"
+              onClick={() => setOrderOpen(true)}
+            >
+              Fix →
+            </Button>
+            <OrderFixDialog
+              open={orderOpen} onClose={() => setOrderOpen(false)}
+              issue={i} analysis={analysis} profileId={profileId}
+            />
+          </>
+        ) : canDefault ? (
+          <Button
+            size="sm" variant="ghost" className="h-7 text-xs"
+            title={`Jump to the default for ${i.field} (fixes this and every other row with the same error)`}
+            onClick={() => setHighlightedField(i.field)}
+          >
+            Set default →
+          </Button>
+        ) : isDate ? (
+          <Button
+            size="sm" variant="ghost" className="h-7 text-xs"
+            title={`Set a valid default for ${i.field}`}
+            onClick={() => setHighlightedField(i.field)}
+          >
+            Set default →
+          </Button>
+        ) : (
+          <span className="text-[10px] text-muted-foreground">per record</span>
+        )}
+      </TableCell>
+    </TableRow>
+  )
+}
+
+function OrderFixDialog({
+  open, onClose, issue: i, analysis, profileId,
+}: {
+  open: boolean
+  onClose: () => void
+  issue: ValidationIssue
+  analysis: RuleAnalysis | undefined
+  profileId: string
+}) {
+  const { toast } = useToast()
+  const mute = useMuteRule(profileId)
+  if (i.fix?.kind !== 'order') return null
+
+  const { thisField, thisValue, otherField, otherValue } = i.fix
+  const misconfigured = analysis?.likelyMisconfigured
+  const shareText = analysis
+    ? `${analysis.violations} of ${analysis.total} records (${Math.round(analysis.share * 100)}%) violate this rule.`
+    : ''
+
+  const doMute = async () => {
+    if (!i.ruleKey) return
+    try {
+      await mute.mutateAsync({ ruleKey: i.ruleKey, muted: true })
+      toast({ title: 'Rule muted for this profile — re-validate to see the drop.' })
+      onClose()
+    } catch (e) { err(toast, 'Could not mute the rule')(e) }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>Fix ordering rule violation</DialogTitle></DialogHeader>
+        <div className="space-y-3 text-sm">
+          <div className="rounded-md border border-border p-3 space-y-1 font-mono text-xs">
+            <div><span className="text-muted-foreground">record</span> {i.studentRef}</div>
+            <div><span className="text-muted-foreground">{otherField}</span> = {otherValue}</div>
+            <div><span className="text-muted-foreground">{thisField}</span> = {thisValue}</div>
+            <div className="pt-1 text-muted-foreground border-t border-border">
+              rule expects {thisField} to be on or after {otherField}
+            </div>
+          </div>
+          {misconfigured ? (
+            <div className="rounded-md bg-[hsl(var(--warning)/0.08)] border border-[hsl(var(--warning)/0.4)] p-3 text-xs space-y-1">
+              <p className="font-medium">This rule looks misconfigured.</p>
+              <p className="text-muted-foreground">
+                {shareText} A genuine cross-field rule catches outliers, not the majority — this
+                one probably arrived via a bad advisory. Muting it for this profile is safe: the
+                spec pack is untouched (so old years stay reproducible), and unmute is one click.
+              </p>
+            </div>
+          ) : (
+            <div className="rounded-md bg-surface-2 border border-border p-3 text-xs">
+              <p>{shareText} A minority of records fails this rule — the data on this record is
+                 the likely cause. Open the student's record to correct the dates, or, if the two
+                 values are simply swapped, fix them there.</p>
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Close</Button>
+          {misconfigured && i.ruleKey && (
+            <Button
+              disabled={mute.isPending}
+              onClick={doMute}
+            >
+              {mute.isPending ? 'Muting…' : `Mute this rule (${analysis?.violations ?? '?'} errors gone)`}
+            </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -1462,6 +1588,7 @@ export default function StatutoryPage() {
                     <ValidationReportView
                       result={validate.data.validation}
                       rowCount={validate.data.rowCount}
+                      profileId={selectedId}
                     />
                   </div>
                 )}
@@ -1487,6 +1614,7 @@ export default function StatutoryPage() {
                     <ValidationReportView
                       result={generated.validation}
                       rowCount={generated.job.rowCount ?? 0}
+                      profileId={selectedId}
                     />
                   </div>
                 )}

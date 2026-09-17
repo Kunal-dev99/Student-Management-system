@@ -280,6 +280,23 @@ async def apply_defaults(
     )
 
 
+class MuteRuleRequest(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+    rule_key: str
+    muted: bool = True
+
+
+@profiles_router.post("/{profile_id}/mute-rule",
+                      summary="Mute (or unmute) a cross-field/format rule for this profile")
+async def mute_rule(
+    profile_id: uuid.UUID,
+    body: MuteRuleRequest,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("admin.configure")),
+) -> dict:
+    return await _engine(session).set_muted_rule(profile_id, rule_key=body.rule_key, muted=body.muted)
+
+
 @profiles_router.post("/{profile_id}/generate", status_code=201, summary="Produce the statutory extract")
 async def generate_profile(
     profile_id: uuid.UUID,
