@@ -11,6 +11,7 @@ from app.core.errors import register_error_handlers
 from app.core.logging import configure_logging
 from app.core.audit import AuditMiddleware
 from app.core.middleware import RequestContextMiddleware
+from app.core.security_middleware import AuthRateLimitMiddleware, SecurityHeadersMiddleware
 
 
 def create_app() -> FastAPI:
@@ -25,11 +26,23 @@ def create_app() -> FastAPI:
         docs_url=f"{settings.api_v1_prefix}/docs",
     )
 
-    # Both are pure ASGI middleware (not BaseHTTPMiddleware) — see core/middleware for why.
-    # Order matters: RequestContextMiddleware is added last so it runs *outermost*, stamping
-    # request_id into the scope before AuditMiddleware reads it on the way out (arch §17).
+    # All ASGI middleware are pure ASGI (not BaseHTTPMiddleware) — see core/middleware for why.
+    # Add-order is inside-out; the OUTERMOST runs first for a request and last for the response.
+    # We want (outer → inner):
+    #   1. SecurityHeadersMiddleware  – adds response headers on the way out, sees every request
+    #   2. RequestContextMiddleware   – stamps x-request-id, must precede logging + audit
+    #   3. AuthRateLimitMiddleware    – short-circuits abusive traffic before it reaches auth code
+    #   4. AuditMiddleware            – innermost, sees the final handler outcome
+    # add_middleware() prepends, so we add innermost first:
     app.add_middleware(AuditMiddleware)
+    if settings.auth_rate_limit_enabled:
+        app.add_middleware(
+            AuthRateLimitMiddleware,
+            limit=settings.auth_rate_limit_per_window,
+            window_secs=settings.auth_rate_limit_window_secs,
+        )
     app.add_middleware(RequestContextMiddleware)
+    app.add_middleware(SecurityHeadersMiddleware)
     register_error_handlers(app)
 
     # Liveness: process is up. No dependencies checked (arch §18).

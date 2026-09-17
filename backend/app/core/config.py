@@ -122,6 +122,12 @@ class Settings(BaseSettings):
 
     api_v1_prefix: str = "/api/v1"
 
+    # G7 — auth-endpoint rate limit (per-IP sliding window). Defaults are safe for interactive
+    # humans and painful for brute-force scripts; can be disabled in dev/test.
+    auth_rate_limit_enabled: bool = True
+    auth_rate_limit_per_window: int = 10
+    auth_rate_limit_window_secs: float = 60.0
+
     @property
     def is_postgres(self) -> bool:
         return self.database_url.startswith("postgresql")
