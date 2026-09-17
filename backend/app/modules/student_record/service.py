@@ -50,13 +50,23 @@ class StudentService:
 
     async def person_has_application(self, person_id: uuid.UUID) -> bool:
         """True if this person came through recruitment (has an application) — as opposed to a
-        direct enrolment (ICR G2). Used to decide whether the journey has an 'Applicant' stage."""
+        direct enrolment (ICR G2). Used to decide whether the journey has an 'Applicant' stage.
+
+        A real recruitment journey always leaves a trail of ``CandidateStageHistory`` rows (one
+        per stage transition), so we require at least one history entry. This deliberately excludes
+        synthetic Applications created by data-fixup scripts (which stamp a single Application
+        row and no history just to populate the ENTRYROUTE field on the HESA return) — those
+        must not turn a direct-enrolment student into a funnel entrant on the journey tracker.
+        """
         from sqlalchemy import exists, select
 
-        from app.modules.recruitment.models import Application
+        from app.modules.recruitment.models import Application, CandidateStageHistory
 
         return bool((await self.repo.session.execute(
-            select(exists().where(Application.person_id == person_id))
+            select(exists().where(
+                Application.person_id == person_id,
+                exists().where(CandidateStageHistory.application_id == Application.id).correlate(Application),
+            ))
         )).scalar())
 
     async def update_student(self, student_id: uuid.UUID, patch: dict) -> Student:

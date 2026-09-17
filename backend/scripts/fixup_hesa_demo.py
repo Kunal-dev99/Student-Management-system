@@ -78,9 +78,20 @@ async def backfill_persons(session) -> int:
     return touched
 
 
+SYNTHETIC_APPLICATION_MARKER = "__fixup_hesa_demo:entryroute_only__"
+
+
 async def ensure_applications(session) -> int:
     """One Application per Student who doesn't already have one — so student.entryRoute
-    resolves to a real value (opportunity_led / student_led → OPPORTUNITY / PROPOSAL)."""
+    resolves to a real value (opportunity_led / student_led → OPPORTUNITY / PROPOSAL).
+
+    IMPORTANT: these Applications are SYNTHETIC — they exist purely so the HESA return can
+    populate ENTRYROUTE. A directly-enrolled student (ICR G2) never went through the funnel,
+    so we deliberately do NOT create ``CandidateStageHistory`` rows for them. That's how the
+    journey tracker (via ``person_has_application``) tells a real applicant from a synthetic
+    fixup one. The ``proposal_document_ref`` also carries an explicit marker so any future
+    cleanup can identify and prune these rows if the domain grows a proper direct-enrol flag.
+    """
     students = (await session.execute(select(Student))).scalars().all()
     existing_person_ids = {
         a.person_id for a in (await session.execute(select(Application))).scalars().all()
@@ -102,6 +113,7 @@ async def ensure_applications(session) -> int:
             person_id=s.person_id, route=route,
             current_stage=CandidateStage.converted,
             submitted_at=submitted,
+            proposal_document_ref=SYNTHETIC_APPLICATION_MARKER,
         ))
         existing_person_ids.add(s.person_id)
         created += 1

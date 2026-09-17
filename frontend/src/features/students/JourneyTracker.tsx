@@ -252,9 +252,20 @@ export function JourneyTracker({
     ...(isTaught ? taughtDefs : researchDefs),
   ]
 
+  // Cascade the "done" state: a later stage can only render as done if every EARLIER stage is
+  // also done. Otherwise seed/import inconsistencies (e.g. an award classification present on
+  // record with zero completed modules) produce contradictory journeys — Award shows a green
+  // tick while Taught is still in progress. When graduated is true, treat every prior stage as
+  // done regardless of intermediate signals (the terminal state is authoritative).
   let currentAssigned = false
+  let priorAllDone = true
   const stages: Stage[] = defs.map((s) => {
-    if (s.done || graduated) return { key: s.key, label: s.label, state: 'done', note: s.doneNote, detail: s.detail }
+    const effectivelyDone = graduated || (s.done && priorAllDone)
+    if (effectivelyDone) {
+      // stays true only while every earlier stage was also done
+      return { key: s.key, label: s.label, state: 'done', note: s.doneNote, detail: s.detail }
+    }
+    priorAllDone = false
     if (!currentAssigned && !withdrawn && !graduated) {
       currentAssigned = true
       return { key: s.key, label: s.label, state: 'current', note: s.currentNote, detail: s.detail }
