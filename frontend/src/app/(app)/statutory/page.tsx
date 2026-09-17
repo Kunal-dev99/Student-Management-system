@@ -6,7 +6,7 @@
  * The whole point of this screen: a statutory return is **configuration, not code**.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import {
   CheckCircle2, CopyPlus, Download, FileSpreadsheet, FileUp, ListChecks, Lock, Unlock, Play, Plus, Pencil, Trash2, ShieldAlert, ShieldCheck, Sparkles,
   type LucideIcon,
@@ -390,21 +390,20 @@ function TransformChainComposer({
 }
 
 /** Live "what will this pipe produce" panel driven off the backend's preview-transform endpoint.
- *  Debounced so a rapid chip-toggle spree doesn't fire N requests, and gated so it doesn't ask
- *  when there's nothing meaningful to preview (no profile / no source / catalog still loading). */
+ *  Gated so it doesn't ask when there's nothing meaningful to preview (no profile / no source /
+ *  catalog still loading).
+ *
+ *  Debounce: uses React's own useDeferredValue rather than a setTimeout+useState pattern. The
+ *  earlier hand-rolled debounce trapped `chain` inside a setTimeout closure — when the user
+ *  removed a chip while the timer was still pending, React reconciled the parent's new chain
+ *  prop but the queued setState continued to fire with the stale captured string, and useQuery
+ *  read from the cache entry for that stale key. useDeferredValue defers to when React itself
+ *  is idle and always sees the latest value; no stray closure. */
 function TransformPreviewPanel({
   profileId, sourceExpression, chain,
 }: { profileId: string | null; sourceExpression: string; chain: string }) {
-  // Only fire when the user hasn't touched the chain for 300ms. Otherwise a "compose 4 chips
-  // quickly" flow launches 4 requests against a 670-row cohort — wasteful and can flap the
-  // panel between old and new results.
-  const [debouncedChain, setDebouncedChain] = useState(chain)
-  useEffect(() => {
-    const h = window.setTimeout(() => setDebouncedChain(chain), 300)
-    return () => window.clearTimeout(h)
-  }, [chain])
-
-  const preview = usePreviewTransform(profileId, sourceExpression, debouncedChain)
+  const deferredChain = useDeferredValue(chain)
+  const preview = usePreviewTransform(profileId, sourceExpression, deferredChain)
 
   if (!profileId || !sourceExpression.trim()) return null
 
