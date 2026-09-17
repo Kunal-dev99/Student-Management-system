@@ -54,7 +54,15 @@ function DetailRow({ label, children }: { label: string; children: ReactNode }) 
   )
 }
 
-export function JourneyTracker({ student }: { student: Student | undefined }) {
+export function JourneyTracker({
+  student, onStageSelect,
+}: {
+  student: Student | undefined
+  /** Fires when the user clicks a stage segment. The tracker still expands its own detail panel;
+   *  this hook lets the parent page ALSO react (e.g. switch its tab bar). Optional so existing
+   *  callers keep working unchanged. */
+  onStageSelect?: (stageKey: string) => void
+}) {
   const id = student?.id ?? ''
   const milestonesQ = useMilestones(id)
   const thesisQ = useThesis(id)
@@ -285,7 +293,7 @@ export function JourneyTracker({ student }: { student: Student | undefined }) {
               <div className="flex items-center">
                 <button
                   type="button"
-                  onClick={() => setExpanded(isOpen ? null : s.key)}
+                  onClick={() => { setExpanded(isOpen ? null : s.key); onStageSelect?.(s.key) }}
                   aria-expanded={isOpen}
                   title={`${s.label} — click for detail`}
                   className={cn(
@@ -304,7 +312,8 @@ export function JourneyTracker({ student }: { student: Student | undefined }) {
                   <div className={cn('h-0.5 flex-1 mx-1.5 rounded', s.state === 'done' ? 'bg-[hsl(var(--success))]' : 'bg-border')} />
                 )}
               </div>
-              <button type="button" onClick={() => setExpanded(isOpen ? null : s.key)}
+              <button type="button"
+                onClick={() => { setExpanded(isOpen ? null : s.key); onStageSelect?.(s.key) }}
                 className="mt-1.5 pr-2 text-left block w-full">
                 <p className={cn(
                   'text-xs font-medium leading-tight inline-flex items-center gap-0.5',
