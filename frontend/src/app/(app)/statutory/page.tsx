@@ -37,7 +37,7 @@ import {
   useAddField, useCloneProfile, useCompileProfile, useCreateFromSpec, useCreateProfile,
   useGenerateProfile, useProfile, useProfiles, useSignOffProfile, useSpecs, useTransforms,
   useUnsignProfile, useValidateProfile, useFixSuggestions, useApplyFix,
-  useUpdateField, useDeleteField, useRecordSchema,
+  useUpdateField, useDeleteField, useRecordSchema, usePreviewTransform,
   useSuggestDefaults, useApplyDefaults, useSuppressRule, useRemoveSuppression,
   type GenerateResult, type ReportProfile, type ValidationResult, type FieldMapping,
   type DefaultSuggestion, type ValidationIssue, type RuleAnalysis, type RuleSuppression,
@@ -261,8 +261,16 @@ function SourceExpressionPicker({
  *  transform used to live in; empty chain → '' (no transform, matches the prior no-transform
  *  state). No drag-reorder in this pass — remove + re-add to reorder. */
 function TransformChainComposer({
-  value, onChange, id,
-}: { value: string; onChange: (v: string) => void; id?: string }) {
+  value, onChange, id, profileId, sourceExpression,
+}: {
+  value: string
+  onChange: (v: string) => void
+  id?: string
+  /** When both are passed the composer shows a "what your pipe produces" preview panel
+   *  driven off the profile's own cohort. Omit either to fall back to the plain composer. */
+  profileId?: string | null
+  sourceExpression?: string
+}) {
   const transforms = useTransforms()
   const cats = transforms.data?.categories
   // The chain is the source of truth for the UI; we keep the string field in sync via onChange.
@@ -371,6 +379,93 @@ function TransformChainComposer({
           Pipeline: <span className="font-mono">{chain.join(' | ')}</span>
         </p>
       )}
+
+      <TransformPreviewPanel
+        profileId={profileId ?? null}
+        sourceExpression={sourceExpression ?? ''}
+        chain={value}
+      />
+    </div>
+  )
+}
+
+/** Live "what will this pipe produce" panel driven off the backend's preview-transform endpoint.
+ *  Debounced so a rapid chip-toggle spree doesn't fire N requests, and gated so it doesn't ask
+ *  when there's nothing meaningful to preview (no profile / no source / catalog still loading). */
+function TransformPreviewPanel({
+  profileId, sourceExpression, chain,
+}: { profileId: string | null; sourceExpression: string; chain: string }) {
+  // Only fire when the user hasn't touched the chain for 300ms. Otherwise a "compose 4 chips
+  // quickly" flow launches 4 requests against a 670-row cohort — wasteful and can flap the
+  // panel between old and new results.
+  const [debouncedChain, setDebouncedChain] = useState(chain)
+  useEffect(() => {
+    const h = window.setTimeout(() => setDebouncedChain(chain), 300)
+    return () => window.clearTimeout(h)
+  }, [chain])
+
+  const preview = usePreviewTransform(profileId, sourceExpression, debouncedChain)
+
+  if (!profileId || !sourceExpression.trim()) return null
+
+  const errMsg = preview.error
+    ? (preview.error as ApiError)?.message ?? 'Preview failed.'
+    : null
+
+  return (
+    <div className="mt-2 rounded-md border border-border bg-surface-2/50 p-2 text-xs">
+      <div className="flex items-center justify-between gap-2 mb-1">
+        <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+          Preview — first {preview.data?.sampled ?? 20} of {preview.data?.totalRecords ?? '…'} records
+        </span>
+        {preview.isFetching && (
+          <span className="text-[10px] text-muted-foreground italic">refreshing…</span>
+        )}
+      </div>
+      {errMsg ? (
+        <p className="text-[hsl(var(--destructive))]">⚠ {errMsg}</p>
+      ) : preview.data ? (
+        <div className="max-h-40 overflow-y-auto">
+          <table className="w-full text-[11px] tabular-nums">
+            <thead className="text-muted-foreground">
+              <tr>
+                <th className="text-left font-normal pr-2">Ref</th>
+                <th className="text-left font-normal pr-2">Input</th>
+                <th className="text-left font-normal">Output</th>
+              </tr>
+            </thead>
+            <tbody className="font-mono">
+              {preview.data.rows.slice(0, 8).map((r) => {
+                const isErr = r.output.startsWith('!!')
+                return (
+                  <tr key={r.studentRef} className="border-t border-border/50">
+                    <td className="pr-2 whitespace-nowrap">{r.studentRef}</td>
+                    <td className="pr-2 max-w-[140px] truncate" title={String(r.input ?? '')}>
+                      {r.input === null || r.input === undefined
+                        ? <span className="italic text-muted-foreground">null</span>
+                        : String(r.input)}
+                    </td>
+                    <td className={`max-w-[140px] truncate ${isErr ? 'text-[hsl(var(--destructive))]' : ''}`}
+                        title={r.output}>
+                      {isErr ? r.output.slice(2) : (r.output || <span className="italic text-muted-foreground">empty</span>)}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+          {preview.data.distinct.outputs.length > 0 && (
+            <p className="mt-1.5 text-[10px] text-muted-foreground">
+              Distinct outputs across sample: <span className="font-mono">
+                {preview.data.distinct.outputs.slice(0, 6).map((o) => o || '""').join(', ')}
+                {preview.data.distinct.outputs.length > 6 && ` +${preview.data.distinct.outputs.length - 6}`}
+              </span>
+            </p>
+          )}
+        </div>
+      ) : (
+        <p className="text-muted-foreground italic">Loading preview…</p>
+      )}
     </div>
   )
 }
@@ -468,7 +563,8 @@ function AddFieldDialog({
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label>Transform (optional)</Label>
-              <TransformChainComposer value={transform} onChange={setTransform} />
+              <TransformChainComposer value={transform} onChange={setTransform}
+                profileId={profileId} sourceExpression={sourceExpression} />
               <p className="text-helper">
                 Steps run left-to-right. Chain e.g. <span className="font-mono text-xs">strip_special | upper</span>.
               </p>
@@ -578,7 +674,8 @@ function EditFieldDialog({
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label htmlFor="e-transform">Transform (optional)</Label>
-              <TransformChainComposer id="e-transform" value={transform} onChange={setTransform} />
+              <TransformChainComposer id="e-transform" value={transform} onChange={setTransform}
+                profileId={profileId} sourceExpression={sourceExpression} />
               <p className="text-helper">Steps run left-to-right. Remove and re-add to reorder.</p>
             </div>
             <div className="space-y-1.5">

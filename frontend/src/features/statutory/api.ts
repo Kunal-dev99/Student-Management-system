@@ -150,6 +150,47 @@ export const useTransforms = () =>
     staleTime: 60 * 60 * 1000,
   })
 
+// -------- Transform-chain preview (Add/Edit dialogs' "what will this pipe produce" panel) --------
+
+export interface TransformPreviewRow {
+  studentRef: string
+  input: string | number | boolean | null
+  output: string
+}
+export interface TransformPreview {
+  sampled: number
+  totalRecords: number
+  rows: TransformPreviewRow[]
+  distinct: {
+    inputs: (string | number | boolean | null)[]
+    outputs: string[]
+  }
+  error: string | null
+}
+
+/** Dry-run a source+transform over the profile's own cohort (first 20 records). Gated by
+ *  `enabled` so the caller only fires when both the profile and the source expression are
+ *  present — otherwise the query key would churn on every keystroke while the user is still
+ *  typing a path. `keepPreviousData` prevents the preview panel flashing between chip clicks. */
+export const usePreviewTransform = (
+  profileId: string | null | undefined,
+  sourceExpression: string,
+  transform: string,
+) =>
+  useQuery({
+    queryKey: ['report-profile-preview-transform', profileId, sourceExpression, transform],
+    queryFn: () =>
+      api.post<TransformPreview>(`/report-profiles/${profileId}/preview-transform`, {
+        sourceExpression,
+        transform: transform || null,
+      }),
+    enabled: !!profileId && sourceExpression.trim().length > 0,
+    // Preview is a debug/inspection view; a bad chain returns 400 with a plain detail — surface
+    // that to the caller as the query's error and let the UI render it as a red note.
+    retry: false,
+    placeholderData: keepPreviousData,
+  })
+
 // -------- Record-schema catalog (source-expression dropdown) --------
 
 export interface RecordSchemaField {
