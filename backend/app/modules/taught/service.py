@@ -58,6 +58,34 @@ def _merged_policy(programme: Programme | None) -> dict:
     return policy
 
 
+def _effective_resit_cap(
+    policy: dict, assessment, attempt_number: int,
+) -> Decimal | None:
+    """The cap that applies to THIS attempt's recorded mark, or None for uncapped.
+
+    Precedence (highest wins):
+      1. ``Assessment.resit_cap`` — a per-component override baked into the assessment row.
+      2. ``policy['resitCapLadder']`` — a per-programme degrading ladder; index 0 is the cap for
+         attempt 2, index 1 for attempt 3, and so on. Beyond the list the LAST value is used
+         (the harshest — the "we've been generous enough" floor).
+      3. ``policy['resitCap']`` — the per-programme flat fallback that applied to every resit.
+      4. None — no cap in force.
+
+    The first attempt is always uncapped: the raw mark counts at 100%. A student who never resat
+    was never at risk of a cap and this function returns None.
+    """
+    if attempt_number < 2:
+        return None
+    if getattr(assessment, "resit_cap", None) is not None:
+        return Decimal(str(assessment.resit_cap))
+    ladder = policy.get("resitCapLadder")
+    if ladder:
+        idx = min(attempt_number - 2, len(ladder) - 1)
+        return Decimal(str(ladder[idx]))
+    flat = policy.get("resitCap")
+    return Decimal(str(flat)) if flat is not None else None
+
+
 def _band_for(mark: Decimal, policy: dict) -> ClassificationBand:
     if mark >= Decimal(str(policy["distinctionMark"])):
         return ClassificationBand.distinction
@@ -259,13 +287,17 @@ class TaughtService:
         prior = [x for x in e.results if x.assessment_id == data.assessment_id]
         attempt_number = len(prior) + 1
 
-        # Capped resit: a resit mark above the cap is recorded at the cap, and the cap is flagged
-        # so it's auditable rather than silently applied.
+        # Capped resit: the effective cap comes from _effective_resit_cap (per-assessment override,
+        # then per-programme ladder for a degrading policy, then the flat programme cap). A resit
+        # mark above the cap is recorded at the cap and flagged, so the cap is auditable rather
+        # than silently applied. First attempt is always uncapped — the raw mark counts at 100%.
         mark = data.mark
         capped = False
-        if (data.is_resit and marked and assessment.resit_cap is not None
-                and mark is not None and mark > assessment.resit_cap):
-            mark = assessment.resit_cap
+        module_for_cap = await self.repo.get_module(e.module_id)
+        programme_for_cap = await self._programme(module_for_cap.programme_id) if module_for_cap else None
+        cap_value = _effective_resit_cap(_merged_policy(programme_for_cap), assessment, attempt_number)
+        if data.is_resit and marked and cap_value is not None and mark is not None and mark > cap_value:
+            mark = cap_value
             capped = True
 
         r = AssessmentResult(

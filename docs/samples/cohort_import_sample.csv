@@ -1,0 +1,11 @@
+student_ref,given_name,family_name,email,programme_code,start_date,study_mode,status,funder
+DEMO-2026-001,Amara,Okoro,amara.okoro@icr.example.ac.uk,ICR-PHD,2026-10-01,full_time,registered,Cancer Research UK (CRUK)
+DEMO-2026-002,Wei,Zhang,wei.zhang@icr.example.ac.uk,ICR-PHD,2026-10-01,full_time,registered,Medical Research Council (MRC)
+DEMO-2026-003,Sofia,Rodriguez,sofia.rodriguez@icr.example.ac.uk,ICR-MDRES,2026-10-01,full_time,registered,Cancer Research UK (CRUK)
+DEMO-2026-004,Jamal,Hassan,jamal.hassan@icr.example.ac.uk,ICR-PHD,2026-10-01,part_time,registered,Breast Cancer Now
+DEMO-2026-005,Priya,Menon,priya.menon@icr.example.ac.uk,ICR-MDRES,2026-10-01,full_time,registered,ICR Corporate Partnership Pool
+DEMO-2026-006,Oliver,Thompson,oliver.thompson@icr.example.ac.uk,ICR-PHD,2026-09-15,full_time,registered,Cancer Research UK (CRUK)
+DEMO-2026-007,Yuki,Tanaka,yuki.tanaka@icr.example.ac.uk,ICR-PHD,2026-10-01,full_time,prospective,
+DEMO-2026-008,Isabella,Costa,isabella.costa@icr.example.ac.uk,MSC-ONC,2026-10-01,full_time,registered,University Scholarship Fund
+DEMO-2026-009,Raheem,Sterling,raheem.sterling@icr.example.ac.uk,ICR-PHD,2026-10-01,full_time,registered,Medical Research Council (MRC)
+DEMO-2026-010,Fatima,Al-Rashid,fatima.alrashid@icr.example.ac.uk,ICR-MDRES,2026-10-01,part_time,registered,ICR Corporate Partnership Pool

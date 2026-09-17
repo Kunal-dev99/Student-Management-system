@@ -42,7 +42,12 @@ class ModuleOutcome(str, enum.Enum):
 # nothing here is hard-coded into logic — the service reads the merged policy.
 DEFAULT_GRADING_POLICY: dict = {
     "passMark": 50,          # module pass mark (%)
-    "resitCap": 50,          # a resit mark is capped at this
+    "resitCap": 50,          # flat resit cap — applies to every attempt >= 2 when the ladder is unset
+    # A DEGRADING resit ladder — each subsequent attempt gets a harsher cap. Index 0 is the
+    # cap for attempt 2, index 1 for attempt 3, and so on. Beyond the list length the LAST value
+    # is used (the harshest). When unset (None), the flat `resitCap` above applies to every resit.
+    # Example: [50, 40, 30] → attempt 2 capped at 50, attempt 3 at 40, attempt 4+ at 30.
+    "resitCapLadder": None,
     "condonementCredits": 30,  # total failed credits the board may condone
     "distinctionMark": 70,   # award classification thresholds (credit-weighted final %)
     "meritMark": 60,
