@@ -6,7 +6,7 @@
  * The whole point of this screen: a statutory return is **configuration, not code**.
  */
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   CheckCircle2, CopyPlus, Download, FileSpreadsheet, FileUp, ListChecks, Lock, Unlock, Play, Plus, Pencil, Trash2, ShieldAlert, ShieldCheck, Sparkles,
 } from 'lucide-react'
@@ -448,17 +448,27 @@ function CloneDialog({ profile }: { profile: ReportProfile }) {
 // per required field, with the empty-default rows surfaced first.
 
 function DefaultRow({
-  profileId, field,
-}: { profileId: string; field: FieldMapping }) {
+  profileId, field, highlighted,
+}: { profileId: string; field: FieldMapping; highlighted?: boolean }) {
   const { toast } = useToast()
   const update = useUpdateField(profileId)
   const [value, setValue] = useState(field.defaultValue ?? '')
+  const inputRef = useRef<HTMLInputElement | null>(null)
+  const rowRef = useRef<HTMLTableRowElement | null>(null)
   // Re-seed when the underlying field changes (e.g. after a save elsewhere).
   useEffect(() => { setValue(field.defaultValue ?? '') }, [field.defaultValue])
+
+  // When highlighted from the validation report, scroll into view and focus the input.
+  useEffect(() => {
+    if (!highlighted) return
+    rowRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    inputRef.current?.focus()
+  }, [highlighted])
 
   const dirty = (value || '') !== (field.defaultValue ?? '')
   const hasDefault = (field.defaultValue ?? '').length > 0
   const allowed = field.allowedValues ?? []
+  const unmapped = !(field.sourceExpression ?? '').trim()
 
   const save = async () => {
     if (!dirty) return
@@ -469,9 +479,22 @@ function DefaultRow({
   }
 
   return (
-    <TableRow>
-      <TableCell className="font-mono text-xs font-medium whitespace-nowrap">{field.targetField}</TableCell>
-      <TableCell className="text-xs text-muted-foreground">{field.keyedAt ?? '—'}</TableCell>
+    <TableRow
+      ref={rowRef}
+      className={highlighted ? 'bg-primary/5 ring-2 ring-primary/40 transition-colors' : undefined}
+    >
+      <TableCell className="font-mono text-xs font-medium whitespace-nowrap">
+        {field.targetField}
+        {field.required && <Badge variant="warning" className="ml-1.5 text-[10px] py-0 px-1.5">req</Badge>}
+      </TableCell>
+      <TableCell className="text-xs text-muted-foreground max-w-[200px]">
+        {unmapped ? (
+          <span className="italic">unmapped</span>
+        ) : (
+          <span className="font-mono">{field.sourceExpression}</span>
+        )}
+        {field.keyedAt && <div className="text-[10px] mt-0.5">{field.keyedAt}</div>}
+      </TableCell>
       <TableCell className="text-xs text-muted-foreground max-w-[220px]">
         {allowed.length > 0 ? (
           <span className="font-mono">{allowed.join(', ')}</span>
@@ -490,6 +513,7 @@ function DefaultRow({
           </Select>
         ) : (
           <Input
+            ref={inputRef}
             className="h-8 w-[160px] font-mono text-xs"
             value={value}
             placeholder="(no default)"
@@ -518,21 +542,45 @@ function DefaultRow({
 function FieldDefaultsSection({
   profileId, fields,
 }: { profileId: string; fields: FieldMapping[] }) {
-  // Only required fields need a fallback (unmapped optional fields can stay empty on the return).
-  // Sort: empty-default first, then by field code — surfaces the actual work upfront.
-  const required = useMemo(() => {
-    const list = fields.filter((f) => f.required)
-    return [...list].sort((a, b) => {
+  // Focus filter — required-only surfaces the sign-off blockers; "needs one" adds unmapped
+  // fields (no source expression means the produced value is always empty); "all" is every field.
+  const [focus, setFocus] = useState<'needs' | 'required' | 'all'>('needs')
+  // Highlight target (set from the validation report's "Set default for FIELD" quick-jump).
+  const highlight = useHighlightedField()
+
+  // If the quick-jump target isn't in the current filter, widen to "all" so it can be scrolled to.
+  useEffect(() => {
+    if (!highlight) return
+    const inView = fields.some((f) => f.targetField === highlight && (
+      focus === 'all' || (focus === 'required' && f.required) ||
+      (focus === 'needs' && (f.required || !(f.sourceExpression ?? '').trim()))
+    ))
+    if (!inView) setFocus('all')
+  }, [highlight, fields, focus])
+
+  const rows = useMemo(() => {
+    const filtered = fields.filter((f) => {
+      if (focus === 'all') return true
+      if (focus === 'required') return f.required
+      // "needs a default" — required OR unmapped (no source column). These are the fields that
+      // ship an empty value today; setting a default plugs them.
+      return f.required || !f.sourceExpression?.trim()
+    })
+    return [...filtered].sort((a, b) => {
       const aEmpty = !(a.defaultValue ?? '').length
       const bEmpty = !(b.defaultValue ?? '').length
       if (aEmpty !== bEmpty) return aEmpty ? -1 : 1
+      // Prioritise required-and-empty, then by field code.
+      if (a.required !== b.required) return a.required ? -1 : 1
       return a.targetField.localeCompare(b.targetField)
     })
-  }, [fields])
+  }, [fields, focus])
 
-  const emptyCount = required.filter((f) => !(f.defaultValue ?? '').length).length
+  const emptyCount = rows.filter((f) => !(f.defaultValue ?? '').length).length
+  const totalRequired = fields.filter((f) => f.required).length
+  const totalNeeds = fields.filter((f) => f.required || !f.sourceExpression?.trim()).length
 
-  if (required.length === 0) return null
+  if (fields.length === 0) return null
 
   return (
     <div className="pt-3 border-t border-border space-y-3">
@@ -540,23 +588,35 @@ function FieldDefaultsSection({
         <div>
           <p className="text-label">Statutory field defaults</p>
           <p className="text-helper max-w-2xl">
-            When a student record has no value for a required field, the return sends the default set here
-            instead of failing validation. Set once per year — the same default applies to every student
+            When a student record has no value for a field, the return sends the default set here
+            instead of leaving it blank. Set once per year — the same default applies to every student
             the return covers. Coded fields pick from their allowed values; free-text fields accept any string.
           </p>
         </div>
         <Badge variant={emptyCount === 0 ? 'success' : 'warning'} className="whitespace-nowrap">
           {emptyCount === 0
-            ? `${required.length} / ${required.length} covered`
-            : `${emptyCount} of ${required.length} without a default`}
+            ? `${rows.length} / ${rows.length} covered`
+            : `${emptyCount} of ${rows.length} without a default`}
         </Badge>
+      </div>
+      <div className="inline-flex rounded-md border border-border p-0.5 text-xs">
+        {([
+          ['needs', `Needs a default (${totalNeeds})`, 'Required fields plus every unmapped field — anywhere the return would ship an empty value.'],
+          ['required', `Required only (${totalRequired})`, 'Only fields marked required by the specification.'],
+          ['all', `All fields (${fields.length})`, 'Every field in the profile — including ones already populated from the record.'],
+        ] as const).map(([k, label, tip]) => (
+          <button key={k} type="button" title={tip} onClick={() => setFocus(k)}
+            className={`px-2 py-0.5 rounded ${focus === k ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+            {label}
+          </button>
+        ))}
       </div>
       <div className="card-elevated overflow-hidden">
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead>Field</TableHead>
-              <TableHead>Keyed on record</TableHead>
+              <TableHead>Source</TableHead>
               <TableHead>Allowed values</TableHead>
               <TableHead>Default when empty</TableHead>
               <TableHead>Status</TableHead>
@@ -564,12 +624,43 @@ function FieldDefaultsSection({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {required.map((f) => <DefaultRow key={f.id} profileId={profileId} field={f} />)}
+            {rows.map((f) => (
+              <DefaultRow
+                key={f.id}
+                profileId={profileId}
+                field={f}
+                highlighted={highlight === f.targetField}
+              />
+            ))}
           </TableBody>
         </Table>
       </div>
     </div>
   )
+}
+
+// ---- cross-component quick-jump: validation report → defaults input ----
+//
+// A tiny module-scoped signal so the validation report can nudge the defaults section to scroll
+// to a specific field and highlight its input, without threading refs through 3 components.
+let _highlightTarget: string | null = null
+const _highlightSubs = new Set<() => void>()
+function setHighlightedField(field: string | null) {
+  _highlightTarget = field
+  _highlightSubs.forEach((fn) => fn())
+  if (field) {
+    // Auto-clear the highlight after a couple of seconds so it doesn't linger.
+    window.setTimeout(() => { if (_highlightTarget === field) setHighlightedField(null) }, 2500)
+  }
+}
+function useHighlightedField() {
+  const [, force] = useState(0)
+  useEffect(() => {
+    const fn = () => force((n) => n + 1)
+    _highlightSubs.add(fn)
+    return () => { _highlightSubs.delete(fn) }
+  }, [])
+  return _highlightTarget
 }
 
 // ---------------------------------------------------------------- validation
@@ -638,18 +729,29 @@ function ValidationReportView({ result, rowCount }: { result: ValidationResult; 
         </p>
       ) : (
         <>
-          {/* Grouped by field ("error type") — click to filter to that field. */}
+          {/* Grouped by field ("error type") — click the label to filter, click "Fix all" to
+             jump to the defaults input for that field (setting one default clears every "empty"
+             or "not in allowed" error for that field in one shot — the group correction). */}
           <div className="flex flex-wrap gap-1.5">
             <button type="button" onClick={() => setField(null)}
               className={`text-xs rounded-full border px-2.5 py-1 ${!field ? 'bg-primary/10 border-primary/40 font-medium' : 'border-border hover:bg-surface-2'}`}>
               All fields ({result.issues.length})
             </button>
             {groups.map((g) => (
-              <button key={g.field} type="button" onClick={() => setField(g.field)}
-                className={`text-xs rounded-full border px-2.5 py-1 inline-flex items-center gap-1.5 ${field === g.field ? 'bg-primary/10 border-primary/40 font-medium' : 'border-border hover:bg-surface-2'}`}>
-                <span className="font-mono">{g.field}</span>
-                <span className={g.errors ? 'text-[hsl(var(--destructive))]' : 'text-[hsl(var(--warning))]'}>{g.count}</span>
-              </button>
+              <span key={g.field}
+                className={`text-xs rounded-full border inline-flex items-stretch overflow-hidden ${field === g.field ? 'bg-primary/10 border-primary/40 font-medium' : 'border-border'}`}>
+                <button type="button" onClick={() => setField(g.field)}
+                  className="px-2.5 py-1 inline-flex items-center gap-1.5 hover:bg-surface-2">
+                  <span className="font-mono">{g.field}</span>
+                  <span className={g.errors ? 'text-[hsl(var(--destructive))]' : 'text-[hsl(var(--warning))]'}>{g.count}</span>
+                </button>
+                <button type="button"
+                  title={`Fix all ${g.count} — set a default value for ${g.field}`}
+                  onClick={() => setHighlightedField(g.field)}
+                  className="px-2 py-1 border-l border-border hover:bg-primary/10 text-primary inline-flex items-center gap-1">
+                  <Sparkles className="h-3 w-3" /> Fix all
+                </button>
+              </span>
             ))}
           </div>
 
@@ -661,27 +763,49 @@ function ValidationReportView({ result, rowCount }: { result: ValidationResult; 
                   <TableHead>Field</TableHead>
                   <TableHead>Severity</TableHead>
                   <TableHead>Message</TableHead>
+                  <TableHead className="text-right w-[80px]">Fix</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {pageItems.map((i, idx) => (
-                  <TableRow key={`${i.studentRef}-${i.field}-${start + idx}`}>
-                    <TableCell className="font-mono text-xs whitespace-nowrap">{i.studentRef}</TableCell>
-                    <TableCell className="font-mono text-xs whitespace-nowrap">{i.field}</TableCell>
-                    <TableCell>
-                      <Badge variant={i.severity === 'warning' ? 'warning' : 'destructive'}>{i.severity}</Badge>
-                    </TableCell>
-                    <TableCell className="text-sm">
-                      {i.message}
-                      {i.allowed && i.allowed.length > 0 && (
-                        <span className="text-helper"> Allowed: {i.allowed.join(', ')}.</span>
-                      )}
-                      {i.sourceExpression && (
-                        <span className="text-helper font-mono"> ({i.sourceExpression})</span>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {pageItems.map((i, idx) => {
+                  // Only "empty" / "not in allowed" are fixable via a default — cross-field rule
+                  // failures (e.g. ENDDATE < COMDATE) can't be fixed by setting a static default,
+                  // so we hide the button rather than mislead.
+                  const canDefault = /is required.*but is empty|is not an accepted value/.test(i.message)
+                  return (
+                    <TableRow key={`${i.studentRef}-${i.field}-${start + idx}`}>
+                      <TableCell className="font-mono text-xs whitespace-nowrap">{i.studentRef}</TableCell>
+                      <TableCell className="font-mono text-xs whitespace-nowrap">{i.field}</TableCell>
+                      <TableCell>
+                        <Badge variant={i.severity === 'warning' ? 'warning' : 'destructive'}>{i.severity}</Badge>
+                      </TableCell>
+                      <TableCell className="text-sm">
+                        {i.message}
+                        {i.allowed && i.allowed.length > 0 && (
+                          <span className="text-helper"> Allowed: {i.allowed.join(', ')}.</span>
+                        )}
+                        {i.sourceExpression && (
+                          <span className="text-helper font-mono"> ({i.sourceExpression})</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {canDefault ? (
+                          <Button
+                            size="sm" variant="ghost" className="h-7 text-xs"
+                            title={`Jump to the default for ${i.field} (fixes this and every other row with the same error)`}
+                            onClick={() => setHighlightedField(i.field)}
+                          >
+                            Set default →
+                          </Button>
+                        ) : (
+                          <span className="text-[10px] text-muted-foreground" title="Cross-field rule — set on the student record itself, not from a default">
+                            per record
+                          </span>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
               </TableBody>
             </Table>
           </div>
