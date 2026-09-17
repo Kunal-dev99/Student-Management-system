@@ -71,7 +71,18 @@ export interface RuleAnalysis {
   total: number
   share: number   // 0..1
   likelyMisconfigured: boolean
-  muted: boolean
+  suppressed: boolean
+}
+
+/** Audit record for one suppressed rule — shown on the sign-off card so the attester can see
+ *  every rule inhibited on this profile and why. */
+export interface RuleSuppression {
+  ruleKey: string
+  reason: string | null
+  at: string | null
+  byUserId: string | null
+  byUserName: string | null
+  scope: 'profile' | 'pack'
 }
 
 export interface ValidationResult {
@@ -81,7 +92,7 @@ export interface ValidationResult {
   valid: boolean
   /** Per-rule roll-up so a UI can spot "85% of records violate — rule is probably wrong". */
   ruleAnalysis?: RuleAnalysis[]
-  mutedRuleKeys?: string[]
+  suppressions?: RuleSuppression[]
 }
 
 export interface SpecPack {
@@ -226,6 +237,7 @@ export interface CompileReport {
   mappedFieldCount: number
   missing: CompileMissing[]
   signOffReady: boolean
+  suppressions?: RuleSuppression[]
 }
 
 export const useCompileProfile = (profileId: string | null) =>
@@ -353,12 +365,24 @@ export function useApplyDefaults(profileId: string | null) {
   })
 }
 
-/** Mute (or unmute) a cross-field/format rule for a profile. Refused if signed off. */
-export function useMuteRule(profileId: string | null) {
+/** Suppress a cross-field/format rule (per profile OR at the shared pack level). Reason required. */
+export function useSuppressRule(profileId: string | null) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (body: { ruleKey: string; muted: boolean }) =>
-      api.post<{ profileId: string; mutedRuleKeys: string[] }>(`/report-profiles/${profileId}/mute-rule`, body),
+    mutationFn: (body: { ruleKey: string; reason: string; scope: 'profile' | 'pack' }) =>
+      api.post<{ suppressions: RuleSuppression[] }>(`/report-profiles/${profileId}/suppress-rule`, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['report-profile', profileId] })
+    },
+  })
+}
+
+/** Undo a suppression at the given scope. */
+export function useRemoveSuppression(profileId: string | null) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: { ruleKey: string; scope: 'profile' | 'pack' }) =>
+      api.post<{ suppressions: RuleSuppression[] }>(`/report-profiles/${profileId}/remove-suppression`, body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['report-profile', profileId] })
     },

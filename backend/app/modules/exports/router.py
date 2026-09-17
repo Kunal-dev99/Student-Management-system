@@ -280,21 +280,47 @@ async def apply_defaults(
     )
 
 
-class MuteRuleRequest(BaseModel):
+class SuppressRuleRequest(BaseModel):
+    """Suppress a validation rule with an audit trail. `reason` is required — the sign-off will
+    show these to whoever attests to the return, so an anonymous mute is not allowed."""
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
     rule_key: str
-    muted: bool = True
+    reason: str
+    scope: str = "profile"    # 'profile' | 'pack'
 
 
-@profiles_router.post("/{profile_id}/mute-rule",
-                      summary="Mute (or unmute) a cross-field/format rule for this profile")
-async def mute_rule(
+@profiles_router.post("/{profile_id}/suppress-rule",
+                      summary="Suppress a cross-field/format rule for this profile or for the whole pack")
+async def suppress_rule(
     profile_id: uuid.UUID,
-    body: MuteRuleRequest,
+    body: SuppressRuleRequest,
+    session: AsyncSession = Depends(get_session),
+    principal=Depends(require_permission("admin.configure")),
+) -> dict:
+    return await _engine(session).suppress_rule(
+        profile_id,
+        rule_key=body.rule_key, reason=body.reason, scope=body.scope,
+        user_id=principal.user_id, user_name=principal.email,
+    )
+
+
+class RemoveSuppressionRequest(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+    rule_key: str
+    scope: str = "profile"
+
+
+@profiles_router.post("/{profile_id}/remove-suppression",
+                      summary="Undo a rule suppression (unsuppresses at profile or pack scope)")
+async def remove_suppression(
+    profile_id: uuid.UUID,
+    body: RemoveSuppressionRequest,
     session: AsyncSession = Depends(get_session),
     _=Depends(require_permission("admin.configure")),
 ) -> dict:
-    return await _engine(session).set_muted_rule(profile_id, rule_key=body.rule_key, muted=body.muted)
+    return await _engine(session).remove_suppression(
+        profile_id, rule_key=body.rule_key, scope=body.scope,
+    )
 
 
 @profiles_router.post("/{profile_id}/generate", status_code=201, summary="Produce the statutory extract")

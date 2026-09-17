@@ -36,9 +36,9 @@ import {
   useGenerateProfile, useProfile, useProfiles, useSignOffProfile, useSpecs, useTransforms,
   useUnsignProfile, useValidateProfile, useFixSuggestions, useApplyFix,
   useUpdateField, useDeleteField,
-  useSuggestDefaults, useApplyDefaults, useMuteRule,
+  useSuggestDefaults, useApplyDefaults, useSuppressRule, useRemoveSuppression,
   type GenerateResult, type ReportProfile, type ValidationResult, type FieldMapping,
-  type DefaultSuggestion, type ValidationIssue, type RuleAnalysis,
+  type DefaultSuggestion, type ValidationIssue, type RuleAnalysis, type RuleSuppression,
 } from '@/features/statutory/api'
 
 function err(toast: ReturnType<typeof useToast>['toast'], title: string) {
@@ -1081,7 +1081,10 @@ function OrderFixDialog({
   profileId: string
 }) {
   const { toast } = useToast()
-  const mute = useMuteRule(profileId)
+  const suppress = useSuppressRule(profileId)
+  const [reason, setReason] = useState('')
+  const [scope, setScope] = useState<'profile' | 'pack'>('profile')
+  useEffect(() => { if (open) { setReason(''); setScope('profile') } }, [open])
   if (i.fix?.kind !== 'order') return null
 
   const { thisField, thisValue, otherField, otherValue } = i.fix
@@ -1090,19 +1093,27 @@ function OrderFixDialog({
     ? `${analysis.violations} of ${analysis.total} records (${Math.round(analysis.share * 100)}%) violate this rule.`
     : ''
 
-  const doMute = async () => {
-    if (!i.ruleKey) return
+  const doSuppress = async () => {
+    if (!i.ruleKey || !reason.trim()) return
     try {
-      await mute.mutateAsync({ ruleKey: i.ruleKey, muted: true })
-      toast({ title: 'Rule muted for this profile — re-validate to see the drop.' })
+      await suppress.mutateAsync({ ruleKey: i.ruleKey, reason: reason.trim(), scope })
+      toast({
+        title: `Rule suppressed (${scope === 'pack' ? 'spec-pack scope' : 'this profile only'}) — re-validate to see the drop.`,
+      })
       onClose()
-    } catch (e) { err(toast, 'Could not mute the rule')(e) }
+    } catch (e) { err(toast, 'Could not suppress the rule')(e) }
   }
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
-      <DialogContent>
-        <DialogHeader><DialogTitle>Fix ordering rule violation</DialogTitle></DialogHeader>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Suppress rule</DialogTitle>
+          <p className="text-helper">
+            Suppressing stops the rule firing — it doesn't fix the underlying issue. Only defensible
+            when the rule itself is wrong (or doesn't apply to this pack).
+          </p>
+        </DialogHeader>
         <div className="space-y-3 text-sm">
           <div className="rounded-md border border-border p-3 space-y-1 font-mono text-xs">
             <div><span className="text-muted-foreground">record</span> {i.studentRef}</div>
@@ -1117,26 +1128,61 @@ function OrderFixDialog({
               <p className="font-medium">This rule looks misconfigured.</p>
               <p className="text-muted-foreground">
                 {shareText} A genuine cross-field rule catches outliers, not the majority — this
-                one probably arrived via a bad advisory. Muting it for this profile is safe: the
-                spec pack is untouched (so old years stay reproducible), and unmute is one click.
+                one probably arrived via a bad advisory. Since this affects every profile using
+                the same pack, consider suppressing at the spec-pack level below.
               </p>
             </div>
           ) : (
             <div className="rounded-md bg-surface-2 border border-border p-3 text-xs">
-              <p>{shareText} A minority of records fails this rule — the data on this record is
-                 the likely cause. Open the student's record to correct the dates, or, if the two
-                 values are simply swapped, fix them there.</p>
+              <p>{shareText} A minority of records fails this rule — the data on the affected
+                 records is the likely cause. Suppressing hides the errors without fixing them;
+                 prefer editing the student records themselves.</p>
             </div>
+          )}
+
+          {i.ruleKey && (
+            <>
+              <div className="space-y-2">
+                <Label>Scope</Label>
+                <div className="rounded-md border border-border divide-y divide-border">
+                  <label className="flex items-start gap-3 p-3 cursor-pointer hover:bg-surface-2">
+                    <input type="radio" name="scope" className="mt-0.5"
+                      checked={scope === 'profile'} onChange={() => setScope('profile')} />
+                    <span className="text-xs">
+                      <span className="font-medium block">Only this profile</span>
+                      <span className="text-muted-foreground">Suppression applies to this return only. Other profiles on the same pack still enforce the rule.</span>
+                    </span>
+                  </label>
+                  <label className="flex items-start gap-3 p-3 cursor-pointer hover:bg-surface-2">
+                    <input type="radio" name="scope" className="mt-0.5"
+                      checked={scope === 'pack'} onChange={() => setScope('pack')} />
+                    <span className="text-xs">
+                      <span className="font-medium block">For every profile on this spec pack</span>
+                      <span className="text-muted-foreground">The right fix when the rule arrived via a bad advisory — one suppression covers every profile using the pack version.</span>
+                    </span>
+                  </label>
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="sup-reason">Why is this suppression justified? <span className="text-danger">*</span></Label>
+                <textarea id="sup-reason" rows={2}
+                  value={reason} onChange={(e) => setReason(e.target.value)}
+                  placeholder="e.g. Rule's fields are inverted vs the HESA spec; raised with Registry."
+                  className="w-full rounded-md border border-border bg-background p-2 text-sm" />
+                <p className="text-helper">Recorded with your name and the time; shown on the sign-off card.</p>
+              </div>
+            </>
           )}
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Close</Button>
-          {misconfigured && i.ruleKey && (
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          {i.ruleKey && (
             <Button
-              disabled={mute.isPending}
-              onClick={doMute}
+              disabled={!reason.trim() || suppress.isPending}
+              onClick={doSuppress}
             >
-              {mute.isPending ? 'Muting…' : `Mute this rule (${analysis?.violations ?? '?'} errors gone)`}
+              {suppress.isPending ? 'Suppressing…'
+                : `Suppress ${scope === 'pack' ? 'at spec-pack level' : 'for this profile'}`}
             </Button>
           )}
         </DialogFooter>
@@ -1213,6 +1259,81 @@ function SuggestedFixes({ profileId, canApply }: { profileId: string; canApply: 
 
 // ---------------------------------------------------------------- F1 — sign-off + gap panel
 
+function SuppressionsPanel({
+  profileId, suppressions, canManage, signed,
+}: {
+  profileId: string
+  suppressions: RuleSuppression[]
+  canManage: boolean
+  signed: boolean
+}) {
+  const { toast } = useToast()
+  const remove = useRemoveSuppression(profileId)
+
+  return (
+    <div className="rounded-md border border-[hsl(var(--warning)/0.4)] bg-[hsl(var(--warning)/0.05)] p-3 space-y-2">
+      <div className="flex items-center gap-2 text-sm">
+        <ShieldAlert className="h-4 w-4 text-[hsl(var(--warning))]" />
+        <span className="font-medium">
+          {suppressions.length} rule{suppressions.length === 1 ? '' : 's'} suppressed
+        </span>
+        <span className="text-helper">
+          — visible to whoever attests to sign-off. Undo any suppression to re-enable the check.
+        </span>
+      </div>
+      <div className="card-elevated overflow-hidden bg-background">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Rule</TableHead>
+              <TableHead>Scope</TableHead>
+              <TableHead>Reason</TableHead>
+              <TableHead>By</TableHead>
+              <TableHead>When</TableHead>
+              {canManage && !signed && <TableHead className="text-right w-[80px]">Undo</TableHead>}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {suppressions.map((s) => (
+              <TableRow key={`${s.scope}-${s.ruleKey}`}>
+                <TableCell className="font-mono text-xs">{s.ruleKey}</TableCell>
+                <TableCell>
+                  <Badge variant={s.scope === 'pack' ? 'warning' : 'secondary'} className="text-[10px]">
+                    {s.scope === 'pack' ? 'spec pack' : 'this profile'}
+                  </Badge>
+                </TableCell>
+                <TableCell className="text-xs">
+                  {s.reason ?? <span className="italic text-muted-foreground">no reason recorded</span>}
+                </TableCell>
+                <TableCell className="text-xs text-muted-foreground">{s.byUserName ?? '—'}</TableCell>
+                <TableCell className="text-xs text-muted-foreground">
+                  {s.at ? new Date(s.at).toLocaleString() : '—'}
+                </TableCell>
+                {canManage && !signed && (
+                  <TableCell className="text-right">
+                    <Button
+                      size="sm" variant="ghost" className="h-7 text-xs"
+                      disabled={remove.isPending}
+                      onClick={async () => {
+                        try {
+                          await remove.mutateAsync({ ruleKey: s.ruleKey, scope: s.scope })
+                          toast({ title: `Suppression removed (${s.scope}) — re-validate to see the rule fire again.` })
+                        } catch (e) { err(toast, 'Could not remove suppression')(e) }
+                      }}
+                    >
+                      Undo
+                    </Button>
+                  </TableCell>
+                )}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    </div>
+  )
+}
+
 function SignOffCard({ profileId, canSignOff }: { profileId: string; canSignOff: boolean }) {
   const { toast } = useToast()
   const compile = useCompileProfile(profileId)
@@ -1253,6 +1374,10 @@ function SignOffCard({ profileId, canSignOff }: { profileId: string; canSignOff:
           </span>
         )}
       </div>
+
+      {r.suppressions && r.suppressions.length > 0 && (
+        <SuppressionsPanel profileId={profileId} suppressions={r.suppressions} canManage={canSignOff} signed={signed} />
+      )}
 
       {signed ? (
         <div className="flex items-center gap-2 text-sm p-3 rounded-md bg-surface-2 border border-border">

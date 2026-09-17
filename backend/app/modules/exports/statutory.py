@@ -509,8 +509,12 @@ class StatutoryEngine:
             # carries its own severity: an "error" rule is a hard fail that blocks sign-off (HESA
             # would reject the file); a "warning" rule is advisory and surfaces for review only.
             # Default is "error" — a rule the Registry bothered to state is normally enforced.
-            # A rule whose key is in profile.muted_rule_keys is skipped entirely (admin opted out).
-            muted = set(profile.muted_rule_keys or [])
+            # A rule whose key is suppressed (profile-scope) is skipped entirely. Pack-scope
+            # suppressions were already filtered out by resolve_rules; this only handles per-profile.
+            # Entries can be dict (new audit shape) or legacy string.
+            muted: set[str] = set()
+            for e in (profile.muted_rule_keys or []):
+                muted.add(e.get("ruleKey") if isinstance(e, dict) else e)
             for rule in spec_rules:
                 flds = rule.get("fields", [])
                 sev = rule.get("severity", "error")
@@ -542,8 +546,8 @@ class StatutoryEngine:
             rows.append(out_row)
 
         # ruleAnalysis lets the UI say "85% of records violate this rule — probably the rule is
-        # wrong (from an accepted advisory)" and offer a one-click mute, instead of hunting through
-        # 8000 error rows.
+        # wrong (from an accepted advisory)" and offer a one-click suppress, instead of hunting
+        # through 8000 error rows.
         rule_analysis: dict[str, dict] = {}
         for rule in spec_rules:
             key = _rule_key(rule)
@@ -558,8 +562,11 @@ class StatutoryEngine:
                 # Heuristic: if a rule fails on more than half the population, it's almost
                 # certainly misconfigured (a genuine rule catches outliers, not the majority).
                 "likelyMisconfigured": share > 0.5,
-                "muted": key in (profile.muted_rule_keys or []),
+                "suppressed": key in muted,   # profile-scope only; pack-scope rules never appear here
             }
+
+        # Full audit record for every suppression (profile + pack), for the sign-off card.
+        suppressions = await self._collect_suppressions(profile)
 
         return {
             "profile": self.profile_out(profile),
@@ -575,29 +582,132 @@ class StatutoryEngine:
                 # advisory and do not block.
                 "valid": not any(i["severity"] == "error" for i in issues),
                 "ruleAnalysis": list(rule_analysis.values()),
-                "mutedRuleKeys": list(profile.muted_rule_keys or []),
+                "suppressions": suppressions,
             },
         }
 
-    async def set_muted_rule(self, profile_id: uuid.UUID, *, rule_key: str, muted: bool) -> dict:
-        """Add or remove a rule key from this profile's mute list. Refused on a signed-off profile
-        (rule state is part of the return; touching it needs the sign-off to be released first)."""
+    async def suppress_rule(
+        self,
+        profile_id: uuid.UUID,
+        *,
+        rule_key: str,
+        reason: str,
+        scope: str,          # 'profile' | 'pack'
+        user_id: uuid.UUID,
+        user_name: str,
+    ) -> dict:
+        """Suppress a validation rule with a full audit record. Reason is REQUIRED — a suppression
+        without a stated reason is a silent workaround, not a decision the auditor can review.
+
+        Two scopes:
+          - ``profile``: inhibits the rule for THIS profile only. Original spec pack untouched, so
+            other profiles keep enforcing it. Refused on a signed-off profile.
+          - ``pack``:    inhibits the rule for EVERY profile that uses the pack's currently active
+            version. This is the right fix when the rule is broken for everyone (typical case: an
+            accepted advisory shipped an inverted rule). Requires an accepted spec version — if
+            only the baseline (code constant) is in play there's no DB row to edit, and we refuse
+            with a clear message.
+        """
+        from datetime import datetime, timezone
+
         from sqlalchemy.orm.attributes import flag_modified
+
+        from app.modules.exports.spec_resolver import active_version_for_code
+
+        reason = (reason or "").strip()
+        if not reason:
+            raise ValidationAppError("A reason is required — say why the rule is being suppressed.")
+        if scope not in {"profile", "pack"}:
+            raise ValidationAppError(f"Unknown suppression scope '{scope}'.")
 
         profile = await self.get_profile(profile_id)
         if profile.signed_off_at is not None:
             raise WorkflowError(f"Profile {profile.code} is signed off — unsign first.")
-        current = list(profile.muted_rule_keys or [])
-        if muted and rule_key not in current:
-            current.append(rule_key)
-        elif not muted and rule_key in current:
-            current.remove(rule_key)
-        profile.muted_rule_keys = current
-        # JSON column mutations aren't auto-detected — mark it dirty explicitly.
-        flag_modified(profile, "muted_rule_keys")
+        now = datetime.now(timezone.utc).isoformat()
+
+        if scope == "profile":
+            current = list(profile.muted_rule_keys or [])
+            # Skip duplicates by ruleKey so re-clicking Suppress doesn't stack records.
+            if not any(isinstance(e, dict) and e.get("ruleKey") == rule_key for e in current):
+                current.append({
+                    "ruleKey": rule_key, "reason": reason, "at": now,
+                    "byUserId": str(user_id), "byUserName": user_name,
+                })
+            profile.muted_rule_keys = current
+            flag_modified(profile, "muted_rule_keys")
+        else:  # scope == 'pack'
+            version = await active_version_for_code(self.session, profile.code)
+            if version is None:
+                raise WorkflowError(
+                    "Pack-level suppression needs an accepted spec version — this pack is still "
+                    "on the shipped baseline. Suppress per profile, or accept an advisory that "
+                    "removes the rule."
+                )
+            keys = list(version.disabled_rule_keys or [])
+            if rule_key not in keys:
+                keys.append(rule_key)
+            version.disabled_rule_keys = keys
+            flag_modified(version, "disabled_rule_keys")
+
         await self.session.commit()
         await self.session.refresh(profile)
-        return {"profileId": str(profile.id), "mutedRuleKeys": current}
+        return {"profileId": str(profile.id), "scope": scope, "ruleKey": rule_key,
+                "suppressions": await self._collect_suppressions(profile)}
+
+    async def remove_suppression(
+        self, profile_id: uuid.UUID, *, rule_key: str, scope: str,
+    ) -> dict:
+        """Undo a suppression at the given scope. Refused on a signed-off profile for scope=profile
+        (it would change what was attested to); pack-level undo is always allowed since a pack version
+        isn't itself signed off."""
+        from sqlalchemy.orm.attributes import flag_modified
+
+        from app.modules.exports.spec_resolver import active_version_for_code
+
+        profile = await self.get_profile(profile_id)
+
+        if scope == "profile":
+            if profile.signed_off_at is not None:
+                raise WorkflowError(f"Profile {profile.code} is signed off — unsign first.")
+            kept = [e for e in (profile.muted_rule_keys or [])
+                    if not (isinstance(e, dict) and e.get("ruleKey") == rule_key) and e != rule_key]
+            profile.muted_rule_keys = kept
+            flag_modified(profile, "muted_rule_keys")
+        elif scope == "pack":
+            version = await active_version_for_code(self.session, profile.code)
+            if version is not None:
+                kept = [k for k in (version.disabled_rule_keys or []) if k != rule_key]
+                version.disabled_rule_keys = kept
+                flag_modified(version, "disabled_rule_keys")
+        else:
+            raise ValidationAppError(f"Unknown suppression scope '{scope}'.")
+
+        await self.session.commit()
+        await self.session.refresh(profile)
+        return {"profileId": str(profile.id), "scope": scope, "ruleKey": rule_key,
+                "suppressions": await self._collect_suppressions(profile)}
+
+    async def _collect_suppressions(self, profile: ReportProfile) -> list[dict]:
+        """Merge profile-level and pack-level suppressions into one auditable list. Legacy string
+        entries (from before the audit column existed) come back as reason=None with a note."""
+        from app.modules.exports.spec_resolver import active_version_for_code
+
+        out: list[dict] = []
+        for e in profile.muted_rule_keys or []:
+            if isinstance(e, dict):
+                out.append({**e, "scope": "profile"})
+            else:
+                # Legacy string entry — synthesise a placeholder record for the audit UI.
+                out.append({"ruleKey": e, "reason": None, "at": None,
+                            "byUserId": None, "byUserName": "legacy (before audit)",
+                            "scope": "profile"})
+        version = await active_version_for_code(self.session, profile.code)
+        if version is not None:
+            for rk in (version.disabled_rule_keys or []):
+                out.append({"ruleKey": rk, "reason": "Suppressed at spec-pack level.",
+                            "at": None, "byUserId": None, "byUserName": None,
+                            "scope": "pack"})
+        return out
 
     # ---------------- ICR G5 — data-quality fix assistant (suggest → accept → apply) ----------------
 
@@ -841,6 +951,9 @@ class StatutoryEngine:
             "mappedFieldCount": len(mapped),
             "missing": missing,
             "signOffReady": (not missing) and bool(mappings),
+            # Suppressed rules are attested to at sign-off, so surface them wherever the sign-off
+            # UI is rendered — not only inside a validation result.
+            "suppressions": await self._collect_suppressions(profile),
         }
 
     async def update_field(

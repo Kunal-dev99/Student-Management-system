@@ -66,9 +66,10 @@ class ReportProfile(UUIDMixin, TimestampMixin, Base):
     signed_off_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     signed_off_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    # Cross-field / format rules the admin has muted for THIS profile only. Each entry is a stable
-    # rule key like "order:ENDDATE:COMDATE" (see statutory.py::_rule_key). Muting is per-profile,
-    # not per-pack — the pack stays intact so old returns can still be regenerated exactly.
+    # Cross-field / format rules the admin has SUPPRESSED for THIS profile only. Each entry is a
+    # dict {ruleKey, reason, at, byUserId, byUserName} — a full audit record so sign-off can
+    # attest to what was inhibited and why. Column name kept as `muted_rule_keys` for backward
+    # compatibility of the migration lineage; the API surface talks about "suppressions".
     muted_rule_keys: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
 
     __table_args__ = (Index("uq_report_profile_version", "code", "academic_year", "version", unique=True),)
@@ -147,6 +148,9 @@ class StatutorySpecVersion(UUIDMixin, TimestampMixin, Base):
     )
     fields: Mapped[list] = mapped_column(JSON, default=list)
     rules: Mapped[list] = mapped_column(JSON, default=list)
+    # Rule keys inhibited at the PACK level — fixes every profile using this pack version. Used
+    # when an accepted advisory shipped a bad rule and per-profile suppression would be repetitive.
+    disabled_rule_keys: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     source_advisory_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("statutory_advisory.id", ondelete="SET NULL"), nullable=True
     )

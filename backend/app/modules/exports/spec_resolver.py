@@ -82,9 +82,18 @@ async def resolve_fields(session: AsyncSession, code: str) -> list[dict]:
 
 
 async def resolve_rules(session: AsyncSession, code: str) -> list[dict]:
-    """Effective cross-field/format rules for a return code (validation)."""
+    """Effective cross-field/format rules for a return code (validation) — filters out any rule
+    keys the active pack version has disabled (pack-level suppression)."""
+    from app.modules.exports.statutory import _rule_key   # avoid import cycle
     row = await _active_for_code(session, code)
-    return list(row.rules or []) if row else list(rules_for(code))
+    all_rules = list(row.rules or []) if row else list(rules_for(code))
+    disabled = set(row.disabled_rule_keys or []) if row else set()
+    return [r for r in all_rules if _rule_key(r) not in disabled]
+
+
+async def active_version_for_code(session: AsyncSession, code: str) -> StatutorySpecVersion | None:
+    """Public accessor for the current active DB version — used by the pack-level suppression flow."""
+    return await _active_for_code(session, code)
 
 
 async def resolve_list_packs(session: AsyncSession) -> list[dict]:
