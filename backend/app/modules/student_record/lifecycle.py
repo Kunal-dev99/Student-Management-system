@@ -83,6 +83,7 @@ class LifecycleService:
             "previousIntensityPct": ev.previous_intensity_pct,
             "intensityPct": ev.intensity_pct,
             "reason": ev.reason,
+            "leaveCategory": ev.leave_category,
             "daysApplied": ev.days_applied,
             "decisionNote": ev.decision_note,
             "decidedAt": ev.decided_at.isoformat() if ev.decided_at else None,
@@ -105,6 +106,7 @@ class LifecycleService:
         new_mode: StudyMode | None = None,
         intensity_pct: int | None = None,
         new_programme_id: uuid.UUID | None = None,
+        leave_category: str | None = None,
         requested_by_user_id: uuid.UUID | None = None,
     ) -> StudentLifecycleEvent:
         """Record a request. Changes nothing about the student until it is approved."""
@@ -164,6 +166,11 @@ class LifecycleService:
             ),
             effective_date=(
                 start_date if event_type is LifecycleEventType.programme_change else None
+            ),
+            # leave_category is only meaningful for a suspension — silently drop it on other types
+            # so a stray field on the request doesn't mislabel a mode change as "medical".
+            leave_category=(
+                leave_category if event_type is LifecycleEventType.suspension else None
             ),
             reason=reason, requested_by_user_id=requested_by_user_id,
         )

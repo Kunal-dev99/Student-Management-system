@@ -143,6 +143,11 @@ class StudentLifecycleEvent(UUIDMixin, TimestampMixin, Base):
     )
     effective_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     reason: Mapped[str] = mapped_column(Text)
+    # Suspension leave category — medical / personal / academic / other. NULL for non-suspensions
+    # and for suspensions where the category wasn't captured. Kept as a plain string (not an enum)
+    # so an institution can extend the vocabulary in configuration rather than a code change; the
+    # schema layer constrains the values that pass through the API today.
+    leave_category: Mapped[str | None] = mapped_column(String(32), nullable=True)
     # Exactly how many days this event added to the expected end date (audit of the arithmetic).
     days_applied: Mapped[int | None] = mapped_column(Integer, nullable=True)
     requested_by_user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)

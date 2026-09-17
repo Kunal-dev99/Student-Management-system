@@ -26,6 +26,8 @@ import { useProgrammesAdmin, type ProgrammeDetail } from '@/features/programmes/
 import {
   useApproveLifecycleEvent, useIntensityImpact, useLifecycleEvents, useRecordReturn,
   useRejectLifecycleEvent, useRequestLifecycleEvent, useStudentIntensity,
+  LEAVE_CATEGORIES,
+  type LeaveCategory,
   type LifecycleEvent, type LifecycleEventStatus, type LifecycleEventType, type StudyMode,
 } from './api'
 
@@ -132,6 +134,7 @@ function RequestDialog({ studentId, student }: { studentId: string; student?: St
   const [newMode, setNewMode] = useState<StudyMode>('part_time')
   const [intensityPct, setIntensityPct] = useState('')
   const [newProgrammeId, setNewProgrammeId] = useState('')
+  const [leaveCategory, setLeaveCategory] = useState<LeaveCategory | ''>('')
   const [reason, setReason] = useState('')
 
   // Programme picker for the transfer variant. Only fetched once the dialog opens so we
@@ -145,7 +148,7 @@ function RequestDialog({ studentId, student }: { studentId: string; student?: St
   const reset = () => {
     setEventType('suspension'); setStartDate(''); setEndDate('')
     setExtensionDays(''); setNewMode('part_time'); setIntensityPct('')
-    setNewProgrammeId(''); setReason('')
+    setNewProgrammeId(''); setLeaveCategory(''); setReason('')
   }
 
   // Default the programme-change effective date to today the first time the user picks the type.
@@ -174,6 +177,7 @@ function RequestDialog({ studentId, student }: { studentId: string; student?: St
         newMode: eventType === 'mode_change' ? newMode : undefined,
         intensityPct: eventType === 'intensity_change' ? Number(intensityPct) : undefined,
         newProgrammeId: eventType === 'programme_change' ? newProgrammeId : undefined,
+        leaveCategory: eventType === 'suspension' && leaveCategory ? leaveCategory : undefined,
       })
       toast({
         title: 'Request submitted',
@@ -206,16 +210,37 @@ function RequestDialog({ studentId, student }: { studentId: string; student?: St
           </div>
 
           {eventType === 'suspension' && (
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="lc-start">Start date</Label>
-                <Input id="lc-start" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+            <>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="lc-start">Start date</Label>
+                  <Input id="lc-start" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="lc-end">Planned end date</Label>
+                  <Input id="lc-end" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+                </div>
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="lc-end">Planned end date</Label>
-                <Input id="lc-end" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+                <Label>Leave category (optional)</Label>
+                <Select value={leaveCategory ?? '__none'}
+                  onValueChange={(v) => setLeaveCategory(v === '__none' ? '' : v as LeaveCategory)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Not categorised" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none">Not categorised</SelectItem>
+                    {LEAVE_CATEGORIES.map((c) => (
+                      <SelectItem key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-helper">
+                  Categorises the leave for statutory / wellbeing reporting. Optional at request
+                  time — can be filled in later.
+                </p>
               </div>
-            </div>
+            </>
           )}
 
           {eventType === 'extension' && (
@@ -525,6 +550,11 @@ export function LifecyclePanel({ studentId, student }: { studentId: string; stud
                       <span className="text-muted-foreground font-normal">
                         {' '}({progCode(e.previousProgrammeId)} → {progCode(e.newProgrammeId)})
                       </span>
+                    )}
+                    {e.eventType === 'suspension' && e.leaveCategory && (
+                      <Badge variant="secondary" className="ml-1.5 text-[10px] py-0 px-1.5 capitalize">
+                        {e.leaveCategory}
+                      </Badge>
                     )}
                   </TableCell>
                   <TableCell className="num whitespace-nowrap text-sm">{eventDates(e)}</TableCell>

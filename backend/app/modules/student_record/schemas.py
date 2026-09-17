@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 from pydantic.alias_generators import to_camel
 
 from app.modules.funding.schemas import ArrangementCreate
@@ -49,6 +49,9 @@ class StudentOut(_Camel):
     from_application: bool | None = None
 
 
+LEAVE_CATEGORIES = {"medical", "personal", "academic", "other"}
+
+
 class LifecycleEventRequest(_Camel):
     event_type: LifecycleEventType
     reason: str
@@ -58,6 +61,21 @@ class LifecycleEventRequest(_Camel):
     new_mode: StudyMode | None = None       # required for a mode change
     intensity_pct: int | None = None        # required for an intensity change (1-100)
     new_programme_id: uuid.UUID | None = None  # required for a programme change; start_date is the effective date
+    # Suspension only — medical / personal / academic / other. Optional (an admin can capture the
+    # category on request or leave it to be filled in later). Ignored for non-suspension events.
+    leave_category: str | None = None
+
+    @field_validator("leave_category")
+    @classmethod
+    def _validate_leave_category(cls, v: str | None) -> str | None:
+        if v is None or v == "":
+            return None
+        v = v.strip().lower()
+        if v not in LEAVE_CATEGORIES:
+            raise ValueError(
+                f"leave_category must be one of {sorted(LEAVE_CATEGORIES)}"
+            )
+        return v
 
 
 class LifecycleDecision(_Camel):
@@ -85,6 +103,7 @@ class LifecycleEventOut(_Camel):
     new_programme_id: str | None = None
     effective_date: str | None = None
     reason: str
+    leave_category: str | None = None
     days_applied: int | None = None
     decision_note: str | None = None
     decided_at: str | None = None

@@ -13,6 +13,9 @@ import { api } from '@/shared/api/client'
 export type LifecycleEventType =
   | 'suspension' | 'extension' | 'mode_change' | 'intensity_change' | 'programme_change'
 export type LifecycleEventStatus = 'requested' | 'approved' | 'rejected' | 'cancelled'
+
+export type LeaveCategory = 'medical' | 'personal' | 'academic' | 'other'
+export const LEAVE_CATEGORIES: readonly LeaveCategory[] = ['medical', 'personal', 'academic', 'other']
 export type StudyMode = 'full_time' | 'part_time'
 
 export interface LifecycleEvent {
@@ -34,6 +37,8 @@ export interface LifecycleEvent {
   /** Effective date of a programme_change (equal to startDate on the wire, exposed separately for clarity). */
   effectiveDate: string | null
   reason: string | null
+  /** Suspension only — medical / personal / academic / other. Null on non-suspensions. */
+  leaveCategory: LeaveCategory | null
   daysApplied: number | null
   decisionNote: string | null
   decidedAt: string | null
@@ -120,6 +125,8 @@ export interface LifecycleEventRequest {
   intensityPct?: number
   /** Required for a programme_change — startDate is the effective date. */
   newProgrammeId?: string
+  /** Suspension only — medical / personal / academic / other. Silently dropped on other types. */
+  leaveCategory?: LeaveCategory
 }
 
 export const useLifecycleEvents = (studentId: string) =>
