@@ -224,14 +224,30 @@ export interface FieldInput {
 }
 
 /** 409 when the target field is already mapped; 422 for an unknown transform. */
+/** Invalidate every query that can go stale after a profile-affecting mutation. The validate
+ *  query is REMOVED (not just invalidated) — it has `enabled: false` so invalidateQueries would
+ *  leave the stale data on screen (the tab pill would keep claiming the old error count). This
+ *  centralises what "a profile changed" means so no mutation forgets a piece. */
+function invalidateProfileEverything(qc: ReturnType<typeof useQueryClient>, profileId: string | null) {
+  if (!profileId) return
+  qc.invalidateQueries({ queryKey: ['report-profile', profileId] })
+  qc.invalidateQueries({ queryKey: ['report-profile', profileId, 'compile'] })
+  qc.invalidateQueries({ queryKey: ['report-profiles'] })
+  // Validate is enabled:false + gcTime:0. Drop the cache entirely so the Validate tab pill
+  // stops advertising a count that pre-dates this mutation (was: user maps a field, tab still
+  // says "2,026 errors" until they click Validate again).
+  qc.removeQueries({ queryKey: ['report-profile', profileId, 'validate'] })
+  // Same reasoning for the on-demand fix-suggestions and default-suggestions queries: their
+  // cached samples are computed from cohort values before the change and are no longer honest.
+  qc.removeQueries({ queryKey: ['report-profile', profileId, 'fixes'] })
+  qc.removeQueries({ queryKey: ['report-profile', profileId, 'suggest-defaults'] })
+}
+
 export function useAddField(profileId: string | null) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (body: FieldInput) => api.post<FieldMapping>(`/report-profiles/${profileId}/fields`, body),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['report-profile', profileId] })
-      qc.invalidateQueries({ queryKey: ['report-profiles'] })
-    },
+    onSuccess: () => invalidateProfileEverything(qc, profileId),
   })
 }
 
@@ -306,10 +322,7 @@ export function useUpdateField(profileId: string | null) {
   return useMutation({
     mutationFn: ({ id, body }: { id: string; body: Partial<FieldInput> }) =>
       api.patch<FieldMapping>(`/report-profiles/${profileId}/fields/${id}`, body),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['report-profile', profileId] })
-      qc.invalidateQueries({ queryKey: ['report-profile', profileId, 'compile'] })
-    },
+    onSuccess: () => invalidateProfileEverything(qc, profileId),
   })
 }
 
@@ -317,11 +330,7 @@ export function useDeleteField(profileId: string | null) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (id: string) => api.del<void>(`/report-profiles/${profileId}/fields/${id}`),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['report-profile', profileId] })
-      qc.invalidateQueries({ queryKey: ['report-profile', profileId, 'compile'] })
-      qc.invalidateQueries({ queryKey: ['report-profiles'] })
-    },
+    onSuccess: () => invalidateProfileEverything(qc, profileId),
   })
 }
 
@@ -330,11 +339,7 @@ export function useSignOffProfile(profileId: string | null) {
   return useMutation({
     mutationFn: (notes: string | undefined) =>
       api.post<ReportProfile>(`/report-profiles/${profileId}/sign-off`, { notes }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['report-profile', profileId] })
-      qc.invalidateQueries({ queryKey: ['report-profile', profileId, 'compile'] })
-      qc.invalidateQueries({ queryKey: ['report-profiles'] })
-    },
+    onSuccess: () => invalidateProfileEverything(qc, profileId),
   })
 }
 
@@ -367,9 +372,7 @@ export function useApplyFix(profileId: string | null) {
   return useMutation({
     mutationFn: (body: { field: string; transform: string }) =>
       api.post<{ field: string; transform: string; applied: boolean }>(`/report-profiles/${profileId}/apply-fix`, body),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['report-profile', profileId] })
-    },
+    onSuccess: () => invalidateProfileEverything(qc, profileId),
   })
 }
 
@@ -413,9 +416,7 @@ export function useApplyDefaults(profileId: string | null) {
   return useMutation({
     mutationFn: (picks: { field: string; value: string }[]) =>
       api.post<{ applied: string[]; count: number }>(`/report-profiles/${profileId}/apply-defaults`, { picks }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['report-profile', profileId] })
-    },
+    onSuccess: () => invalidateProfileEverything(qc, profileId),
   })
 }
 
@@ -425,9 +426,7 @@ export function useSuppressRule(profileId: string | null) {
   return useMutation({
     mutationFn: (body: { ruleKey: string; reason: string; scope: 'profile' | 'pack' }) =>
       api.post<{ suppressions: RuleSuppression[] }>(`/report-profiles/${profileId}/suppress-rule`, body),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['report-profile', profileId] })
-    },
+    onSuccess: () => invalidateProfileEverything(qc, profileId),
   })
 }
 
@@ -437,9 +436,7 @@ export function useRemoveSuppression(profileId: string | null) {
   return useMutation({
     mutationFn: (body: { ruleKey: string; scope: 'profile' | 'pack' }) =>
       api.post<{ suppressions: RuleSuppression[] }>(`/report-profiles/${profileId}/remove-suppression`, body),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['report-profile', profileId] })
-    },
+    onSuccess: () => invalidateProfileEverything(qc, profileId),
   })
 }
 
@@ -448,9 +445,7 @@ export function useUnsignProfile(profileId: string | null) {
   return useMutation({
     mutationFn: () => api.post<ReportProfile>(`/report-profiles/${profileId}/unsign`, {}),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['report-profile', profileId] })
-      qc.invalidateQueries({ queryKey: ['report-profile', profileId, 'compile'] })
-      qc.invalidateQueries({ queryKey: ['report-profiles'] })
+      invalidateProfileEverything(qc, profileId)
     },
   })
 }
@@ -533,7 +528,14 @@ export function useIngestAdvisoryUpload() {
   })
 }
 
-/** Accept an advisory — makes its proposed pack the active spec version (reports.signoff). */
+/** Accept an advisory — makes its proposed pack the active spec version (reports.signoff).
+ *
+ *  Accepting rewrites the pack's fields + rules, so EVERY profile using that pack sees a new
+ *  mandatory-field list, coding frames and cross-field rules. We can't cheaply figure out which
+ *  profiles are affected on the client, so invalidate every profile-scoped query — one prefix
+ *  match covers profile / compile / validate / suggest-defaults / fix-suggestions across all
+ *  profiles. Cheap because these queries are only re-fetched on demand for the currently
+ *  visible profile. */
 export function useAcceptAdvisory() {
   const qc = useQueryClient()
   return useMutation({
@@ -543,6 +545,14 @@ export function useAcceptAdvisory() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['report-advisories'] })
       qc.invalidateQueries({ queryKey: ['report-profile-specs'] })
+      qc.invalidateQueries({ queryKey: ['report-profiles'] })
+      qc.invalidateQueries({ queryKey: ['report-profile'] })   // prefix — every profile
+      // Drop enabled:false caches too so stale counts don't cling to any profile.
+      qc.removeQueries({ predicate: (q) => {
+        const k = q.queryKey
+        return Array.isArray(k) && k[0] === 'report-profile'
+          && (k[2] === 'validate' || k[2] === 'fixes' || k[2] === 'suggest-defaults')
+      }})
     },
   })
 }

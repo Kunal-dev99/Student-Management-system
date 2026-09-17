@@ -1979,6 +1979,16 @@ export default function StatutoryPage() {
   const [generated, setGenerated] = useState<GenerateResult | null>(null)
   const [tab, setTab] = useState<StatutoryTab>('fields')
 
+  // Bug fix (2026-09-17): the "Fix all" chip and per-row "Set default →" in the validation report
+  // used to fire setHighlightedField, but the FieldDefaultsSection subscribes to that signal —
+  // and it now lives on a DIFFERENT tab. So the highlight fired against nothing. Watch the
+  // signal at the page level and switch to Defaults when it fires; the section then mounts and
+  // its own hook picks up the highlight, scrolls, and focuses in the same render.
+  const highlight = useHighlightedField()
+  useEffect(() => {
+    if (highlight) setTab('defaults')
+  }, [highlight])
+
   // Pick the first profile once the list arrives so the screen is never empty for no reason.
   useEffect(() => {
     if (!selectedId && profiles.data && profiles.data.length > 0) setSelectedId(profiles.data[0].id)
