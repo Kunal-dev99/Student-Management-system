@@ -207,11 +207,11 @@ async def reset_profile(session) -> str:
 
 
 async def cleanse_spec_versions(session) -> int:
-    """Some ingested advisory versions carry an "order" rule with the fields reversed
-    (["ENDDATE","COMDATE"] instead of ["COMDATE","ENDDATE"]). Because resolve_rules picks
-    the LATEST year's pack for a return code, that bogus rule fires against every profile
-    of the same code — every valid record (ENDDATE > COMDATE) is misreported as an
-    ordering violation. Drop the reversed duplicate wherever it appears."""
+    """Historical: strips a reversed-order rule (["ENDDATE","COMDATE"]) that had leaked
+    into a newer year's pack version. The underlying cross-year leak is now closed at the
+    source — resolve_fields/resolve_rules scope to the profile's own academic year — so
+    this scrub is only useful for tidying already-polluted DBs. Safe to keep as a no-op
+    on clean data."""
     rows = (await session.execute(select(StatutorySpecVersion))).scalars().all()
     fixed = 0
     for row in rows:

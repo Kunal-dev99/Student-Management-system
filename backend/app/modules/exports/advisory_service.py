@@ -57,8 +57,13 @@ class AdvisoryService:
         source: str = "paste",
         created_by: uuid.UUID | None = None,
     ) -> StatutoryAdvisory:
-        base_fields = await resolve_fields(self.session, pack_code)
-        base_rules = await resolve_rules(self.session, pack_code)
+        # Base the advisory diff on the *same year's* accepted pack if there is one, so an
+        # advisory for 2026/27 is compared to the 2026/27 pack (not whichever year happens to be
+        # latest). If academic_year isn't supplied yet, resolve falls back to latest-wins, which
+        # matches the historical behaviour and is fine — the parser sets `parsed.academic_year`
+        # from the text and later checks below re-validate against the resolved year.
+        base_fields = await resolve_fields(self.session, pack_code, academic_year)
+        base_rules = await resolve_rules(self.session, pack_code, academic_year)
         if not base_fields:
             raise ValidationAppError(f"No spec pack is registered for '{pack_code}'")
 

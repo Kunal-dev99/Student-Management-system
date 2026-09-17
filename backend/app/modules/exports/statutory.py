@@ -252,7 +252,7 @@ class StatutoryEngine:
         # ICR G5 — surface where each field is captured on the record ("keyed_at"), from the spec,
         # so Registry can see the record location behind every mapping, not just the source path.
         from app.modules.exports.spec_resolver import resolve_fields
-        keyed = {f["field"]: f.get("keyed_at") for f in await resolve_fields(self.session, p.code)}
+        keyed = {f["field"]: f.get("keyed_at") for f in await resolve_fields(self.session, p.code, p.academic_year)}
         fields = []
         for m in await self._mappings(p.id):
             row = self.mapping_out(m)
@@ -478,7 +478,7 @@ class StatutoryEngine:
         import re
 
         from app.modules.exports.spec_resolver import resolve_rules
-        spec_rules = await resolve_rules(self.session, profile.code)
+        spec_rules = await resolve_rules(self.session, profile.code, profile.academic_year)
 
         for record in records:
             out_row, ref = [], record["student"]["ref"]
@@ -636,7 +636,7 @@ class StatutoryEngine:
             profile.muted_rule_keys = current
             flag_modified(profile, "muted_rule_keys")
         else:  # scope == 'pack'
-            version = await active_version_for_code(self.session, profile.code)
+            version = await active_version_for_code(self.session, profile.code, profile.academic_year)
             if version is None:
                 raise WorkflowError(
                     "Pack-level suppression needs an accepted spec version — this pack is still "
@@ -674,7 +674,7 @@ class StatutoryEngine:
             profile.muted_rule_keys = kept
             flag_modified(profile, "muted_rule_keys")
         elif scope == "pack":
-            version = await active_version_for_code(self.session, profile.code)
+            version = await active_version_for_code(self.session, profile.code, profile.academic_year)
             if version is not None:
                 kept = [k for k in (version.disabled_rule_keys or []) if k != rule_key]
                 version.disabled_rule_keys = kept
@@ -701,7 +701,7 @@ class StatutoryEngine:
                 out.append({"ruleKey": e, "reason": None, "at": None,
                             "byUserId": None, "byUserName": "legacy (before audit)",
                             "scope": "profile"})
-        version = await active_version_for_code(self.session, profile.code)
+        version = await active_version_for_code(self.session, profile.code, profile.academic_year)
         if version is not None:
             for rk in (version.disabled_rule_keys or []):
                 out.append({"ruleKey": rk, "reason": "Suppressed at spec-pack level.",
@@ -802,7 +802,7 @@ class StatutoryEngine:
         profile = await self.get_profile(profile_id)
         mappings = await self._mappings(profile_id)
         records = await self.build_records()
-        keyed = {f["field"]: f.get("keyed_at") for f in await resolve_fields(self.session, profile.code)}
+        keyed = {f["field"]: f.get("keyed_at") for f in await resolve_fields(self.session, profile.code, profile.academic_year)}
 
         NOT_KNOWN_HINTS = ["98", "99", "ZZ", "00", "unknown", "not known", "prefer not", "other"]
         DATE_TRANSFORMS = {"date_compact", "date_iso", "year"}
@@ -938,7 +938,7 @@ class StatutoryEngine:
         profile = await self.get_profile(profile_id)
         mappings = await self._mappings(profile_id)
         mapped = {m.target_field for m in mappings}
-        spec = await resolve_fields(self.session, profile.code)
+        spec = await resolve_fields(self.session, profile.code, profile.academic_year)
         # Carry the spec's recommended source/transform/default through so the "Map" affordance
         # on the sign-off tab can offer a one-click map for fields the spec pack already knows how
         # to source (avoids the modal-and-a-form-for-every-row UX complaint from ICR testing).

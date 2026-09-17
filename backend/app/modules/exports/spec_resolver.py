@@ -30,21 +30,37 @@ def _pack_key(code: str, year: str) -> str:
     return f"{code}:{year}"
 
 
-async def _active_for_code(session: AsyncSession, code: str) -> StatutorySpecVersion | None:
-    """The most current accepted version for a return code (latest year, then latest version)."""
-    rows = (
-        await session.execute(
-            select(StatutorySpecVersion)
-            .where(
-                StatutorySpecVersion.pack_code == code,
-                StatutorySpecVersion.status == SpecVersionStatus.active,
-            )
-            .order_by(
-                StatutorySpecVersion.academic_year.desc(),
-                StatutorySpecVersion.version.desc(),
-            )
+async def _active_for_code(
+    session: AsyncSession, code: str, academic_year: str | None = None,
+) -> StatutorySpecVersion | None:
+    """The accepted spec version to use for a return code.
+
+    With ``academic_year`` (the profile's own year), the *exact-year* active row is
+    preferred — an advisory accepted against 2027/28 must never leak into a 2026/27
+    profile's validation. Falls back to the latest year only when no row for the given
+    year exists (baseline behaviour for a profile whose year has no ingested advisory).
+    Callers without a year (bulk pickers, legacy paths) still get "latest wins".
+    """
+    q = (
+        select(StatutorySpecVersion)
+        .where(
+            StatutorySpecVersion.pack_code == code,
+            StatutorySpecVersion.status == SpecVersionStatus.active,
         )
-    ).scalars().all()
+        .order_by(
+            StatutorySpecVersion.academic_year.desc(),
+            StatutorySpecVersion.version.desc(),
+        )
+    )
+    if academic_year is not None:
+        exact = (
+            await session.execute(
+                q.where(StatutorySpecVersion.academic_year == academic_year)
+            )
+        ).scalars().first()
+        if exact is not None:
+            return exact
+    rows = (await session.execute(q)).scalars().all()
     return rows[0] if rows else None
 
 
@@ -75,25 +91,34 @@ async def resolve_pack(session: AsyncSession, key: str) -> SpecPack | None:
     }
 
 
-async def resolve_fields(session: AsyncSession, code: str) -> list[dict]:
-    """Effective mandatory-field list for a return code (compile gate)."""
-    row = await _active_for_code(session, code)
+async def resolve_fields(
+    session: AsyncSession, code: str, academic_year: str | None = None,
+) -> list[dict]:
+    """Effective mandatory-field list for a return code (compile gate). Pass the profile's own
+    ``academic_year`` so a same-year accepted advisory is used and cross-year advisories don't
+    leak in."""
+    row = await _active_for_code(session, code, academic_year)
     return list(row.fields or []) if row else list(spec_for(code))
 
 
-async def resolve_rules(session: AsyncSession, code: str) -> list[dict]:
+async def resolve_rules(
+    session: AsyncSession, code: str, academic_year: str | None = None,
+) -> list[dict]:
     """Effective cross-field/format rules for a return code (validation) — filters out any rule
-    keys the active pack version has disabled (pack-level suppression)."""
+    keys the active pack version has disabled (pack-level suppression). ``academic_year`` scopes
+    resolution to the profile's own year (see ``_active_for_code``)."""
     from app.modules.exports.statutory import _rule_key   # avoid import cycle
-    row = await _active_for_code(session, code)
+    row = await _active_for_code(session, code, academic_year)
     all_rules = list(row.rules or []) if row else list(rules_for(code))
     disabled = set(row.disabled_rule_keys or []) if row else set()
     return [r for r in all_rules if _rule_key(r) not in disabled]
 
 
-async def active_version_for_code(session: AsyncSession, code: str) -> StatutorySpecVersion | None:
+async def active_version_for_code(
+    session: AsyncSession, code: str, academic_year: str | None = None,
+) -> StatutorySpecVersion | None:
     """Public accessor for the current active DB version — used by the pack-level suppression flow."""
-    return await _active_for_code(session, code)
+    return await _active_for_code(session, code, academic_year)
 
 
 async def resolve_list_packs(session: AsyncSession) -> list[dict]:
