@@ -256,47 +256,122 @@ function SourceExpressionPicker({
   )
 }
 
-/** Transform dropdown — a real picker, not a list of code names. Groups by category, shows
- *  the label prominently with the code name and description as small subtitles. */
-function TransformPicker({
+/** Transform CHAIN composer — chips left-to-right = execution order (matches the pipe).
+ *  The composed value is stored as a `|`-joined string in the same `transform` field a single
+ *  transform used to live in; empty chain → '' (no transform, matches the prior no-transform
+ *  state). No drag-reorder in this pass — remove + re-add to reorder. */
+function TransformChainComposer({
   value, onChange, id,
 }: { value: string; onChange: (v: string) => void; id?: string }) {
   const transforms = useTransforms()
   const cats = transforms.data?.categories
+  // The chain is the source of truth for the UI; we keep the string field in sync via onChange.
+  const chain = (value ?? '').split('|').map((s) => s.trim()).filter(Boolean)
+  const [pickerOpen, setPickerOpen] = useState(false)
+
+  // Flat lookup so a chip can render the human label even when we only stored the code name.
+  const entryByName = useMemo(() => {
+    const m = new Map<string, { name: string; label: string; category: string; description: string }>()
+    for (const c of cats ?? []) for (const t of c.transforms) m.set(t.name, t)
+    return m
+  }, [cats])
+
+  const emit = (next: string[]) => onChange(next.join('|'))
+  const append = (name: string) => { emit([...chain, name]); setPickerOpen(false) }
+  const removeAt = (idx: number) => emit(chain.filter((_, i) => i !== idx))
+
+  // Backend still loading — fall back to plain free-text so the user isn't blocked.
   if (!cats) {
     return (
       <Input id={id} className="font-mono text-xs" value={value}
         onChange={(e) => onChange(e.target.value)} placeholder="No transform" />
     )
   }
+
   return (
-    <Select value={value || '__none'} onValueChange={(v) => onChange(v === '__none' ? '' : v)}>
-      <SelectTrigger id={id}>
-        <SelectValue placeholder="No transform" />
-      </SelectTrigger>
-      <SelectContent className="max-h-96">
-        <SelectItem value="__none">
-          <span className="italic text-muted-foreground">No transform</span>
-        </SelectItem>
-        {cats.map((c) => (
-          <SelectGroup key={c.category}>
-            <SelectLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">
-              {c.category}
-            </SelectLabel>
-            {c.transforms.map((t) => (
-              <SelectItem key={t.name} value={t.name}>
-                <div className="flex flex-col">
-                  <span className="text-sm">{t.label}</span>
-                  <span className="text-[10px] text-muted-foreground">
-                    <span className="font-mono">{t.name}</span> — {t.description}
-                  </span>
-                </div>
-              </SelectItem>
-            ))}
-          </SelectGroup>
-        ))}
-      </SelectContent>
-    </Select>
+    <div id={id} className="space-y-1.5">
+      {chain.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {chain.map((name, idx) => {
+            const entry = entryByName.get(name)
+            return (
+              <span
+                key={`${name}-${idx}`}
+                className="text-xs rounded-full border border-primary/40 bg-primary/10 inline-flex items-stretch overflow-hidden"
+              >
+                <span className="px-2.5 py-1 inline-flex items-center gap-1.5">
+                  <span className="text-[10px] text-muted-foreground tabular-nums">{idx + 1}.</span>
+                  <span className="font-medium">{entry?.label ?? name}</span>
+                  <span className="font-mono text-[10px] text-muted-foreground">{name}</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => removeAt(idx)}
+                  title={`Remove ${entry?.label ?? name}`}
+                  className="px-2 border-l border-primary/40 text-muted-foreground hover:bg-primary/10 hover:text-foreground"
+                  aria-label={`Remove ${entry?.label ?? name}`}
+                >
+                  ×
+                </button>
+              </span>
+            )
+          })}
+        </div>
+      )}
+
+      {pickerOpen ? (
+        <Select
+          open
+          value=""
+          onValueChange={(v) => { if (v) append(v) }}
+          onOpenChange={(o) => { if (!o) setPickerOpen(false) }}
+        >
+          <SelectTrigger className="h-8">
+            <SelectValue placeholder="Pick a transform to add…" />
+          </SelectTrigger>
+          <SelectContent className="max-h-96">
+            {cats.map((c) => {
+              const remaining = c.transforms.filter((t) => !chain.includes(t.name))
+              if (remaining.length === 0) return null
+              return (
+                <SelectGroup key={c.category}>
+                  <SelectLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                    {c.category}
+                  </SelectLabel>
+                  {remaining.map((t) => (
+                    <SelectItem key={t.name} value={t.name}>
+                      <div className="flex flex-col">
+                        <span className="text-sm">{t.label}</span>
+                        <span className="text-[10px] text-muted-foreground">
+                          <span className="font-mono">{t.name}</span> — {t.description}
+                        </span>
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              )
+            })}
+          </SelectContent>
+        </Select>
+      ) : (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-8"
+          onClick={() => setPickerOpen(true)}
+        >
+          <Plus className="h-3.5 w-3.5 mr-1" />
+          {chain.length === 0 ? 'Add transform' : 'Add step'}
+        </Button>
+      )}
+
+      {chain.length > 0 && (
+        <p className="text-[11px] text-muted-foreground">
+          Pipeline: <span className="font-mono">{chain.join(' | ')}</span>
+        </p>
+      )}
+    </div>
   )
 }
 
@@ -323,7 +398,6 @@ function AddFieldDialog({
 }) {
   const { toast } = useToast()
   const add = useAddField(profileId)
-  const transforms = useTransforms()
   const [openUncontrolled, setOpenUncontrolled] = useState(false)
   const open = openProp ?? openUncontrolled
   const setOpen = (o: boolean) => { onOpenChange ? onOpenChange(o) : setOpenUncontrolled(o) }
@@ -394,7 +468,10 @@ function AddFieldDialog({
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label>Transform (optional)</Label>
-              <TransformPicker value={transform} onChange={setTransform} />
+              <TransformChainComposer value={transform} onChange={setTransform} />
+              <p className="text-helper">
+                Steps run left-to-right. Chain e.g. <span className="font-mono text-xs">strip_special | upper</span>.
+              </p>
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="f-default">Default value (optional)</Label>
@@ -501,17 +578,8 @@ function EditFieldDialog({
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label htmlFor="e-transform">Transform (optional)</Label>
-              {/* If the value carries a `|`, it's a chain and needs the free-text input; otherwise
-                 the human-labelled picker is much friendlier. */}
-              {transform.includes('|') ? (
-                <>
-                  <Input id="e-transform" className="font-mono text-xs" value={transform}
-                    onChange={(e) => setTransform(e.target.value)} placeholder="e.g. upper|strip_name" />
-                  <p className="text-helper">Chain — <span className="font-mono text-xs">|</span>-separated transforms applied in order.</p>
-                </>
-              ) : (
-                <TransformPicker id="e-transform" value={transform} onChange={setTransform} />
-              )}
+              <TransformChainComposer id="e-transform" value={transform} onChange={setTransform} />
+              <p className="text-helper">Steps run left-to-right. Remove and re-add to reorder.</p>
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="e-default">Default value (optional)</Label>
