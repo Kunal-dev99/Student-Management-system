@@ -158,33 +158,50 @@ async def ensure_research_projects(session) -> int:
     return created
 
 
-async def reset_profile(session) -> str:
-    """Delete the existing HESA_STUDENT/2026/27 profile (fields cascade) and rebuild it
-    from the spec pack, giving each field a defensible default where the spec doesn't
-    yet have a source. That means a fresh Validate should have zero errors."""
-    engine = StatutoryEngine(session)
+# Which per-field defaults are correct-by-model vs stand-in-for-missing-data. The demo
+# validates green with either, but honesty matters: a "not known" code isn't a real answer
+# for a real return — the operator running fixup needs to see which fields the return would
+# ship as placeholders. The two categories are:
+#
+#   CORRECT_BY_MODEL  — the value is a fact about the ICR PGR population, not a placeholder.
+#                       E.g. STUDYLEVEL is D00 because every ICR student in the return is a
+#                       doctoral candidate; SUPERVISED is Y because every PGR has a supervisor.
+#
+#   NOT_CAPTURED_YET  — the domain model doesn't collect this field. The value is the HESA
+#                       "not known / refused / unspecified" code — legally shippable, but the
+#                       operator should know real capture is still outstanding.
+CORRECT_BY_MODEL: dict[str, str] = {
+    "STUDYLEVEL": "D00",   # every student in this return is a doctoral candidate
+    "SUPERVISED": "Y",     # every PGR is supervised
+}
+NOT_CAPTURED_YET: dict[str, str] = {
+    "SEXID":     "13",     # "not specified"
+    "ETHNIC":    "98",     # "information refused"
+    "DISABLE":   "00",     # "no known disability"
+    "COURSETYP": "A",      # placeholder — full-time academic year
+    "FEESTAT":   "9",      # "not known"
+    "MSTUFEE":   "99",     # "not classified elsewhere"
+    "FUNDCODE":  "9",      # "other"
+    "DOMICILE":  "GB",     # placeholder — real domicile capture pending
+    "TERMTIME":  "9",      # "not known"
+}
 
-    # Codes we can't yet source from the domain model — a spec fallback keeps the return
-    # signable. Each value is either the sole allowed code, the "not known" code, or the
-    # HESA-blessed placeholder.
-    field_defaults = {
-        "SEXID": "13",       # "not specified"
-        "ETHNIC": "98",      # "information refused"
-        "DISABLE": "00",     # "no known disability"
-        "COURSETYP": "A",
-        "STUDYLEVEL": "D00", # doctorate — every PGR
-        "FEESTAT": "9",
-        "MSTUFEE": "99",
-        "FUNDCODE": "9",
-        "DOMICILE": "GB",
-        "TERMTIME": "9",
-        "SUPERVISED": "Y",   # PGR
-    }
+
+async def reset_profile(session) -> tuple[str, list[str]]:
+    """Delete the existing HESA_STUDENT/2026/27 profile (fields cascade) and rebuild it
+    from the spec pack, giving each field either a correct-by-model or a spec-fallback
+    default so a fresh Validate is green. Returns (new_profile_id, warnings).
+
+    Suppressions the operator had set on the old profile are carried across — losing them
+    silently on a fixup rerun would silently un-mute rules the return relied on."""
+    engine = StatutoryEngine(session)
 
     existing = (await session.execute(
         select(ReportProfile).where(ReportProfile.code == CODE, ReportProfile.academic_year == YEAR)
     )).scalar_one_or_none()
+    carried_suppressions: list = []
     if existing is not None:
+        carried_suppressions = list(existing.muted_rule_keys or [])
         await session.delete(existing)
         await session.flush()
 
@@ -193,6 +210,11 @@ async def reset_profile(session) -> str:
         description="Worked example: the statutory return expressed entirely as configuration.",
     )
     for i, spec in enumerate(HESA_STUDENT_2026, start=1):
+        default = (
+            spec.get("default")
+            or CORRECT_BY_MODEL.get(spec["field"])
+            or NOT_CAPTURED_YET.get(spec["field"])
+        )
         await engine.add_field(
             profile.id,
             target_field=spec["field"],
@@ -201,9 +223,24 @@ async def reset_profile(session) -> str:
             transform=spec.get("transform"),
             required=spec.get("required", True),
             allowed_values=spec.get("allowed"),
-            default_value=spec.get("default") or field_defaults.get(spec["field"]),
+            default_value=default,
         )
-    return str(profile.id)
+
+    # Carry profile-scope suppressions across the rebuild.
+    if carried_suppressions:
+        refreshed = (await session.execute(
+            select(ReportProfile).where(ReportProfile.id == profile.id)
+        )).scalar_one()
+        refreshed.muted_rule_keys = carried_suppressions
+
+    warnings = [
+        f"{field} defaulted to {value!r} — {NOT_CAPTURED_YET[field]!r} is a HESA "
+        f"'not known' placeholder; wire the real domain source before a live submission."
+        for field, value in NOT_CAPTURED_YET.items()
+    ]
+    if carried_suppressions:
+        warnings.append(f"Carried {len(carried_suppressions)} profile-scope suppression(s) across the rebuild.")
+    return str(profile.id), warnings
 
 
 async def cleanse_spec_versions(session) -> int:
@@ -235,7 +272,7 @@ async def main() -> None:
         ends_backfilled = await backfill_expected_end(s)
         rules_fixed = await cleanse_spec_versions(s)
         await s.flush()
-        new_profile_id = await reset_profile(s)
+        new_profile_id, reset_warnings = await reset_profile(s)
         await s.commit()
 
         # Dry-run validation on the freshly-reset profile so operators see the outcome.
@@ -246,6 +283,11 @@ async def main() -> None:
         print(f"Rebuilt profile {CODE}/{YEAR} — {result['rowCount']} rows, {v['errors']} errors, {v.get('warnings', 0)} warnings.")
         for issue in v["issues"][:5]:
             print(f"  - {issue['studentRef']}: {issue['message']}")
+        if reset_warnings:
+            print("")
+            print("Advisories (integrity — not blockers):")
+            for w in reset_warnings:
+                print(f"  ! {w}")
 
 
 if __name__ == "__main__":

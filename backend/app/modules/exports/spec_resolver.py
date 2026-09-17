@@ -110,7 +110,12 @@ async def resolve_rules(
     from app.modules.exports.statutory import _rule_key   # avoid import cycle
     row = await _active_for_code(session, code, academic_year)
     all_rules = list(row.rules or []) if row else list(rules_for(code))
-    disabled = set(row.disabled_rule_keys or []) if row else set()
+    # disabled_rule_keys carries either legacy string entries or the newer dict shape
+    # {ruleKey, reason, at, byUserId, byUserName}. Accept both so old data still filters.
+    disabled = {
+        (e.get("ruleKey") if isinstance(e, dict) else e)
+        for e in (row.disabled_rule_keys or [])
+    } if row else set()
     return [r for r in all_rules if _rule_key(r) not in disabled]
 
 

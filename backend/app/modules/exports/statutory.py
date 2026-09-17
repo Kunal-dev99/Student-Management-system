@@ -643,10 +643,20 @@ class StatutoryEngine:
                     "on the shipped baseline. Suppress per profile, or accept an advisory that "
                     "removes the rule."
                 )
-            keys = list(version.disabled_rule_keys or [])
-            if rule_key not in keys:
-                keys.append(rule_key)
-            version.disabled_rule_keys = keys
+            # Promote to a dict shape carrying the same audit fields as profile-scope suppressions.
+            # Legacy string entries persist as-is (see _collect_suppressions for the read side);
+            # we only skip duplicates so re-clicking Suppress doesn't stack records.
+            entries = list(version.disabled_rule_keys or [])
+            already = any(
+                (isinstance(e, dict) and e.get("ruleKey") == rule_key) or e == rule_key
+                for e in entries
+            )
+            if not already:
+                entries.append({
+                    "ruleKey": rule_key, "reason": reason, "at": now,
+                    "byUserId": str(user_id), "byUserName": user_name,
+                })
+            version.disabled_rule_keys = entries
             flag_modified(version, "disabled_rule_keys")
 
         await self.session.commit()
@@ -676,7 +686,11 @@ class StatutoryEngine:
         elif scope == "pack":
             version = await active_version_for_code(self.session, profile.code, profile.academic_year)
             if version is not None:
-                kept = [k for k in (version.disabled_rule_keys or []) if k != rule_key]
+                # Handle both new dict entries and legacy string entries.
+                kept = [
+                    e for e in (version.disabled_rule_keys or [])
+                    if not (isinstance(e, dict) and e.get("ruleKey") == rule_key) and e != rule_key
+                ]
                 version.disabled_rule_keys = kept
                 flag_modified(version, "disabled_rule_keys")
         else:
@@ -703,10 +717,14 @@ class StatutoryEngine:
                             "scope": "profile"})
         version = await active_version_for_code(self.session, profile.code, profile.academic_year)
         if version is not None:
-            for rk in (version.disabled_rule_keys or []):
-                out.append({"ruleKey": rk, "reason": "Suppressed at spec-pack level.",
-                            "at": None, "byUserId": None, "byUserName": None,
-                            "scope": "pack"})
+            for e in (version.disabled_rule_keys or []):
+                if isinstance(e, dict):
+                    out.append({**e, "scope": "pack"})
+                else:
+                    # Legacy string entry from before the pack-scope audit trail existed.
+                    out.append({"ruleKey": e, "reason": None, "at": None,
+                                "byUserId": None, "byUserName": "legacy (before audit)",
+                                "scope": "pack"})
         return out
 
     # ---------------- ICR G5 — data-quality fix assistant (suggest → accept → apply) ----------------
