@@ -290,6 +290,54 @@ async def test_a_supervisor_sees_only_their_own_students_in_the_graph(ctx):
 
 
 @pytest.mark.asyncio
+async def test_a_supervisor_does_not_see_awards_or_funders_they_have_no_link_to(ctx):
+    """The leak fix (ICR): the graph used to include every recent-N award, opportunity, funder
+    and supervisor Person for scoped users too. That's a real data leak — a supervisor could
+    read award refs, funder names, and supervisor identities they have no permission to see
+    anywhere else in the app. Now: a scoped user sees only awards/funders linked to their own
+    students, and only opportunities they lead themselves. This test pins that.
+
+    Rossi supervises a HISTORY student with NO funding arrangement / NO research award, so the
+    graph for Rossi must contain zero award nodes, zero funder nodes, and zero opportunity nodes
+    — even though the tenant has an active EPSRC-funded ML award linked to Okonkwo's students.
+    """
+    c, _admin_h, ids = ctx
+
+    async with ids["sm"]() as s:
+        perms = {p.code: p for p in (await s.execute(select(Permission))).scalars().all()}
+        sup_role = Role(name="SupOnly"); s.add(sup_role); await s.flush()
+        await s.refresh(sup_role, ["permissions"])
+        sup_role.permissions = [perms["student.read"]]
+        u = User(email="rossi-leak@t.com", password_hash=hash_password("pw"), is_active=True,
+                 person_id=ids["rossi"])
+        s.add(u); await s.flush(); await s.refresh(u, ["roles"]); u.roles = [sup_role]
+        await s.commit()
+
+    r = await c.post("/api/v1/auth/login", json={"email": "rossi-leak@t.com", "password": "pw"})
+    sh = {"Authorization": f"Bearer {r.json()['accessToken']}"}
+
+    g = (await c.get("/api/v1/research/graph", headers=sh)).json()
+    kinds = [n["kind"] for n in g["nodes"]]
+    assert "award" not in kinds, f"award node leaked to a scoped supervisor: {g['nodes']}"
+    assert "funder" not in kinds, f"funder node leaked to a scoped supervisor: {g['nodes']}"
+    assert "opportunity" not in kinds, f"opportunity node leaked to a scoped supervisor: {g['nodes']}"
+
+    # And a scoped supervisor targeting an award they have no link to gets zero-award back —
+    # not the award's metadata as a side channel to "does this exist?".
+    focused = (await c.get(f"/api/v1/research/graph?awardId={ids['award']}",
+                           headers=sh)).json()
+    assert not any(n["kind"] == "award" for n in focused["nodes"]), (
+        f"award=<id> query param leaked award metadata to a scoped supervisor: {focused['nodes']}"
+    )
+
+    # By contrast, the unscoped admin STILL sees the whole catalog — the map is the record
+    # of what exists for a Registry / admin user. Otherwise the fix is over-tightening.
+    admin_g = (await c.get("/api/v1/research/graph", headers=_admin_h)).json()
+    admin_kinds = [n["kind"] for n in admin_g["nodes"]]
+    assert "award" in admin_kinds, "admin lost their award catalog view (regression)"
+
+
+@pytest.mark.asyncio
 async def test_research_areas_are_discoverable(ctx):
     """`supervisor-suggestions` takes a researchAreaId, so callers need a way to find one."""
     c, h, _ = ctx

@@ -183,23 +183,38 @@ class MatchingService:
 
     async def relationship_graph(
         self, *, student_id: uuid.UUID | None = None, award_id: uuid.UUID | None = None,
-        allowed_ids: list[uuid.UUID] | None = None, limit: int = 40,
+        allowed_ids: list[uuid.UUID] | None = None,
+        principal_person_id: uuid.UUID | None = None, limit: int = 40,
     ) -> dict:
         """Nodes and edges for Person ↔ Research ↔ Supervisor ↔ Award ↔ Funding ↔ Opportunity.
 
         Centre it on one student or one award, or omit both for a bounded overview.
-        Standalone awards and opportunities are ALWAYS included — the map is the record
-        of what exists, not only what has already been linked to a student.
+
+        Row-scoping (previously leaking, ICR bug fix):
+          - **Unscoped** (``allowed_ids is None``, e.g. Registry / admin): shows the whole tenant's
+            standalone-award and opportunity catalog too — the map is the record of what exists.
+          - **Scoped** (supervisor / self): shows ONLY awards linked to the principal's own
+            students (via project or funding arrangement), opportunities the principal leads as
+            principal supervisor, and the funders / supervisor labels those touch. A ``student_id``
+            or ``award_id`` that isn't in that reduced set is silently dropped — the endpoint
+            never leaks records the principal can't see anywhere else in the app.
         """
         from app.modules.funding.constants import FundingStatus
         from app.modules.funding.models import FundingArrangement, FundingSource
         from app.modules.recruitment.models import ResearchOpportunity
 
+        scoped = allowed_ids is not None
+
         stmt = select(Student, Person).join(Person, Person.id == Student.person_id)
+        # Silently drop a student_id the principal can't see, rather than exposing "does this
+        # student exist" through the presence/absence of related awards further down.
         if student_id:
+            if scoped and student_id not in (allowed_ids or []):
+                return {"nodes": [], "edges": [],
+                        "counts": {"nodes": 0, "edges": 0, "students": 0}}
             stmt = stmt.where(Student.id == student_id)
-        if allowed_ids is not None:
-            stmt = stmt.where(Student.id.in_(allowed_ids))
+        if scoped:
+            stmt = stmt.where(Student.id.in_(allowed_ids or []))
         student_rows = (await self.session.execute(stmt.limit(limit))).all()
 
         ids = [st.id for st, _ in student_rows]
@@ -219,29 +234,51 @@ class MatchingService:
             )
         )).scalars().all()) if ids else []
 
-        # Always include EVERY award and opportunity in scope, even the ones no student
-        # has been attached to yet. The bounded `limit` keeps this safe for large tenants.
-        awards = {a.id: a for a in (await self.session.execute(
-            select(ResearchAward).order_by(ResearchAward.created_at.desc()).limit(limit)
-        )).scalars().all()}
-        # Union in awards referenced by projects/arrangements so a focused (student=…) view
-        # still shows the award behind that student's project even if it's older than the
-        # top-N slice.
-        extra_award_ids = ({p.research_award_id for p in projects.values() if p.research_award_id}
-                           | {a.research_award_id for a in arrangements if a.research_award_id})
-        if award_id:
-            extra_award_ids.add(award_id)
-        extra_award_ids -= set(awards.keys())
-        if extra_award_ids:
-            for a in (await self.session.execute(
-                select(ResearchAward).where(ResearchAward.id.in_(list(extra_award_ids)))
-            )).scalars().all():
-                awards[a.id] = a
+        # Awards. Unscoped: whole recent catalog + anything referenced by projects/arrangements
+        # (so a focused view still shows the older award behind a student's project). Scoped:
+        # ONLY awards linked via the principal's own students; a hint of the wider catalog would
+        # be a data leak. ``award_id`` query param is honoured only if it's already in scope.
+        linked_award_ids = ({p.research_award_id for p in projects.values() if p.research_award_id}
+                            | {a.research_award_id for a in arrangements if a.research_award_id})
+        if scoped:
+            if award_id and award_id in linked_award_ids:
+                pass   # already in the linked set
+            elif award_id:
+                # Not visible to this principal — silently drop rather than exposing metadata.
+                pass
+            awards = {a.id: a for a in (await self.session.execute(
+                select(ResearchAward).where(ResearchAward.id.in_(list(linked_award_ids)))
+            )).scalars().all()} if linked_award_ids else {}
+        else:
+            awards = {a.id: a for a in (await self.session.execute(
+                select(ResearchAward).order_by(ResearchAward.created_at.desc()).limit(limit)
+            )).scalars().all()}
+            extra_award_ids = set(linked_award_ids)
+            if award_id:
+                extra_award_ids.add(award_id)
+            extra_award_ids -= set(awards.keys())
+            if extra_award_ids:
+                for a in (await self.session.execute(
+                    select(ResearchAward).where(ResearchAward.id.in_(list(extra_award_ids)))
+                )).scalars().all():
+                    awards[a.id] = a
 
-        opportunities = list((await self.session.execute(
-            select(ResearchOpportunity)
-            .order_by(ResearchOpportunity.created_at.desc()).limit(limit)
-        )).scalars().all())
+        # Opportunities. Unscoped: recent-N catalog. Scoped: only the ones this principal LEADS
+        # as principal supervisor (they'd see them via the standard workforce/persons view anyway).
+        if scoped:
+            if principal_person_id is None:
+                opportunities = []
+            else:
+                opportunities = list((await self.session.execute(
+                    select(ResearchOpportunity)
+                    .where(ResearchOpportunity.principal_supervisor_id == principal_person_id)
+                    .order_by(ResearchOpportunity.created_at.desc()).limit(limit)
+                )).scalars().all())
+        else:
+            opportunities = list((await self.session.execute(
+                select(ResearchOpportunity)
+                .order_by(ResearchOpportunity.created_at.desc()).limit(limit)
+            )).scalars().all())
 
         funder_ids = {a.funder_id for a in awards.values() if a.funder_id}
         funder_ids |= {a.funding_source_id for a in arrangements if a.funding_source_id}

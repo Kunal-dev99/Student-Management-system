@@ -194,8 +194,11 @@ async def relationship_graph(
     from app.modules.student_record.router import scoped_ids
 
     allowed = await scoped_ids(principal, session)
+    # Pass the principal's own person_id so a scoped supervisor still sees the opportunities
+    # they lead (drawn on the graph); scoped users without a person_id see none, safely.
     return await MatchingService(session).relationship_graph(
-        student_id=studentId, award_id=awardId, allowed_ids=allowed, limit=limit
+        student_id=studentId, award_id=awardId,
+        allowed_ids=allowed, principal_person_id=principal.person_id, limit=limit,
     )
 
 
