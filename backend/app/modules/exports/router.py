@@ -130,9 +130,14 @@ async def list_profiles(
 
 @profiles_router.get("/transforms", summary="Transforms a field mapping may use")
 async def list_transforms(_=Depends(require_permission("reporting.read"))) -> dict:
+    """Human-facing catalog of transforms — each carries a plain-English label + description +
+    category so the mapping form can group them and show something readable next to the code
+    name. Also returns the legacy `transforms` flat list for older callers."""
     from app.modules.exports.statutory import TRANSFORMS
+    from app.modules.exports.transforms_catalog import as_dict
 
-    return {"transforms": sorted(TRANSFORMS)}
+    body = as_dict()
+    return {**body, "transforms": sorted(TRANSFORMS)}
 
 
 @profiles_router.get(

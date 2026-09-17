@@ -216,12 +216,22 @@ function SourceExpressionPicker({
                 <SelectLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">
                   {g.label}
                 </SelectLabel>
-                {g.fields.map((f) => (
-                  <SelectItem key={f.path} value={f.path}>
-                    <span className="font-mono text-xs">{f.path}</span>
-                    <span className="text-[10px] text-muted-foreground ml-2">{f.type}</span>
-                  </SelectItem>
-                ))}
+                {g.fields.map((f) => {
+                  // Strip the group prefix from the label so we don't read "Student · start
+                  // date" inside a "Student record" group — the group header already carries
+                  // that context. e.g. "Student · start date" → "start date".
+                  const shortLabel = f.label.replace(new RegExp(`^${g.label}·\\s*`), '').replace(/^[^·]+·\s*/, '')
+                  return (
+                    <SelectItem key={f.path} value={f.path}>
+                      <div className="flex flex-col">
+                        <span className="text-sm">{shortLabel}</span>
+                        <span className="text-[10px] text-muted-foreground">
+                          <span className="font-mono">{f.path}</span> · {f.type}
+                        </span>
+                      </div>
+                    </SelectItem>
+                  )
+                })}
               </SelectGroup>
             ))}
           </SelectContent>
@@ -243,6 +253,50 @@ function SourceExpressionPicker({
         </button>
       </div>
     </div>
+  )
+}
+
+/** Transform dropdown — a real picker, not a list of code names. Groups by category, shows
+ *  the label prominently with the code name and description as small subtitles. */
+function TransformPicker({
+  value, onChange, id,
+}: { value: string; onChange: (v: string) => void; id?: string }) {
+  const transforms = useTransforms()
+  const cats = transforms.data?.categories
+  if (!cats) {
+    return (
+      <Input id={id} className="font-mono text-xs" value={value}
+        onChange={(e) => onChange(e.target.value)} placeholder="No transform" />
+    )
+  }
+  return (
+    <Select value={value || '__none'} onValueChange={(v) => onChange(v === '__none' ? '' : v)}>
+      <SelectTrigger id={id}>
+        <SelectValue placeholder="No transform" />
+      </SelectTrigger>
+      <SelectContent className="max-h-96">
+        <SelectItem value="__none">
+          <span className="italic text-muted-foreground">No transform</span>
+        </SelectItem>
+        {cats.map((c) => (
+          <SelectGroup key={c.category}>
+            <SelectLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              {c.category}
+            </SelectLabel>
+            {c.transforms.map((t) => (
+              <SelectItem key={t.name} value={t.name}>
+                <div className="flex flex-col">
+                  <span className="text-sm">{t.label}</span>
+                  <span className="text-[10px] text-muted-foreground">
+                    <span className="font-mono">{t.name}</span> — {t.description}
+                  </span>
+                </div>
+              </SelectItem>
+            ))}
+          </SelectGroup>
+        ))}
+      </SelectContent>
+    </Select>
   )
 }
 
@@ -340,14 +394,7 @@ function AddFieldDialog({
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label>Transform (optional)</Label>
-              <Select value={transform} onValueChange={setTransform}>
-                <SelectTrigger><SelectValue placeholder="No transform" /></SelectTrigger>
-                <SelectContent>
-                  {transforms.data?.transforms.map((t) => (
-                    <SelectItem key={t} value={t}>{t}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <TransformPicker value={transform} onChange={setTransform} />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="f-default">Default value (optional)</Label>
@@ -454,9 +501,17 @@ function EditFieldDialog({
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label htmlFor="e-transform">Transform (optional)</Label>
-              <Input id="e-transform" className="font-mono text-xs" value={transform}
-                onChange={(e) => setTransform(e.target.value)} placeholder="e.g. upper|strip_name" />
-              <p className="text-helper">One transform, or a <span className="font-mono text-xs">|</span>-separated chain applied in order.</p>
+              {/* If the value carries a `|`, it's a chain and needs the free-text input; otherwise
+                 the human-labelled picker is much friendlier. */}
+              {transform.includes('|') ? (
+                <>
+                  <Input id="e-transform" className="font-mono text-xs" value={transform}
+                    onChange={(e) => setTransform(e.target.value)} placeholder="e.g. upper|strip_name" />
+                  <p className="text-helper">Chain — <span className="font-mono text-xs">|</span>-separated transforms applied in order.</p>
+                </>
+              ) : (
+                <TransformPicker id="e-transform" value={transform} onChange={setTransform} />
+              )}
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="e-default">Default value (optional)</Label>

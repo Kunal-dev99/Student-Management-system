@@ -131,10 +131,22 @@ export const useProfile = (profileId: string | null) =>
   })
 
 /** The transforms a mapping may name. Server-owned, so never hard-coded here. */
+export interface TransformCatalogEntry {
+  name: string           // the code name that goes in mapping.transform
+  category: string       // Format | Coding frame | Cleaning | Number
+  label: string          // human-readable label ("Uppercase")
+  description: string    // one-line explainer ("Uppercase the text ('rossi' → 'ROSSI')")
+}
+export interface TransformsCatalog {
+  categories: { category: string; transforms: TransformCatalogEntry[] }[]
+  names: string[]
+  transforms: string[]   // legacy flat list, kept for older callers
+}
+
 export const useTransforms = () =>
   useQuery({
     queryKey: ['report-profile-transforms'],
-    queryFn: () => api.get<{ transforms: string[] }>('/report-profiles/transforms'),
+    queryFn: () => api.get<TransformsCatalog>('/report-profiles/transforms'),
     staleTime: 60 * 60 * 1000,
   })
 
