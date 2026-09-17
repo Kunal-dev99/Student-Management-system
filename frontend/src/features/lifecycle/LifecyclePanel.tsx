@@ -21,6 +21,8 @@ import { ApiError } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthContext'
 import type { Student } from '@/features/students/api'
 import { IntensityImpactView } from './IntensityImpactView'
+import { ProgrammeChangeImpactView } from './ProgrammeChangeImpactView'
+import { useProgrammesAdmin, type ProgrammeDetail } from '@/features/programmes/api'
 import {
   useApproveLifecycleEvent, useIntensityImpact, useLifecycleEvents, useRecordReturn,
   useRejectLifecycleEvent, useRequestLifecycleEvent, useStudentIntensity,
@@ -32,6 +34,7 @@ const EVENT_LABELS: Record<LifecycleEventType, string> = {
   extension: 'Extension',
   mode_change: 'Mode change',
   intensity_change: 'Intensity change',
+  programme_change: 'Transfer to another programme',
 }
 
 const STATUS_VARIANT: Record<LifecycleEventStatus, 'success' | 'warning' | 'destructive' | 'secondary'> = {
@@ -52,6 +55,9 @@ function dayDelta(from: string, to: string): number {
 function eventDates(e: LifecycleEvent): string {
   if (e.eventType === 'extension') {
     return `${e.extensionDays ?? 0} day${e.extensionDays === 1 ? '' : 's'} from ${e.startDate}`
+  }
+  if (e.eventType === 'programme_change') {
+    return `effective ${e.effectiveDate ?? e.startDate}`
   }
   const end = e.actualEndDate ?? e.endDate
   return end ? `${e.startDate} → ${end}${e.actualEndDate ? ' (actual)' : ''}` : e.startDate
@@ -114,9 +120,10 @@ function DecisionDialog({
   )
 }
 
-function RequestDialog({ studentId }: { studentId: string }) {
+function RequestDialog({ studentId, student }: { studentId: string; student?: Student }) {
   const { toast } = useToast()
   const request = useRequestLifecycleEvent(studentId)
+  const today = new Date().toISOString().slice(0, 10)
   const [open, setOpen] = useState(false)
   const [eventType, setEventType] = useState<LifecycleEventType>('suspension')
   const [startDate, setStartDate] = useState('')
@@ -124,11 +131,27 @@ function RequestDialog({ studentId }: { studentId: string }) {
   const [extensionDays, setExtensionDays] = useState('')
   const [newMode, setNewMode] = useState<StudyMode>('part_time')
   const [intensityPct, setIntensityPct] = useState('')
+  const [newProgrammeId, setNewProgrammeId] = useState('')
   const [reason, setReason] = useState('')
+
+  // Programme picker for the transfer variant. Only fetched once the dialog opens so we
+  // don't add a network call to every student page load.
+  const programmesQ = useProgrammesAdmin()
+  const currentProgramme: ProgrammeDetail | null =
+    programmesQ.data?.find((p) => p.id === student?.programmeId) ?? null
+  const newProgramme: ProgrammeDetail | null =
+    programmesQ.data?.find((p) => p.id === newProgrammeId) ?? null
 
   const reset = () => {
     setEventType('suspension'); setStartDate(''); setEndDate('')
-    setExtensionDays(''); setNewMode('part_time'); setIntensityPct(''); setReason('')
+    setExtensionDays(''); setNewMode('part_time'); setIntensityPct('')
+    setNewProgrammeId(''); setReason('')
+  }
+
+  // Default the programme-change effective date to today the first time the user picks the type.
+  const onTypeChange = (v: LifecycleEventType) => {
+    setEventType(v)
+    if (v === 'programme_change' && !startDate) setStartDate(today)
   }
 
   const intensityValid = Number(intensityPct) >= 1 && Number(intensityPct) <= 100
@@ -136,7 +159,9 @@ function RequestDialog({ studentId }: { studentId: string }) {
     !!reason.trim() && !!startDate &&
     (eventType !== 'suspension' || !!endDate) &&
     (eventType !== 'extension' || Number(extensionDays) > 0) &&
-    (eventType !== 'intensity_change' || intensityValid)
+    (eventType !== 'intensity_change' || intensityValid) &&
+    (eventType !== 'programme_change'
+      || (!!newProgrammeId && newProgrammeId !== student?.programmeId))
 
   const submit = async () => {
     try {
@@ -148,6 +173,7 @@ function RequestDialog({ studentId }: { studentId: string }) {
         extensionDays: eventType === 'extension' ? Number(extensionDays) : undefined,
         newMode: eventType === 'mode_change' ? newMode : undefined,
         intensityPct: eventType === 'intensity_change' ? Number(intensityPct) : undefined,
+        newProgrammeId: eventType === 'programme_change' ? newProgrammeId : undefined,
       })
       toast({
         title: 'Request submitted',
@@ -237,6 +263,46 @@ function RequestDialog({ studentId }: { studentId: string }) {
                   onChange={(e) => setIntensityPct(e.target.value)} placeholder="e.g. 50" />
               </div>
             </div>
+          )}
+
+          {eventType === 'programme_change' && (
+            <>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label>Target programme</Label>
+                  <Select value={newProgrammeId} onValueChange={setNewProgrammeId}>
+                    <SelectTrigger>
+                      <SelectValue placeholder={
+                        programmesQ.isLoading ? 'Loading…' : 'Pick a programme'
+                      } />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(programmesQ.data ?? [])
+                        .filter((p) => p.id !== student?.programmeId)
+                        .map((p) => (
+                          <SelectItem key={p.id} value={p.id}>
+                            {p.code} — {p.name} ({p.programmeType})
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="lc-peff">Effective date</Label>
+                  <Input id="lc-peff" type="date" value={startDate}
+                    onChange={(e) => setStartDate(e.target.value)} />
+                </div>
+              </div>
+              {newProgramme && startDate && (
+                <ProgrammeChangeImpactView
+                  studentId={studentId}
+                  currentProgramme={currentProgramme}
+                  newProgramme={newProgramme}
+                  currentExpectedEnd={student?.expectedEndDate ?? null}
+                  effectiveDate={startDate}
+                />
+              )}
+            </>
           )}
 
           <div className="space-y-1.5">
@@ -368,6 +434,11 @@ export function LifecyclePanel({ studentId, student }: { studentId: string; stud
   const events = useLifecycleEvents(studentId)
   const approve = useApproveLifecycleEvent(studentId)
   const reject = useRejectLifecycleEvent(studentId)
+  // For the history-row label on programme_change events — resolve ids to codes if the
+  // programmes list is already cached (it is once the request dialog has been opened).
+  const programmesQ = useProgrammesAdmin()
+  const progCode = (id: string | null) =>
+    id ? programmesQ.data?.find((p) => p.id === id)?.code ?? id.slice(0, 6) : '?'
   // Hiding the buttons is convenience only — the API enforces the permission.
   const canDecide = hasPermission('student.lifecycle.approve')
   const canRequest = hasPermission('student.write')
@@ -395,7 +466,7 @@ export function LifecyclePanel({ studentId, student }: { studentId: string; stud
         canRequest ? (
           <div className="flex items-center gap-2">
             {status && PAUSED.includes(status) && <ReturnDialog studentId={studentId} />}
-            <RequestDialog studentId={studentId} />
+            <RequestDialog studentId={studentId} student={student} />
           </div>
         ) : undefined
       }
@@ -448,6 +519,11 @@ export function LifecyclePanel({ studentId, student }: { studentId: string; stud
                     {e.eventType === 'intensity_change' && e.intensityPct != null && (
                       <span className="text-muted-foreground font-normal">
                         {' '}({e.previousIntensityPct ?? '?'}% → {e.intensityPct}%)
+                      </span>
+                    )}
+                    {e.eventType === 'programme_change' && e.newProgrammeId && (
+                      <span className="text-muted-foreground font-normal">
+                        {' '}({progCode(e.previousProgrammeId)} → {progCode(e.newProgrammeId)})
                       </span>
                     )}
                   </TableCell>

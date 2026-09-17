@@ -10,7 +10,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/shared/api/client'
 
-export type LifecycleEventType = 'suspension' | 'extension' | 'mode_change' | 'intensity_change'
+export type LifecycleEventType =
+  | 'suspension' | 'extension' | 'mode_change' | 'intensity_change' | 'programme_change'
 export type LifecycleEventStatus = 'requested' | 'approved' | 'rejected' | 'cancelled'
 export type StudyMode = 'full_time' | 'part_time'
 
@@ -27,6 +28,11 @@ export interface LifecycleEvent {
   newMode: StudyMode | null
   previousIntensityPct: number | null
   intensityPct: number | null
+  /** ICR programme-transfer — the old/new programme ids on an approved programme_change event. */
+  previousProgrammeId: string | null
+  newProgrammeId: string | null
+  /** Effective date of a programme_change (equal to startDate on the wire, exposed separately for clarity). */
+  effectiveDate: string | null
   reason: string | null
   daysApplied: number | null
   decisionNote: string | null
@@ -112,6 +118,8 @@ export interface LifecycleEventRequest {
   extensionDays?: number
   newMode?: StudyMode
   intensityPct?: number
+  /** Required for a programme_change — startDate is the effective date. */
+  newProgrammeId?: string
 }
 
 export const useLifecycleEvents = (studentId: string) =>
@@ -130,6 +138,9 @@ function invalidate(qc: ReturnType<typeof useQueryClient>, studentId: string) {
   qc.invalidateQueries({ queryKey: ['student', studentId] })
   qc.invalidateQueries({ queryKey: ['intensity', studentId] })
   qc.invalidateQueries({ queryKey: ['milestones', studentId] })
+  // Programme-change approvals shift programmeId + taught state; refresh both so the
+  // Programme tab and journey tracker reflect the new programme without a page reload.
+  qc.invalidateQueries({ queryKey: ['taught', studentId] })
   qc.invalidateQueries({ queryKey: ['students'] })
   qc.invalidateQueries({ queryKey: ['tasks'] })
 }
@@ -142,6 +153,29 @@ export function useRequestLifecycleEvent(studentId: string) {
       api.post<LifecycleEvent>(`/students/${studentId}/lifecycle-events`, body),
     onSuccess: () => invalidate(qc, studentId),
   })
+}
+
+/** Programme-change requests piggy-back on the shared lifecycle request endpoint; this thin
+ * wrapper makes the call-site read like what it does and forces the payload shape. */
+export interface ProgrammeChangeRequestBody {
+  newProgrammeId: string
+  /** The date the new programme is treated as starting from. */
+  effectiveDate: string
+  reason: string
+}
+
+export function useRequestProgrammeChange(studentId: string) {
+  const request = useRequestLifecycleEvent(studentId)
+  return {
+    ...request,
+    mutateAsync: (body: ProgrammeChangeRequestBody) =>
+      request.mutateAsync({
+        eventType: 'programme_change',
+        reason: body.reason,
+        startDate: body.effectiveDate,
+        newProgrammeId: body.newProgrammeId,
+      }),
+  }
 }
 
 /** 409 when the request has already been decided. */

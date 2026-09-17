@@ -12,6 +12,8 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useStudent, useStudentSummary } from '@/features/students/api'
+import { useLifecycleEvents } from '@/features/lifecycle/api'
+import { useProgrammesAdmin } from '@/features/programmes/api'
 import { LifecyclePanel } from '@/features/lifecycle/LifecyclePanel'
 import { SupervisorsPanel } from '@/features/supervision/SupervisorsPanel'
 import { SupervisionMeetingsPanel } from '@/features/supervision-meetings/SupervisionMeetingsPanel'
@@ -32,6 +34,69 @@ import { STUDENT_PANELS as P } from '@/config/studentPanels'
 
 function Field({ label, value }: { label: string; value: string | null | undefined }) {
   return <div><p className="text-label">{label}</p><p className="text-sm mt-0.5">{value || '—'}</p></div>
+}
+
+/**
+ * Programme history — chronological list of programmes the student has been on, derived
+ * from the initial enrolment (student.programmeId + startDate) plus every approved
+ * programme_change lifecycle event. Read-only.
+ */
+function ProgrammeHistorySection({ studentId }: { studentId: string }) {
+  const events = useLifecycleEvents(studentId)
+  const student = useStudent(studentId)
+  const programmes = useProgrammesAdmin()
+  const codeFor = (id: string | null) =>
+    id ? programmes.data?.find((p) => p.id === id)?.code ?? id.slice(0, 6) : '—'
+
+  if (events.isLoading || student.isLoading) {
+    return (
+      <PageSection icon={History} title="Programme history" accent="primary">
+        <Skeleton className="h-12 w-full" />
+      </PageSection>
+    )
+  }
+
+  const changes = (events.data ?? [])
+    .filter((e) => e.eventType === 'programme_change' && e.status === 'approved'
+      && e.newProgrammeId && (e.effectiveDate || e.startDate))
+    .sort((a, b) =>
+      (a.effectiveDate ?? a.startDate).localeCompare(b.effectiveDate ?? b.startDate))
+
+  const rows: { programmeId: string | null; from: string | null; to: string | null }[] = []
+  const initialFrom = student.data?.startDate ?? null
+  // The programme in force at enrolment: the previousProgrammeId of the first change (if any),
+  // otherwise the current programme id (no changes ever happened).
+  const initialProg = changes[0]?.previousProgrammeId ?? student.data?.programmeId ?? null
+  let cursor = initialFrom
+  let cur = initialProg
+  for (const ev of changes) {
+    const eff = ev.effectiveDate ?? ev.startDate
+    rows.push({ programmeId: cur, from: cursor, to: eff })
+    cursor = eff
+    cur = ev.newProgrammeId
+  }
+  rows.push({ programmeId: cur, from: cursor, to: null })
+
+  return (
+    <PageSection icon={History} title="Programme history" accent="primary"
+      description="Programmes this student has been on, oldest first.">
+      {rows.length === 0 ? (
+        <p className="text-helper">No programme record for this student.</p>
+      ) : (
+        <ul className="space-y-1.5">
+          {rows.map((r, i) => (
+            <li key={i} className="text-sm flex flex-wrap items-baseline gap-x-2">
+              <span className="font-mono font-medium">{codeFor(r.programmeId)}</span>
+              <span className="text-muted-foreground">— from</span>
+              <span className="num">{r.from ?? '—'}</span>
+              <span className="text-muted-foreground">to</span>
+              <span className="num">{r.to ?? 'present'}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </PageSection>
+  )
 }
 
 function HistorySection({ studentId }: { studentId: string }) {
@@ -238,6 +303,9 @@ export default function StudentDetailPage() {
 
         {/* --- Programme tab: taught rec OR thesis+classification depending on programme --- */}
         <TabPanel tab="programme" active={tab}>
+          {/* Programme history goes above the taught/thesis panels so the reader sees the
+              transfer trail before the current-programme content. */}
+          <ProgrammeHistorySection studentId={id} />
           {/* ICR G1 — taught students run modules/assessments/award; research students run
               thesis+examination+classification. Kept exactly as it worked pre-tabs. */}
           {P.taughtOrThesis && (isTaught
