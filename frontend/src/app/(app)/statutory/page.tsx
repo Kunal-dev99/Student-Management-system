@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import { PageHeader } from '@/components/common/PageHeader'
 import { PageSection } from '@/components/common/PageSection'
+import { JargonTip } from '@/features/statutory/JargonTip'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -39,6 +40,7 @@ import {
   useSuggestDefaults, useApplyDefaults, useSuppressRule, useRemoveSuppression,
   type GenerateResult, type ReportProfile, type ValidationResult, type FieldMapping,
   type DefaultSuggestion, type ValidationIssue, type RuleAnalysis, type RuleSuppression,
+  type ProfileDetail, type ValidationReport,
 } from '@/features/statutory/api'
 
 function err(toast: ReturnType<typeof useToast>['toast'], title: string) {
@@ -766,10 +768,12 @@ function FieldDefaultsSection({
   if (fields.length === 0) return null
 
   return (
-    <div className="pt-3 border-t border-border space-y-3">
+    <div id={SECTION_IDS.defaults} className="pt-3 border-t border-border space-y-3 scroll-mt-4 rounded-md">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-label">Statutory field defaults</p>
+          <p className="text-label inline-flex items-center gap-1.5">
+            Statutory field defaults <JargonTip term="default when empty" />
+          </p>
           <p className="text-helper max-w-2xl">
             When a student record has no value for a field, the return sends the default set here
             instead of leaving it blank. Set once per year — the same default applies to every student
@@ -1476,6 +1480,168 @@ function SignOffCard({ profileId, canSignOff }: { profileId: string; canSignOff:
   )
 }
 
+// ---------------------------------------------------------------- guided flow
+//
+// UX pass: /statutory got noisy — 9 stacked sections, jargon everywhere, no story about what to
+// do first. This checklist sits at the top when a profile is selected and turns "what am I
+// looking at?" into an ordered 5-step flow. Each step has live status, an action button that
+// scrolls-and-highlights the relevant section, and only lights up when the prior step is done.
+// The advanced sections below remain — this is progressive disclosure, not deletion.
+
+const SECTION_IDS = {
+  signoff: 'section-signoff',
+  fields: 'section-fields',
+  defaults: 'section-defaults',
+  validation: 'section-validation',
+} as const
+
+/** Scroll to a section and briefly highlight it so the user's eye lands in the right place. */
+function scrollToSection(id: string) {
+  const el = document.getElementById(id)
+  if (!el) return
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  el.classList.add('ring-2', 'ring-primary/40', 'transition-shadow')
+  window.setTimeout(() => el.classList.remove('ring-2', 'ring-primary/40'), 2000)
+}
+
+function ReturnReadyChecklist({
+  profileId, detail, validate, onRunValidate,
+}: {
+  profileId: string
+  detail: ProfileDetail | undefined
+  validate: ValidationReport | undefined
+  onRunValidate: () => Promise<unknown>
+}) {
+  const compile = useCompileProfile(profileId)
+  const r = compile.data
+  const [runningValidate, setRunningValidate] = useState(false)
+
+  if (!r || !detail) return null
+
+  // --- compute step statuses from live data (no extra fetch) ---
+  const missingCount = r.missing.length
+  const step1Done = missingCount === 0 && detail.fields.length > 0
+
+  // "Needs a default" = required fields OR unmapped fields with no defaultValue set. Same rule
+  // the defaults section uses so counts match.
+  const emptyDefaults = detail.fields.filter((f) =>
+    (f.required || !f.sourceExpression?.trim()) && !(f.defaultValue ?? '').length,
+  ).length
+  const step2Done = emptyDefaults === 0
+
+  const validation = validate?.validation
+  const step3Done = !!validation && validation.errors === 0
+
+  const suppressions = r.suppressions ?? []
+  const step4Show = suppressions.length > 0
+
+  const signed = r.profile.signedOff
+  const step5Ready = r.signOffReady && step3Done
+
+  const allDone = step1Done && step2Done && step3Done && step5Ready
+
+  return (
+    <PageSection
+      icon={ListChecks}
+      title={signed ? 'Signed off ✓' : 'Get this return ready'}
+      accent={signed ? 'success' : allDone ? 'success' : 'primary'}
+      description={
+        signed
+          ? 'This profile is locked. Unsign it to make changes.'
+          : 'Five steps to a submittable return. Each step lights up when the one before it is done.'
+      }
+    >
+      <ol className="space-y-2">
+        <ChecklistStep n={1} title="Map every mandatory field" done={step1Done}
+          statusOk={`${detail.fields.length} fields mapped — all mandatory fields covered.`}
+          statusTodo={`${missingCount} mandatory field${missingCount === 1 ? '' : 's'} still unmapped.`}
+          actionLabel={step1Done ? 'Show mappings' : 'Map fields'}
+          onAction={() => scrollToSection(SECTION_IDS.fields)}
+        />
+        <ChecklistStep n={2} title="Set defaults for empty fields" done={step2Done}
+          statusOk="Every required-or-unmapped field has a default — empty records will use it."
+          statusTodo={`${emptyDefaults} field${emptyDefaults === 1 ? '' : 's'} without a default — records with no source data will fail validation.`}
+          actionLabel="Set defaults"
+          onAction={() => scrollToSection(SECTION_IDS.defaults)}
+        />
+        <ChecklistStep n={3} title="Run validation" done={step3Done}
+          statusOk="Validation is clean — no errors."
+          statusTodo={validation
+            ? `${validation.errors} error${validation.errors === 1 ? '' : 's'}${validation.warnings ? `, ${validation.warnings} warning${validation.warnings === 1 ? '' : 's'}` : ''} on ${validate?.rowCount ?? 0} rows.`
+            : 'Not yet checked. Run validation to see what would ship today.'}
+          actionLabel={validation ? 'Show report' : (runningValidate ? 'Checking…' : 'Run validation')}
+          actionDisabled={runningValidate}
+          onAction={async () => {
+            if (!validation) {
+              setRunningValidate(true)
+              try { await onRunValidate() } finally { setRunningValidate(false) }
+            }
+            scrollToSection(SECTION_IDS.validation)
+          }}
+        />
+        {step4Show && (
+          <ChecklistStep n={4} title="Review rule suppressions" done={false} attention
+            statusOk=""
+            statusTodo={`${suppressions.length} rule${suppressions.length === 1 ? '' : 's'} suppressed — sign-off will show reasons and who suppressed them.`}
+            actionLabel="Review"
+            onAction={() => scrollToSection(SECTION_IDS.signoff)}
+          />
+        )}
+        <ChecklistStep n={step4Show ? 5 : 4} title="Sign off" done={signed}
+          statusOk="Signed off — return is locked and reproducible."
+          statusTodo={step5Ready
+            ? 'Ready to sign off — every mandatory field is mapped and validation is green.'
+            : 'Waiting on the previous steps.'}
+          actionLabel={signed ? 'Show sign-off' : (step5Ready ? 'Go to sign off' : 'Not yet')}
+          actionDisabled={!signed && !step5Ready}
+          onAction={() => scrollToSection(SECTION_IDS.signoff)}
+        />
+      </ol>
+    </PageSection>
+  )
+}
+
+function ChecklistStep({
+  n, title, done, statusOk, statusTodo, actionLabel, onAction, actionDisabled, attention,
+}: {
+  n: number
+  title: string
+  done: boolean
+  statusOk: string
+  statusTodo: string
+  actionLabel: string
+  onAction: () => void
+  actionDisabled?: boolean
+  attention?: boolean
+}) {
+  return (
+    <li className={`flex items-start gap-3 p-3 rounded-md border ${
+      done ? 'border-[hsl(var(--success)/0.35)] bg-[hsl(var(--success)/0.04)]'
+        : attention ? 'border-[hsl(var(--warning)/0.4)] bg-[hsl(var(--warning)/0.04)]'
+        : 'border-border bg-background'
+    }`}>
+      <div className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-medium ${
+        done ? 'bg-[hsl(var(--success))] text-white'
+          : attention ? 'bg-[hsl(var(--warning))] text-white'
+          : 'bg-surface-2 text-muted-foreground'
+      }`}>
+        {done ? '✓' : n}
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-medium">{title}</p>
+        <p className="text-xs text-muted-foreground mt-0.5">{done ? statusOk : statusTodo}</p>
+      </div>
+      <Button
+        size="sm" variant={done ? 'ghost' : 'default'} className="h-7 shrink-0"
+        disabled={actionDisabled}
+        onClick={onAction}
+      >
+        {actionLabel}
+      </Button>
+    </li>
+  )
+}
+
 // ---------------------------------------------------------------- page
 
 export default function StatutoryPage() {
@@ -1578,6 +1744,20 @@ export default function StatutoryPage() {
           )}
         </PageSection>
 
+        {/* Guided flow: sits above the advanced sections so a first-time admin knows what to do
+           next. The advanced sections below remain — this is progressive disclosure, not deletion. */}
+        {selectedId && (
+          <ReturnReadyChecklist
+            profileId={selectedId}
+            detail={detail.data ?? undefined}
+            validate={validate.data ?? undefined}
+            onRunValidate={async () => {
+              const res = await validate.refetch()
+              if (res.error) err(toast, 'Could not validate')(res.error)
+            }}
+          />
+        )}
+
         <PageSection
           icon={FileUp}
           title="Statutory advisories"
@@ -1589,6 +1769,7 @@ export default function StatutoryPage() {
 
         {selectedId && (
           <PageSection
+            id={SECTION_IDS.signoff}
             icon={ShieldCheck}
             title="Sign-off &amp; mandatory-field readiness"
             accent="primary"
@@ -1600,6 +1781,7 @@ export default function StatutoryPage() {
 
         {selectedId && (
           <PageSection
+            id={SECTION_IDS.fields}
             icon={ListChecks}
             title={detail.data ? `${detail.data.code} — ${detail.data.academicYear}` : 'Field mappings'}
             accent="accent"
@@ -1660,11 +1842,19 @@ export default function StatutoryPage() {
                       <TableRow>
                         <TableHead>#</TableHead>
                         <TableHead>Target field</TableHead>
-                        <TableHead>Source expression</TableHead>
-                        <TableHead>Keyed on record</TableHead>
-                        <TableHead>Transform</TableHead>
+                        <TableHead className="whitespace-nowrap">
+                          Source expression <JargonTip term="source expression" />
+                        </TableHead>
+                        <TableHead className="whitespace-nowrap">
+                          Keyed on record <JargonTip term="keyed on record" />
+                        </TableHead>
+                        <TableHead>
+                          Transform <JargonTip term="transform" />
+                        </TableHead>
                         <TableHead>Required</TableHead>
-                        <TableHead>Allowed values</TableHead>
+                        <TableHead className="whitespace-nowrap">
+                          Allowed values <JargonTip term="allowed values" />
+                        </TableHead>
                         <TableHead>Default</TableHead>
                         {canConfigure && !detail.data.signedOff && <TableHead className="text-right">Map</TableHead>}
                       </TableRow>
@@ -1708,8 +1898,10 @@ export default function StatutoryPage() {
                 )}
 
                 {showValidation && validate.data && (
-                  <div className="pt-3 border-t border-border">
-                    <p className="text-label mb-2">Validation report</p>
+                  <div id={SECTION_IDS.validation} className="pt-3 border-t border-border scroll-mt-4 rounded-md">
+                    <p className="text-label mb-2 inline-flex items-center gap-1.5">
+                      Validation report <JargonTip term="validation report" />
+                    </p>
                     <ValidationReportView
                       result={validate.data.validation}
                       rowCount={validate.data.rowCount}
