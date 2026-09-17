@@ -296,8 +296,16 @@ export interface DefaultSuggestion {
   allowedValues: string[]
   suggested: string | null
   reason: string
-  source: 'model' | 'fallback' | 'skip'
+  /** Where the suggested value comes from: the cohort's own data, a spec convention, or nothing. */
+  source: 'data' | 'convention' | 'skip'
   applicable: boolean
+  evidence: {
+    total: number
+    populated: number
+    empty: number
+    unique: number
+    topValues: { value: string; count: number }[]
+  }
 }
 
 /** GET grounded per-field default suggestions (AI classify + rule fallback). */

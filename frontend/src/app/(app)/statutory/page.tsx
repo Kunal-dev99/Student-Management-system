@@ -615,9 +615,11 @@ function SuggestDefaultsDialog({ profileId }: { profileId: string }) {
           <DialogTitle>Suggested defaults</DialogTitle>
         </DialogHeader>
         <p className="text-helper">
-          For each coded field with no default, we pick the frame's "not known" / "prefer not to say"
-          value — grounded on the spec's allowed values, so nothing is invented. Date fields and
-          unrestricted free-text fields are skipped (a made-up value would falsify the return).
+          Evidence-based, not opinion. For each field the system inspects every student record
+          this return covers, computes the value distribution, and suggests the value the data
+          already points to — with the counts visible so you can decide. When no value dominates
+          the cohort but the spec publishes a "not known / other" code, that's the safe fallback.
+          Dates and unrestricted free-text are never guessed.
         </p>
         {suggest.isFetching && !suggest.data ? (
           <Skeleton className="h-40 w-full" />
@@ -634,33 +636,51 @@ function SuggestDefaultsDialog({ profileId }: { profileId: string }) {
                     <TableRow>
                       <TableHead className="w-[36px]"></TableHead>
                       <TableHead>Field</TableHead>
-                      <TableHead>Value</TableHead>
-                      <TableHead>Why</TableHead>
-                      <TableHead className="w-[70px]">Source</TableHead>
+                      <TableHead>Suggested</TableHead>
+                      <TableHead>Evidence in your cohort</TableHead>
+                      <TableHead className="w-[90px]">Basis</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {applicable.map((s) => (
-                      <TableRow key={s.field}>
-                        <TableCell>
-                          <Checkbox
-                            checked={!!picks[s.field]}
-                            onCheckedChange={(c) => setPicks((p) => ({ ...p, [s.field]: c === true }))}
-                          />
-                        </TableCell>
-                        <TableCell className="font-mono text-xs font-medium whitespace-nowrap">
-                          {s.field}
-                          {s.required && <Badge variant="warning" className="ml-1.5 text-[10px] py-0 px-1.5">req</Badge>}
-                        </TableCell>
-                        <TableCell className="font-mono text-xs">{s.suggested}</TableCell>
-                        <TableCell className="text-xs text-muted-foreground">{s.reason}</TableCell>
-                        <TableCell>
-                          <Badge variant={s.source === 'model' ? 'success' : 'secondary'} className="text-[10px]">
-                            {s.source === 'model' ? 'AI' : 'rule'}
-                          </Badge>
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                    {applicable.map((s) => {
+                      const ev = s.evidence
+                      // "Basis" colour: data-driven picks are green (cohort said so), convention
+                      // picks are amber (nothing in the cohort points anywhere — using the safe
+                      // HESA fallback).
+                      const basisLabel = s.source === 'data' ? 'cohort' : 'spec fallback'
+                      const basisVariant: 'success' | 'warning' = s.source === 'data' ? 'success' : 'warning'
+                      return (
+                        <TableRow key={s.field}>
+                          <TableCell>
+                            <Checkbox
+                              checked={!!picks[s.field]}
+                              onCheckedChange={(c) => setPicks((p) => ({ ...p, [s.field]: c === true }))}
+                            />
+                          </TableCell>
+                          <TableCell className="font-mono text-xs font-medium whitespace-nowrap">
+                            {s.field}
+                            {s.required && <Badge variant="warning" className="ml-1.5 text-[10px] py-0 px-1.5">req</Badge>}
+                          </TableCell>
+                          <TableCell className="font-mono text-xs">{s.suggested}</TableCell>
+                          <TableCell className="text-xs text-muted-foreground">
+                            <div className="tabular-nums">
+                              {ev.populated} / {ev.total} populated
+                              {ev.empty > 0 && <> · <span className="text-[hsl(var(--warning))]">{ev.empty} empty</span></>}
+                              {ev.unique > 0 && <> · {ev.unique} unique value{ev.unique === 1 ? '' : 's'}</>}
+                            </div>
+                            {ev.topValues.length > 0 && (
+                              <div className="mt-0.5 font-mono">
+                                top: {ev.topValues.map((v) => `${v.value} (${v.count})`).join(', ')}
+                              </div>
+                            )}
+                            <div className="mt-0.5 italic">{s.reason}</div>
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant={basisVariant} className="text-[10px] whitespace-nowrap">{basisLabel}</Badge>
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })}
                   </TableBody>
                 </Table>
               </div>

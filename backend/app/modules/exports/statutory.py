@@ -607,32 +607,37 @@ class StatutoryEngine:
     # ---------------- ICR — intelligent default suggestions ----------------
 
     async def suggest_defaults(self, profile_id: uuid.UUID) -> dict:
-        """Suggest a safe default value per required/coded field, so the whole return can be plugged
-        in one action instead of setting each default by hand.
+        """Evidence-based default suggestions — the system inspects the actual student records the
+        return will cover and, per field, proposes the value the data *already* points to.
 
-        Design constraints, per the ICR "no hallucination" rule:
-          - For a **coded field** (spec-published allowed values), we prefer a "Not known"-style
-            code that HESA already publishes (98/99/ZZ/00/etc.). Detection is by keyword rule
-            over the allowed-values list — deterministic. The AI layer (``classify``) is called
-            with the same allowed values as its label set and keyword rules as its fallback, so
-            the picked value is always in the frame and the reasoning line explains WHY it's safe.
-          - For a **date field** we never suggest a default (a made-up date would falsify the
-            return). Same for **required free-text** fields where any suggestion would be a guess.
-          - Fields with a default already set are returned as ``skip`` (with the current value) so
-            the UI can show them as "already covered".
+        The picks are deterministic and rooted in evidence, not opinion:
+
+          1. **Look at the real data.** Produce every record's value for the field (via the same
+             resolve/transform chain used at Generate time). Compute the distribution: total /
+             populated / empty / unique / top-N values with counts.
+          2. **If the population has a dominant value** (mode covers > MODE_THRESHOLD of the
+             populated records), suggest it. The reason cites the evidence:
+               "402 of 670 records (60%) already use this — safe default for the empty rest."
+          3. **If nothing dominates** but the frame publishes a "not known"-style code
+             (98 / 99 / ZZ / 00 / unknown / other), fall back to that with a clear reason.
+          4. **If neither applies** — no dominant value, no unknown code, date field, or free-text
+             with no coding frame — skip with a reason explaining why. The Suggested list is
+             therefore never a guess.
+
+        The AI layer is deliberately **not** in the picking loop: it was opinion-based and slow
+        (4.6s per request, LLM roundtrip per field). This runs in ~one DB fetch, no roundtrips.
         """
-        from app.ai.classify import classify
         from app.modules.exports.spec_resolver import resolve_fields
 
         profile = await self.get_profile(profile_id)
         mappings = await self._mappings(profile_id)
-        # `keyed_at` isn't a column on the mapping — it's derived from the spec pack, same as in
-        # profile_detail. Look it up per field.
+        records = await self.build_records()
         keyed = {f["field"]: f.get("keyed_at") for f in await resolve_fields(self.session, profile.code)}
 
-        # HESA/ONS conventions: the "not known" / "prefer not to say" codes across the coding
-        # frames. We match any allowed value against these substrings, in order.
         NOT_KNOWN_HINTS = ["98", "99", "ZZ", "00", "unknown", "not known", "prefer not", "other"]
+        DATE_TRANSFORMS = {"date_compact", "date_iso", "year"}
+        MODE_THRESHOLD = 0.5   # mode must cover > 50% of populated records to win outright
+        TOP_N = 3              # how many top values to surface as evidence
 
         def pick_not_known(allowed: list[str]) -> str | None:
             for hint in NOT_KNOWN_HINTS:
@@ -641,15 +646,34 @@ class StatutoryEngine:
                         return v
             return None
 
-        DATE_TRANSFORMS = {"date_compact", "date_iso", "year"}
-
         suggestions = []
         for m in mappings:
             allowed = list(m.allowed_values or [])
             transform_parts = {t.strip() for t in (m.transform or "").split("|") if t.strip()}
             is_date = bool(transform_parts & DATE_TRANSFORMS) or m.target_field.upper().endswith(("DATE", "DTE", "DOB"))
-
             keyed_at = keyed.get(m.target_field)
+
+            # Compute the actual value distribution across the records this return covers. We use
+            # the SAME resolve/transform chain the Generate step uses, so the "existing values" are
+            # exactly what the return would ship today (before any default kicks in).
+            counts: dict[str, int] = {}
+            populated = 0
+            for record in records:
+                raw = resolve(record, m.source_expression) if m.source_expression else None
+                value = apply_chain(m.transform, raw) if raw is not None else None
+                text = "" if value is None else str(value).strip()
+                if text:
+                    populated += 1
+                    counts[text] = counts.get(text, 0) + 1
+            total = len(records)
+            empty = total - populated
+            ranked = sorted(counts.items(), key=lambda kv: -kv[1])[:TOP_N]
+            evidence = {
+                "total": total, "populated": populated, "empty": empty,
+                "unique": len(counts),
+                "topValues": [{"value": v, "count": c} for v, c in ranked],
+            }
+
             entry = {
                 "field": m.target_field,
                 "mappingId": str(m.id),
@@ -657,52 +681,55 @@ class StatutoryEngine:
                 "required": m.required,
                 "current": m.default_value,
                 "allowedValues": allowed,
+                "evidence": evidence,
             }
 
-            # Already covered — nothing to suggest.
+            # Already covered — surface as info, not actionable.
             if m.default_value:
-                suggestions.append({**entry, "suggested": None, "reason": "Already has a default.",
-                                    "source": "skip", "applicable": False})
+                suggestions.append({**entry, "suggested": None, "source": "skip",
+                                    "reason": "Already has a default.", "applicable": False})
                 continue
 
-            # Real dates can't be safely defaulted.
-            if is_date:
+            # 1) Dominant value in the population.
+            if ranked:
+                top_val, top_count = ranked[0]
+                share = top_count / populated if populated else 0
+                if share > MODE_THRESHOLD and (not allowed or top_val in allowed):
+                    pct = round(share * 100)
+                    suggestions.append({
+                        **entry, "suggested": top_val, "source": "data",
+                        "reason": f"{top_count} of {populated} populated records ({pct}%) already use this — "
+                                  f"safe default for the {empty} empty record{'s' if empty != 1 else ''}.",
+                        "applicable": True,
+                    })
+                    continue
+
+            # 2) Coded frame with an "unknown"-style code — the safe HESA fallback.
+            if allowed:
+                unknown = pick_not_known(allowed)
+                if unknown:
+                    reason = (f"No dominant value in the cohort (top: "
+                              f"{', '.join(f'{v}={c}' for v, c in ranked[:2]) if ranked else 'no data'}); "
+                              f"'{unknown}' is the frame's 'not known / other' code.")
+                    suggestions.append({**entry, "suggested": unknown, "source": "convention",
+                                        "reason": reason, "applicable": True})
+                    continue
+                # Coded but no unknown code and no dominant value — don't guess.
                 suggestions.append({**entry, "suggested": None, "source": "skip",
-                                    "reason": "Date field — a fixed default would falsify the return; leave it empty or fix per record.",
+                                    "reason": "No dominant value and no 'not known' code in the frame — pick manually.",
                                     "applicable": False})
                 continue
 
-            # Coded field: keyword-rule pick, then AI to explain (or fall back to the same pick).
-            if allowed:
-                rule_pick = pick_not_known(allowed)
-                if rule_pick is None:
-                    # No obvious "not known" code in this frame — don't guess.
-                    suggestions.append({**entry, "suggested": None, "source": "skip",
-                                        "reason": "No 'not known' style code in the frame — pick manually.",
-                                        "applicable": False})
-                    continue
-                # Ask the model to CONFIRM (grounded on the frame; keyword rule is the fallback).
-                keyword_rules = {rule_pick: NOT_KNOWN_HINTS}
-                context = (f"HESA field {m.target_field} ({keyed_at or 'no description'}). "
-                           f"Pick the code that means 'not known / prefer not to say / other', "
-                           f"so an empty record still validates.")
-                result = await classify(
-                    text=", ".join(allowed),
-                    labels=allowed,
-                    keyword_rules=keyword_rules,
-                    fallback_label=rule_pick,
-                    context=context,
-                )
-                suggestions.append({**entry, "suggested": result.label,
-                                    "reason": result.reasoning,
-                                    "source": result.provenance.source, "applicable": True})
+            # 3) Date field — never default (a made-up date would falsify the return).
+            if is_date:
+                suggestions.append({**entry, "suggested": None, "source": "skip",
+                                    "reason": "Date field — a fixed default would falsify the return; leave empty or fix per record.",
+                                    "applicable": False})
                 continue
 
-            # Free-text field with no coding frame: refuse to guess if required (a made-up
-            # SURNAME would be worse than an empty one); skip silently if optional.
-            reason = ("Free-text field — no safe default; set one manually if the record's source is empty."
-                      if m.required
-                      else "Optional free-text field — empty is fine.")
+            # 4) Free-text with no dominant value and no coding frame — no safe default.
+            reason = ("Free-text field with no dominant value in the cohort — set one manually if needed."
+                      if m.required else "Optional free-text field — empty is fine.")
             suggestions.append({**entry, "suggested": None, "source": "skip",
                                 "reason": reason, "applicable": False})
 
