@@ -269,6 +269,7 @@ async def request_lifecycle_event(
         start_date=body.start_date, end_date=body.end_date,
         extension_days=body.extension_days, new_mode=body.new_mode,
         intensity_pct=body.intensity_pct,
+        new_programme_id=body.new_programme_id,
         requested_by_user_id=principal.user_id,
     )
     return LifecycleEventOut.model_validate(svc.out(event))

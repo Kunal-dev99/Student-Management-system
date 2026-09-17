@@ -86,6 +86,9 @@ class LifecycleService:
             "daysApplied": ev.days_applied,
             "decisionNote": ev.decision_note,
             "decidedAt": ev.decided_at.isoformat() if ev.decided_at else None,
+            "previousProgrammeId": str(ev.previous_programme_id) if ev.previous_programme_id else None,
+            "newProgrammeId": str(ev.new_programme_id) if ev.new_programme_id else None,
+            "effectiveDate": ev.effective_date.isoformat() if ev.effective_date else None,
         }
 
     # ---------------- request ----------------
@@ -101,6 +104,7 @@ class LifecycleService:
         extension_days: int | None = None,
         new_mode: StudyMode | None = None,
         intensity_pct: int | None = None,
+        new_programme_id: uuid.UUID | None = None,
         requested_by_user_id: uuid.UUID | None = None,
     ) -> StudentLifecycleEvent:
         """Record a request. Changes nothing about the student until it is approved."""
@@ -109,6 +113,7 @@ class LifecycleService:
             raise WorkflowError("A reason is required")
 
         previous_intensity: int | None = None
+        previous_programme_id: uuid.UUID | None = None
 
         if event_type is LifecycleEventType.suspension:
             if student.status not in SUSPENDABLE_STATUSES:
@@ -134,6 +139,16 @@ class LifecycleService:
             previous_intensity = await self._current_intensity(student)
             if intensity_pct == previous_intensity:
                 raise WorkflowError(f"The student is already studying at {intensity_pct}% intensity")
+        elif event_type is LifecycleEventType.programme_change:
+            if new_programme_id is None:
+                raise WorkflowError("A programme change needs the new programme id")
+            if student.programme_id == new_programme_id:
+                raise WorkflowError("The student is already on that programme")
+            from app.modules.student_record.models import Programme
+            new_prog = await self.session.get(Programme, new_programme_id)
+            if new_prog is None:
+                raise NotFoundError("Target programme not found")
+            previous_programme_id = student.programme_id
 
         event = StudentLifecycleEvent(
             student_id=student_id, event_type=event_type,
@@ -143,6 +158,13 @@ class LifecycleService:
             new_mode=new_mode,
             previous_intensity_pct=previous_intensity,
             intensity_pct=intensity_pct if event_type is LifecycleEventType.intensity_change else None,
+            previous_programme_id=previous_programme_id,
+            new_programme_id=(
+                new_programme_id if event_type is LifecycleEventType.programme_change else None
+            ),
+            effective_date=(
+                start_date if event_type is LifecycleEventType.programme_change else None
+            ),
             reason=reason, requested_by_user_id=requested_by_user_id,
         )
         self.session.add(event)
@@ -161,6 +183,28 @@ class LifecycleService:
         await self.session.commit()
         await self.session.refresh(event)
         return event
+
+    async def request_programme_change(
+        self,
+        student_id: uuid.UUID,
+        *,
+        new_programme_id: uuid.UUID,
+        effective_date: date,
+        reason: str,
+        requested_by_user_id: uuid.UUID | None = None,
+    ) -> StudentLifecycleEvent:
+        """Convenience wrapper — mid-term programme transfer piggy-backs on ``request_event`` so
+        the same requested -> approve -> recalculate pipeline runs for it. ``effective_date`` is
+        stored on both ``start_date`` (for the shared event surface) and ``effective_date`` (the
+        programme-change-specific field the recalculate step reads)."""
+        return await self.request_event(
+            student_id,
+            event_type=LifecycleEventType.programme_change,
+            reason=reason,
+            start_date=effective_date,
+            new_programme_id=new_programme_id,
+            requested_by_user_id=requested_by_user_id,
+        )
 
     async def _assert_no_overlap(self, student_id: uuid.UUID, start: date, end: date) -> None:
         for ev in await self.events_for_student(student_id):
@@ -213,6 +257,15 @@ class LifecycleService:
                 StudyMode.full_time if (event.intensity_pct or 0) >= FULL_TIME_INTENSITY_PCT
                 else StudyMode.part_time
             )
+        elif event.event_type is LifecycleEventType.programme_change:
+            # Programme transfer has its own recalc — no days_applied contribution; the
+            # timeline is rebuilt from the new programme's duration, not from a delta.
+            recalc = await self._recalculate_programme_change(student, event)
+            await self.session.commit()
+            await self.session.refresh(event)
+            return {"event": self.out(event), "recalculation": recalc,
+                    "warnings": recalc.get("warnings", []),
+                    "crossType": recalc.get("crossType", False)}
 
         recalc = await self._recalculate(student)
         await self.session.commit()
@@ -492,6 +545,163 @@ class LifecycleService:
         return None
 
     # ---------------- recalculation ----------------
+
+    async def _recalculate_programme_change(
+        self, student: Student, event: StudentLifecycleEvent,
+    ) -> dict:
+        """Swap the student's current programme, rebuild the milestone schedule from the new
+        programme's definitions, and recompute the expected end date from the effective date +
+        the new programme's duration. The original agreed end date stays put (baseline immutability
+        — the transfer changes the plan going forward, it does not rewrite what was agreed at
+        registration).
+
+        Cross-type transfers (research <-> taught) are allowed — the domain model won't stop you —
+        but a warning is returned so the approver sees the carry-over concerns.
+        """
+        from datetime import timedelta
+
+        from app.modules.progression.models import Milestone, MilestoneDefinition
+        from app.modules.student_record.models import Programme
+        from app.modules.student_record.service import _add_months
+
+        old_prog = await self.session.get(Programme, student.programme_id) if student.programme_id else None
+        new_prog = await self.session.get(Programme, event.new_programme_id)
+        if new_prog is None:
+            raise NotFoundError("Target programme not found")
+
+        effective = event.effective_date or event.start_date
+        cross_type = bool(old_prog and old_prog.programme_type != new_prog.programme_type)
+        warnings: list[str] = []
+        if cross_type:
+            warnings.append(
+                f"Cross-type transfer: {old_prog.programme_type.value} -> {new_prog.programme_type.value}. "
+                "Existing supervisors and funding arrangements are student-scoped and carry over unchanged; "
+                "review whether the supervisory team and funding source remain appropriate for the new programme."
+            )
+        else:
+            warnings.append(
+                "Existing supervisors and funding arrangements carry over unchanged — review whether they "
+                "remain appropriate under the new programme."
+            )
+
+        # 1) Swap the current programme pointer.
+        student.programme_id = new_prog.id
+
+        # 2) Cancel undecided milestones from the old schedule (decided = historical fact).
+        cancelled = 0
+        cancel_note = f"superseded by programme change to {new_prog.code}"
+        rows = (await self.session.execute(
+            select(Milestone).where(Milestone.student_id == student.id)
+        )).scalars().unique().all()
+        for m in rows:
+            if m.status == MilestoneStatus.decided or m.status == MilestoneStatus.cancelled:
+                continue
+            m.status = MilestoneStatus.cancelled
+            # Preserve the reason inline (Milestone has no dedicated note column) — the existing
+            # name (or definition-derived name) is kept intact by prefixing.
+            if m.name:
+                m.name = f"{m.name} ({cancel_note})"
+            else:
+                m.name = cancel_note
+            cancelled += 1
+
+        # 3) Generate the new programme's milestone schedule from the effective date. We inline the
+        #    generator here (rather than calling ProgressionService.generate_full_schedule) because
+        #    the offsets must anchor on ``effective``, not on the student's original start_date.
+        defs = (await self.session.execute(
+            select(MilestoneDefinition)
+            .where(MilestoneDefinition.programme_id == new_prog.id)
+            .order_by(MilestoneDefinition.due_offset_days)
+        )).scalars().all()
+        from app.modules.progression.constants import MilestoneOrigin
+        generated = 0
+        today = date.today()
+        for defn in defs:
+            due = effective + timedelta(days=defn.due_offset_days)
+            status = MilestoneStatus.due if due <= today else MilestoneStatus.not_started
+            self.session.add(Milestone(
+                student_id=student.id,
+                milestone_definition_id=defn.id,
+                due_date=due,
+                status=status,
+                origin=MilestoneOrigin.template,
+            ))
+            generated += 1
+
+        # 4) Recompute expected end from the effective date + the new programme's duration. Leave
+        #    original_expected_end_date alone — the baseline is what Registry agreed to.
+        previous_end = student.expected_end_date
+        if new_prog.duration_months:
+            student.expected_end_date = _add_months(effective, new_prog.duration_months)
+        # If the new programme has no configured duration, leave expected_end_date unchanged so
+        # the return still has a date to show; the warning below flags it.
+        elif student.expected_end_date is None:
+            warnings.append(
+                f"The new programme '{new_prog.code}' has no configured duration — set duration_months on "
+                "the programme or update the student's expected end date manually."
+            )
+
+        return {
+            "effectiveDate": effective.isoformat(),
+            "previousProgrammeId": str(event.previous_programme_id) if event.previous_programme_id else None,
+            "newProgrammeId": str(new_prog.id),
+            "previousProgrammeCode": old_prog.code if old_prog else None,
+            "newProgrammeCode": new_prog.code,
+            "crossType": cross_type,
+            "milestonesCancelled": cancelled,
+            "milestonesGenerated": generated,
+            "previousExpectedEnd": previous_end.isoformat() if previous_end else None,
+            "newExpectedEnd": student.expected_end_date.isoformat() if student.expected_end_date else None,
+            "originalExpectedEnd": (
+                student.original_expected_end_date.isoformat()
+                if student.original_expected_end_date else None
+            ),
+            "warnings": warnings,
+        }
+
+    async def programme_periods_for(
+        self, student: Student, *, year_start: date, year_end: date,
+    ) -> list[dict]:
+        """Slice the student's registration inside the given return window into per-programme
+        periods, honouring every approved ``programme_change`` event on the record.
+
+        A student with no approved programme changes yields a single period covering their whole
+        registration inside the window. Each mid-window change ends the running period on the day
+        before the effective date and opens a fresh one on the effective date.
+        """
+        start = student.start_date or year_start
+        end_cap = student.expected_end_date or year_end
+        events = sorted(
+            [
+                e for e in await self.events_for_student(student.id)
+                if e.event_type is LifecycleEventType.programme_change
+                and e.status is LifecycleEventStatus.approved
+                and e.new_programme_id is not None
+                and e.effective_date is not None
+            ],
+            key=lambda e: e.effective_date,
+        )
+
+        # Walk the timeline from ``start`` forward, opening a new period at each change.
+        periods: list[tuple[date, date, uuid.UUID | None]] = []
+        cur_from = start
+        # The programme in force at ``cur_from`` — earliest change tells us what came before it.
+        cur_prog = events[0].previous_programme_id if events else student.programme_id
+        for ev in events:
+            if ev.effective_date > cur_from:
+                periods.append((cur_from, ev.effective_date, cur_prog))
+            cur_from = ev.effective_date
+            cur_prog = ev.new_programme_id
+        periods.append((cur_from, max(end_cap, cur_from), cur_prog))
+
+        # Clip each period to the return's academic-year window; drop anything outside it.
+        out: list[dict] = []
+        for p_from, p_to, prog_id in periods:
+            lo = max(p_from, year_start)
+            hi = min(p_to, year_end)
+            if hi > lo:
+                out.append({"programme_id": prog_id, "period_start": lo, "period_end": hi})
+        return out
 
     async def _recalculate(self, student: Student) -> dict:
         """Rebuild the expected end date from the original plus every approved adjustment.

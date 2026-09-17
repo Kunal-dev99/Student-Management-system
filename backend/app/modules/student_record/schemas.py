@@ -57,6 +57,7 @@ class LifecycleEventRequest(_Camel):
     extension_days: int | None = None       # required for an extension
     new_mode: StudyMode | None = None       # required for a mode change
     intensity_pct: int | None = None        # required for an intensity change (1-100)
+    new_programme_id: uuid.UUID | None = None  # required for a programme change; start_date is the effective date
 
 
 class LifecycleDecision(_Camel):
@@ -80,6 +81,9 @@ class LifecycleEventOut(_Camel):
     new_mode: StudyMode | None = None
     previous_intensity_pct: int | None = None
     intensity_pct: int | None = None
+    previous_programme_id: str | None = None
+    new_programme_id: str | None = None
+    effective_date: str | None = None
     reason: str
     days_applied: int | None = None
     decision_note: str | None = None

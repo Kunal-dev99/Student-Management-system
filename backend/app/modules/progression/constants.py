@@ -11,6 +11,9 @@ class MilestoneStatus(str, enum.Enum):
     under_review = "under_review"
     decided = "decided"
     overdue = "overdue"
+    # A milestone that was scheduled but is no longer expected (e.g. superseded by a programme
+    # transfer). Distinct from decided (which is a historical fact with a recorded outcome).
+    cancelled = "cancelled"
 
 
 class MilestoneOrigin(str, enum.Enum):

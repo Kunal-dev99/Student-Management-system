@@ -366,9 +366,28 @@ class StatutoryEngine:
 
     # ---------------- the flat record every mapping reads from ----------------
 
-    async def build_records(self) -> list[dict]:
-        """One flat dict per student. This is the *only* contract mappings depend on, so the
-        domain model can evolve without breaking every configured return."""
+    @staticmethod
+    def _year_window(academic_year: str | None) -> tuple[date, date] | None:
+        """Parse a HESA-style academic year ('2026/27') into a UK-year window
+        (1 Aug of the start year -> 31 Jul of the following year). Returns None for a bad or
+        missing value so per-student single-record behaviour still runs."""
+        if not academic_year:
+            return None
+        head = academic_year.split("/", 1)[0].strip()
+        if not head.isdigit() or len(head) != 4:
+            return None
+        y = int(head)
+        return date(y, 8, 1), date(y + 1, 7, 31)
+
+    async def build_records(self, academic_year: str | None = None) -> list[dict]:
+        """One flat dict per student — or, when an ``academic_year`` is supplied and the student
+        transferred programme mid-year, one dict *per programme period* the student was on during
+        that year. Each period's dict resolves ``programme`` from the programme in force for that
+        window, so a single student can legitimately appear on the return under both programme
+        codes (with the entry/end dates clipped to the period).
+
+        This is the *only* contract mappings depend on, so the domain model can evolve without
+        breaking every configured return."""
         from app.modules.funding.constants import FundingStatus
         from app.modules.funding.models import FundingArrangement, FundingSource
         from app.modules.person.models import Person
@@ -416,50 +435,115 @@ class StatutoryEngine:
         from app.modules.settings.service import setting_value
         inst_code = await setting_value(self.session, "statutory.husid_institution_code")
 
+        # Per-period slicing (mid-term programme transfer). Only kicks in when an academic year is
+        # supplied AND the student has an approved programme_change inside the window. Every other
+        # student still emits exactly one record — the historical behaviour is preserved.
+        from app.modules.student_record.lifecycle import LifecycleService
+
+        window = self._year_window(academic_year)
+        lifecycle = LifecycleService(self.session) if window else None
+
+        def _period_ref(base_ref: str, prog_code: str | None, period_start: date) -> str:
+            # Row identity: a no-change record keeps the raw student_ref; a per-period record
+            # extends it with the programme code + period start so downstream de-dup by ref works.
+            return f"{base_ref}::{prog_code or 'NONE'}::{period_start.isoformat()}"
+
         records = []
         for student, person in rows:
             fa = funding.get(student.id)
             proj = projects.get(student.id)
-            prog = programmes.get(student.programme_id)
             award = awards.get(proj.research_award_id) if proj and proj.research_award_id else None
-            records.append({
-                "student": {
-                    "ref": student.student_ref,
-                    "status": student.status.value if hasattr(student.status, "value") else student.status,
-                    "mode": student.study_mode.value if hasattr(student.study_mode, "value") else student.study_mode,
-                    "startDate": student.start_date,
-                    "expectedEndDate": student.expected_end_date,
-                    "originalExpectedEndDate": student.original_expected_end_date,
-                    "entryRoute": routes.get(student.person_id),
-                    "intensityPct": latest_intensity.get(
-                        student.id,
-                        FULL_TIME_INTENSITY_PCT if student.study_mode is StudyMode.full_time
-                        else DEFAULT_PART_TIME_INTENSITY_PCT,
-                    ),
-                    "husid": husid(
-                        inst_code,
-                        student.start_date.year if student.start_date else None,
-                        student.student_ref,
-                    ),
-                },
-                "person": {
-                    "givenName": person.given_name, "familyName": person.family_name,
-                    "nationality": person.nationality, "email": person.email,
-                    "dateOfBirth": getattr(person, "date_of_birth", None),
-                },
-                "programme": {"name": prog.name if prog else None, "code": prog.code if prog else None},
-                "research": {"topic": proj.research_topic if proj else None,
-                             "group": proj.research_group if proj else None},
-                "funding": {
-                    "type": fa.funding_type.value if fa else None,
-                    "source": sources[fa.funding_source_id].name if fa and fa.funding_source_id in sources else None,
-                    "amount": fa.stipend_amount if fa else None,
-                    "currency": fa.currency if fa else None,
-                    "costCentre": fa.cost_centre if fa else None,
-                },
-                "award": {"ref": award.award_ref if award else None,
-                          "title": award.title if award else None},
-            })
+
+            slices: list[dict] = []
+            if window:
+                slices = await lifecycle.programme_periods_for(
+                    student, year_start=window[0], year_end=window[1],
+                )
+            # Only fan out when the student was demonstrably on more than one programme inside
+            # the window; a single period (or a student with no programme change at all) keeps the
+            # historical single-record shape, so existing returns validate identically.
+            fan_out = len(slices) > 1
+
+            common_person = {
+                "givenName": person.given_name, "familyName": person.family_name,
+                "nationality": person.nationality, "email": person.email,
+                "dateOfBirth": getattr(person, "date_of_birth", None),
+            }
+            common_research = {"topic": proj.research_topic if proj else None,
+                               "group": proj.research_group if proj else None}
+            common_funding = {
+                "type": fa.funding_type.value if fa else None,
+                "source": sources[fa.funding_source_id].name if fa and fa.funding_source_id in sources else None,
+                "amount": fa.stipend_amount if fa else None,
+                "currency": fa.currency if fa else None,
+                "costCentre": fa.cost_centre if fa else None,
+            }
+            common_award = {"ref": award.award_ref if award else None,
+                            "title": award.title if award else None}
+            base_intensity = latest_intensity.get(
+                student.id,
+                FULL_TIME_INTENSITY_PCT if student.study_mode is StudyMode.full_time
+                else DEFAULT_PART_TIME_INTENSITY_PCT,
+            )
+
+            if not fan_out:
+                # Backwards-compatible single record — no fan-out required.
+                prog = programmes.get(student.programme_id)
+                records.append({
+                    "student": {
+                        "ref": student.student_ref,
+                        "status": student.status.value if hasattr(student.status, "value") else student.status,
+                        "mode": student.study_mode.value if hasattr(student.study_mode, "value") else student.study_mode,
+                        "startDate": student.start_date,
+                        "expectedEndDate": student.expected_end_date,
+                        "originalExpectedEndDate": student.original_expected_end_date,
+                        "entryRoute": routes.get(student.person_id),
+                        "intensityPct": base_intensity,
+                        "husid": husid(
+                            inst_code,
+                            student.start_date.year if student.start_date else None,
+                            student.student_ref,
+                        ),
+                    },
+                    "person": common_person,
+                    "programme": {"name": prog.name if prog else None, "code": prog.code if prog else None},
+                    "research": common_research,
+                    "funding": common_funding,
+                    "award": common_award,
+                })
+                continue
+
+            # Per-period fan-out — one record per programme window inside the return year. COMDATE
+            # and ENDDATE clip to the period so a student that ran on Programme A until 31 Jan and
+            # Programme B from 1 Feb shows the right dates against each row.
+            for slot in slices:
+                prog = programmes.get(slot["programme_id"])
+                prog_code = prog.code if prog else None
+                sliced_ref = _period_ref(student.student_ref, prog_code, slot["period_start"])
+                records.append({
+                    "student": {
+                        "ref": sliced_ref,
+                        "status": student.status.value if hasattr(student.status, "value") else student.status,
+                        "mode": student.study_mode.value if hasattr(student.study_mode, "value") else student.study_mode,
+                        "startDate": slot["period_start"],
+                        "expectedEndDate": slot["period_end"],
+                        "originalExpectedEndDate": student.original_expected_end_date,
+                        "entryRoute": routes.get(student.person_id),
+                        "intensityPct": base_intensity,
+                        # HUSID is per-student (not per period) — the person is one student across
+                        # the return, no matter how many programmes they were on that year.
+                        "husid": husid(
+                            inst_code,
+                            student.start_date.year if student.start_date else None,
+                            student.student_ref,
+                        ),
+                    },
+                    "person": common_person,
+                    "programme": {"name": prog.name if prog else None, "code": prog_code},
+                    "research": common_research,
+                    "funding": common_funding,
+                    "award": common_award,
+                })
         return records
 
     # ---------------- generate + validate ----------------
@@ -471,7 +555,7 @@ class StatutoryEngine:
         if not mappings:
             raise WorkflowError("This profile has no field mappings, so it cannot produce a return")
 
-        records = await self.build_records()
+        records = await self.build_records(academic_year=profile.academic_year)
         header = [m.target_field for m in mappings]
         rows, issues = [], []
 

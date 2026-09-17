@@ -31,6 +31,11 @@ class LifecycleEventType(str, enum.Enum):
     extension = "extension"
     mode_change = "mode_change"
     intensity_change = "intensity_change"
+    # A mid-term move to a different programme (e.g. MPhil -> PhD, or PhD -> MSc). The event
+    # carries previous/new programme ids and an effective date; approval swaps the student's
+    # current programme, cancels undecided milestones, and generates the new programme's schedule
+    # from the effective date. Cross-type transfers are allowed with warnings.
+    programme_change = "programme_change"
 
 
 class LifecycleEventStatus(str, enum.Enum):

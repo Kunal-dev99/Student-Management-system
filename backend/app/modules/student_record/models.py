@@ -133,6 +133,15 @@ class StudentLifecycleEvent(UUIDMixin, TimestampMixin, Base):
     # ICR G4 — study intensity (FTE %) for an intensity_change event: the % before and after.
     previous_intensity_pct: Mapped[int | None] = mapped_column(Integer, nullable=True)
     intensity_pct: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Programme change (mid-term transfer): the programme in force before this event, the one
+    # after, and the date the swap takes effect. NULL for every non-programme-change event.
+    previous_programme_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("programme.id"), nullable=True,
+    )
+    new_programme_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("programme.id"), nullable=True,
+    )
+    effective_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     reason: Mapped[str] = mapped_column(Text)
     # Exactly how many days this event added to the expected end date (audit of the arithmetic).
     days_applied: Mapped[int | None] = mapped_column(Integer, nullable=True)
