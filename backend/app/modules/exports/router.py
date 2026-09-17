@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile
+from datetime import date, datetime
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, ConfigDict
 from pydantic.alias_generators import to_camel
 from fastapi.responses import Response
@@ -338,6 +340,90 @@ async def remove_suppression(
     return await _engine(session).remove_suppression(
         profile_id, rule_key=body.rule_key, scope=body.scope,
     )
+
+
+class PreviewTransformRequest(BaseModel):
+    """Ask 'what does this pipe produce over the profile's own cohort?' before saving a mapping."""
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+    source_expression: str
+    transform: str | None = None
+
+
+def _json_safe(v):
+    """Dates/datetimes aren't natively JSON serialisable; everything else passes through."""
+    if isinstance(v, (date, datetime)):
+        return v.isoformat()
+    return v
+
+
+@profiles_router.post(
+    "/{profile_id}/preview-transform",
+    summary="Dry-run a source+transform over the profile's cohort (first 20 records)",
+)
+async def preview_transform(
+    profile_id: uuid.UUID,
+    body: PreviewTransformRequest,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("admin.configure")),
+) -> dict:
+    """Feed the Add/Edit-field dialog: show the user the input value and produced output for the
+    first 20 records of *this* profile's cohort, plus distinct input/output lists. Uses exactly
+    the same resolver + transform pipeline the validation/generate step uses so what you preview
+    is what the return will ship. Per-row errors are caught so one bad record doesn't kill the
+    preview."""
+    from app.core.errors import WorkflowError
+    from app.modules.exports.statutory import (
+        _validate_transform_chain, apply_chain, resolve,
+    )
+
+    eng = _engine(session)
+    await eng.get_profile(profile_id)     # 404 if the profile doesn't exist
+
+    try:
+        _validate_transform_chain(body.transform)
+    except WorkflowError as e:
+        # Deliberately 400 here (not 422): the dialog is asking "is this pipe usable?" and expects
+        # a plain rejection, not the standard error envelope used by full mutations.
+        raise HTTPException(status_code=400, detail=str(e))
+
+    records = await eng.build_records()
+    sample = records[:20]
+
+    rows: list[dict] = []
+    input_seen: list = []
+    output_seen: list = []
+
+    def _dedupe(seen: list, value) -> None:
+        key = None if value is None else str(value)
+        for existing in seen:
+            existing_key = None if existing is None else str(existing)
+            if existing_key == key:
+                return
+        seen.append(value)
+
+    for rec in sample:
+        raw = resolve(rec, body.source_expression) if body.source_expression else None
+        try:
+            produced = apply_chain(body.transform, raw)
+            output = "" if produced is None else str(produced)
+        except Exception as e:  # noqa: BLE001 — one bad row must not kill the preview
+            msg = str(e).splitlines()[0][:160] if str(e) else e.__class__.__name__
+            output = f"!!{msg}"
+        rows.append({
+            "studentRef": rec["student"]["ref"],
+            "input": _json_safe(raw),
+            "output": output,
+        })
+        _dedupe(input_seen, _json_safe(raw))
+        _dedupe(output_seen, output)
+
+    return {
+        "sampled": len(sample),
+        "totalRecords": len(records),
+        "rows": rows,
+        "distinct": {"inputs": input_seen, "outputs": output_seen},
+        "error": None,
+    }
 
 
 @profiles_router.post("/{profile_id}/generate", status_code=201, summary="Produce the statutory extract")
