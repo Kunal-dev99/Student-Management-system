@@ -150,8 +150,8 @@ TRANSFORMS.update({
         "pgdip": "I11", "i11": "I11",
     }),
     "hesa_route": _map({
-        "opportunity": "OPPORTUNITY", "route_a": "OPPORTUNITY",
-        "proposal": "PROPOSAL", "route_b": "PROPOSAL",
+        "opportunity": "OPPORTUNITY", "opportunity_led": "OPPORTUNITY", "route_a": "OPPORTUNITY",
+        "proposal": "PROPOSAL", "student_led": "PROPOSAL", "route_b": "PROPOSAL",
     }),
 })
 
