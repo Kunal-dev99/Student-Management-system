@@ -134,6 +134,35 @@ export const useTransforms = () =>
     staleTime: 60 * 60 * 1000,
   })
 
+// -------- Record-schema catalog (source-expression dropdown) --------
+
+export interface RecordSchemaField {
+  path: string
+  label: string
+  type: 'string' | 'date' | 'number' | 'code' | 'boolean'
+  hint: string
+  nullable: boolean
+}
+export interface RecordSchemaGroup {
+  root: string
+  label: string
+  description: string
+  fields: RecordSchemaField[]
+}
+export interface RecordSchema {
+  groups: RecordSchemaGroup[]
+  paths: string[]
+}
+
+/** Catalog of dotted source paths a mapping may read from. Cached — it changes only when the
+ *  backend record-schema catalog changes (a code deploy). */
+export const useRecordSchema = () =>
+  useQuery({
+    queryKey: ['report-profile-record-schema'],
+    queryFn: () => api.get<RecordSchema>('/report-profiles/record-schema'),
+    staleTime: 60 * 60 * 1000,
+  })
+
 export interface ProfileInput {
   code: string
   name: string

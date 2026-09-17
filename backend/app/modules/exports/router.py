@@ -135,6 +135,18 @@ async def list_transforms(_=Depends(require_permission("reporting.read"))) -> di
     return {"transforms": sorted(TRANSFORMS)}
 
 
+@profiles_router.get(
+    "/record-schema",
+    summary="Catalog of dotted source paths a field mapping may read from",
+)
+async def record_schema(_=Depends(require_permission("reporting.read"))) -> dict:
+    """The authoritative list of source expressions available on the flat student record. Used by
+    the mapping form to render a dropdown so admins never mistype a path."""
+    from app.modules.exports.record_schema import as_dict
+
+    return as_dict()
+
+
 @profiles_router.get("/specs", summary="Published spec packs a profile can be created from")
 async def list_specs(
     session: AsyncSession = Depends(get_session),

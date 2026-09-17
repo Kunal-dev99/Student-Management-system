@@ -25,7 +25,7 @@ import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger,
 } from '@/components/ui/dialog'
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useToast } from '@/components/ui/use-toast'
@@ -37,7 +37,7 @@ import {
   useAddField, useCloneProfile, useCompileProfile, useCreateFromSpec, useCreateProfile,
   useGenerateProfile, useProfile, useProfiles, useSignOffProfile, useSpecs, useTransforms,
   useUnsignProfile, useValidateProfile, useFixSuggestions, useApplyFix,
-  useUpdateField, useDeleteField,
+  useUpdateField, useDeleteField, useRecordSchema,
   useSuggestDefaults, useApplyDefaults, useSuppressRule, useRemoveSuppression,
   type GenerateResult, type ReportProfile, type ValidationResult, type FieldMapping,
   type DefaultSuggestion, type ValidationIssue, type RuleAnalysis, type RuleSuppression,
@@ -170,6 +170,82 @@ function NewProfileDialog() {
   )
 }
 
+/** Grouped dropdown for a source expression — the catalog comes from GET /report-profiles
+ *  /record-schema. Falls back to a plain text input if the schema hasn't loaded (or the
+ *  currently-picked value isn't in the catalog — respects hand-typed legacy values). */
+function SourceExpressionPicker({
+  value, onChange, inputId,
+}: {
+  value: string
+  onChange: (v: string) => void
+  inputId?: string
+}) {
+  const schema = useRecordSchema()
+  const groups = schema.data?.groups
+  const paths = schema.data?.paths ?? []
+  const isCustom = !!value && !paths.includes(value)
+  const [mode, setMode] = useState<'pick' | 'custom'>(isCustom ? 'custom' : 'pick')
+
+  // If the value flips to something outside the catalog (e.g. legacy import), swap to custom
+  // mode automatically so the value stays visible to the user.
+  useEffect(() => {
+    if (isCustom && mode !== 'custom') setMode('custom')
+  }, [isCustom])   // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!groups) {
+    // Schema loading — fall back to the free-text input, don't block the user.
+    return (
+      <Input id={inputId} className="font-mono text-xs" value={value}
+        onChange={(e) => onChange(e.target.value)} placeholder="student.ref" />
+    )
+  }
+
+  return (
+    <div className="space-y-1.5">
+      {mode === 'pick' ? (
+        <Select value={value || '__unset'} onValueChange={(v) => onChange(v === '__unset' ? '' : v)}>
+          <SelectTrigger id={inputId} className="font-mono text-xs">
+            <SelectValue placeholder="Pick a source column…" />
+          </SelectTrigger>
+          <SelectContent className="max-h-80">
+            <SelectItem value="__unset">
+              <span className="italic text-muted-foreground">(unmapped — the field ships empty)</span>
+            </SelectItem>
+            {groups.map((g) => (
+              <SelectGroup key={g.root}>
+                <SelectLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                  {g.label}
+                </SelectLabel>
+                {g.fields.map((f) => (
+                  <SelectItem key={f.path} value={f.path}>
+                    <span className="font-mono text-xs">{f.path}</span>
+                    <span className="text-[10px] text-muted-foreground ml-2">{f.type}</span>
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            ))}
+          </SelectContent>
+        </Select>
+      ) : (
+        <Input id={inputId} className="font-mono text-xs" value={value}
+          onChange={(e) => onChange(e.target.value)} placeholder="custom.path" />
+      )}
+      <div className="flex items-center justify-between text-[11px]">
+        <span className="text-muted-foreground">
+          {mode === 'pick'
+            ? 'Or type your own path if it isn\'t in the list.'
+            : 'Or pick from the record catalog.'}
+        </span>
+        <button type="button"
+          className="text-muted-foreground hover:text-foreground hover:underline"
+          onClick={() => setMode((m) => m === 'pick' ? 'custom' : 'pick')}>
+          {mode === 'pick' ? 'custom path' : 'back to picker'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 interface AddFieldInitial {
   targetField?: string
   allowedValues?: string[]
@@ -250,14 +326,15 @@ function AddFieldDialog({
             </div>
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="f-src">Source expression</Label>
-            <Input id="f-src" className="font-mono text-xs" value={sourceExpression}
-              onChange={(e) => setSourceExpression(e.target.value)} placeholder="student.ref" />
+            <Label htmlFor="f-src">Source column</Label>
+            <SourceExpressionPicker
+              inputId="f-src"
+              value={sourceExpression}
+              onChange={setSourceExpression}
+            />
             <p className="text-helper">
-              A dotted path over the flat student record — <span className="font-mono text-xs">student.*</span>,{' '}
-              <span className="font-mono text-xs">person.*</span>, <span className="font-mono text-xs">programme.*</span>,{' '}
-              <span className="font-mono text-xs">research.*</span>, <span className="font-mono text-xs">funding.*</span>,{' '}
-              <span className="font-mono text-xs">award.*</span>. Deliberately not an expression language.
+              Which column on the flat student record this field reads from. Pick from the catalog or
+              switch to a custom path (deliberately not an expression language).
             </p>
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -367,15 +444,12 @@ function EditFieldDialog({
             </div>
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="e-src">Source expression (the column this field maps to)</Label>
-            <Input id="e-src" className="font-mono text-xs" value={sourceExpression}
-              onChange={(e) => setSourceExpression(e.target.value)} placeholder="student.ref" />
-            <p className="text-helper">
-              A dotted path over the flat student record — <span className="font-mono text-xs">student.*</span>,{' '}
-              <span className="font-mono text-xs">person.*</span>, <span className="font-mono text-xs">programme.*</span>,{' '}
-              <span className="font-mono text-xs">research.*</span>, <span className="font-mono text-xs">funding.*</span>,{' '}
-              <span className="font-mono text-xs">award.*</span>.
-            </p>
+            <Label htmlFor="e-src">Source column (what this field reads from)</Label>
+            <SourceExpressionPicker
+              inputId="e-src"
+              value={sourceExpression}
+              onChange={setSourceExpression}
+            />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
