@@ -19,5 +19,8 @@ echo   Health : http://localhost:8001/health/ready
 echo   Docs   : http://localhost:8001/api/v1/docs
 echo (Press Ctrl+C to stop)
 echo.
-".venv\Scripts\python.exe" -m uvicorn app.main:app --host 127.0.0.1 --port 8001 --reload
+REM Binding to 0.0.0.0 exposes the API on every network interface. Only safe when this box
+REM sits behind a firewall / reverse-proxy that fronts it; on a direct-to-internet host the
+REM API is exposed on the public IP without TLS.
+".venv\Scripts\python.exe" -m uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
 pause
