@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "pcs": {
+      "command": "C:\\Users\\KunalSharma\\OneDrive - fusionpractices.com\\Documents\\RMS_UPDATED\\Project context system\\.venv\\Scripts\\python.exe",
+      "args": [
+        "-m",
+        "pcs.cli",
+        "mcp"
+      ],
+      "env": {
+        "PCS_PROJECT_ROOT": "C:\\Users\\KunalSharma\\OneDrive - fusionpractices.com\\Documents\\RMS_UPDATED"
+      }
+    }
+  }
+}

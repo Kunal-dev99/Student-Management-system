@@ -6,7 +6,7 @@ REM  starts (so the login page never proxies to a dead backend and
 REM  users never see ECONNREFUSED spam), then open the app.
 REM
 REM  Canonical ports:
-REM    backend  :8001   (8000 is skipped — recurring orphan socket)
+REM    backend  :8000   (bound to 0.0.0.0, all interfaces)
 REM    frontend :3000
 REM ============================================================
 cd /d "%~dp0"
@@ -21,8 +21,8 @@ if not exist "frontend\node_modules" (
 )
 
 echo.
-echo Freeing ports 8001 (backend) and 3000 (frontend) if anything is holding them...
-for %%P in (8001 3000) do (
+echo Freeing ports 8000 (backend) and 3000 (frontend) if anything is holding them...
+for %%P in (8000 8001 3000) do (
     for /f "tokens=5" %%A in ('netstat -ano ^| findstr ":%%P " ^| findstr LISTENING') do (
         echo   port %%P busy - killing PID %%A
         taskkill /F /PID %%A >nul 2>&1
@@ -51,14 +51,14 @@ if errorlevel 1 (
 )
 
 echo.
-echo Launching backend window ^(:8001^)...
-start "PGR Backend (API :8001)" cmd /k "%~dp0start-backend.bat"
+echo Launching backend window ^(:8000^)...
+start "PGR Backend (API :8000)" cmd /k "%~dp0start-backend.bat"
 
-echo Waiting for backend health on http://127.0.0.1:8001/health/ready ...
+echo Waiting for backend health on http://127.0.0.1:8000/health/ready ...
 set /a _btries=0
 :backend_wait
 set /a _btries+=1
-powershell -NoProfile -Command "try { $r = Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 http://127.0.0.1:8001/health/ready; if ($r.StatusCode -eq 200) { exit 0 } else { exit 1 } } catch { exit 1 }" >nul 2>&1
+powershell -NoProfile -Command "try { $r = Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 http://127.0.0.1:8000/health/ready; if ($r.StatusCode -eq 200) { exit 0 } else { exit 1 } } catch { exit 1 }" >nul 2>&1
 if not errorlevel 1 goto backend_ready
 if %_btries% geq 30 goto backend_timeout
 ping -n 3 127.0.0.1 >nul
@@ -67,7 +67,7 @@ goto backend_wait
 echo.
 echo ============================================================
 echo   Backend didn't become healthy after ~90s.
-echo   Check the "PGR Backend (API :8001)" window for the error
+echo   Check the "PGR Backend (API :8000)" window for the error
 echo   (Postgres unreachable, migration failed, port collision).
 echo   The frontend will still start, but /api calls will fail
 echo   until the backend is up.

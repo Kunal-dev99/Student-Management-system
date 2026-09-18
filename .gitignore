@@ -35,3 +35,11 @@ Thumbs.db
 .vscode/
 .idea/
 db_export/
+
+# Project Context System — a separate, self-contained dev tool with its own git repo.
+/Project context system/
+
+# PCS project memory — a LOCAL sidecar, kept out of the app repo so code bundles never bloat it.
+# It updates live via the git post-commit hook; move it between machines with `pcs export`/`import`,
+# not git. Remove this line only if you deliberately want memory committed with the app.
+.project-memory/
