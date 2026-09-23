@@ -25,9 +25,12 @@ from app.modules.taught.schemas import (
     CondoneRequest,
     DissertationOut,
     DissertationUpsert,
+    ElectiveCandidateOut,
     EnrolmentCreate,
     EnrolmentOut,
     EnrolmentStatusRequest,
+    LinkElectiveRequest,
+    LinkProgrammeElectivesRequest,
     ModuleCreate,
     ModuleOut,
     ModuleUpdate,
@@ -106,6 +109,52 @@ async def add_assessment(
     _=Depends(require_permission("admin.configure")),
 ) -> AssessmentOut:
     return AssessmentOut.model_validate(await _svc(session).add_assessment(module_id, body))
+
+
+# --- Shared / elective modules: offer another programme's modules here ---
+
+@programme_router.get("/{programme_id}/available-electives", response_model=list[ElectiveCandidateOut],
+                      summary="Modules from other programmes that can be added here as electives")
+async def available_electives(
+    programme_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("taught.read")),
+) -> list[ElectiveCandidateOut]:
+    return [ElectiveCandidateOut.model_validate(m)
+            for m in await _svc(session).available_electives(programme_id)]
+
+
+@programme_router.post("/{programme_id}/module-offerings", status_code=201,
+                       summary="Offer another programme's module here as an elective")
+async def link_elective(
+    programme_id: uuid.UUID,
+    body: LinkElectiveRequest,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("admin.configure")),
+) -> dict:
+    return await _svc(session).link_elective(programme_id, body.module_id)
+
+
+@programme_router.post("/{programme_id}/module-offerings/from-programme",
+                       summary="Offer ALL of another programme's modules here as electives")
+async def link_programme_electives(
+    programme_id: uuid.UUID,
+    body: LinkProgrammeElectivesRequest,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("admin.configure")),
+) -> dict:
+    return await _svc(session).link_programme_electives(programme_id, body.source_programme_id)
+
+
+@programme_router.delete("/{programme_id}/module-offerings/{module_id}",
+                         summary="Stop offering an elective module here")
+async def unlink_elective(
+    programme_id: uuid.UUID,
+    module_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("admin.configure")),
+) -> dict:
+    return await _svc(session).unlink_elective(programme_id, module_id)
 
 
 # --- Enrolments & results (per student, row-scoped) ---

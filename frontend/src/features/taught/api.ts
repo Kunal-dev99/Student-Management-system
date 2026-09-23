@@ -32,6 +32,9 @@ export interface TaughtModule {
   level: number
   isCore: boolean
   convenorPersonId: string | null
+  /** Shared/elective module: offered here but belonging to another programme (its home). */
+  isElective?: boolean
+  homeProgrammeName?: string | null
   assessments: Assessment[]
 }
 
@@ -133,6 +136,59 @@ export const useProgrammeModules = (programmeId: string | null | undefined) =>
 function invalidate(qc: ReturnType<typeof useQueryClient>, studentId: string) {
   qc.invalidateQueries({ queryKey: ['taught', studentId] })
   qc.invalidateQueries({ queryKey: ['student', studentId, 'summary'] })
+}
+
+// --- shared / elective modules: offer other programmes' modules here ---
+
+export interface ElectiveCandidate {
+  id: string
+  code: string
+  title: string
+  credits: number
+  level: number
+  homeProgrammeId: string
+  homeProgrammeName: string | null
+}
+
+export const useAvailableElectives = (programmeId: string | null | undefined) =>
+  useQuery({
+    queryKey: ['taught-electives-available', programmeId],
+    queryFn: () => api.get<ElectiveCandidate[]>(`/programmes/${programmeId}/available-electives`),
+    enabled: !!programmeId,
+  })
+
+function invalidateModules(qc: ReturnType<typeof useQueryClient>, programmeId: string) {
+  qc.invalidateQueries({ queryKey: ['taught-modules', programmeId] })
+  qc.invalidateQueries({ queryKey: ['taught-electives-available', programmeId] })
+}
+
+/** Offer a single module from another programme here as an elective. */
+export function useLinkElective(programmeId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (moduleId: string) =>
+      api.post(`/programmes/${programmeId}/module-offerings`, { moduleId }),
+    onSuccess: () => invalidateModules(qc, programmeId),
+  })
+}
+
+/** Offer ALL of another programme's modules here as electives, in one action. */
+export function useLinkProgrammeElectives(programmeId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (sourceProgrammeId: string) =>
+      api.post(`/programmes/${programmeId}/module-offerings/from-programme`, { sourceProgrammeId }),
+    onSuccess: () => invalidateModules(qc, programmeId),
+  })
+}
+
+export function useUnlinkElective(programmeId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (moduleId: string) =>
+      api.del(`/programmes/${programmeId}/module-offerings/${moduleId}`),
+    onSuccess: () => invalidateModules(qc, programmeId),
+  })
 }
 
 // --- module / assessment configuration (admin.configure) ---

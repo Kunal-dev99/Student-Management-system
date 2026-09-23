@@ -122,16 +122,95 @@ class TaughtService:
             "pass_mark": a.pass_mark, "resit_allowed": a.resit_allowed, "resit_cap": a.resit_cap,
         }
 
-    def _module_out(self, m: TaughtModule) -> dict:
+    def _module_out(self, m: TaughtModule, *, is_elective: bool = False,
+                    home_programme_name: str | None = None) -> dict:
         return {
             "id": m.id, "programme_id": m.programme_id, "code": m.code, "title": m.title,
             "credits": m.credits, "term": m.term,
             "level": m.level, "is_core": m.is_core, "convenor_person_id": m.convenor_person_id,
+            # Shared/elective modules: an elective is offered here but "belongs" to another
+            # programme (its home). Home modules carry is_elective=False.
+            "is_elective": is_elective, "home_programme_name": home_programme_name,
             "assessments": [self._assessment_out(a) for a in m.assessments],
         }
 
+    async def _programme_names(self, ids) -> dict:
+        ids = {i for i in ids if i is not None}
+        if not ids:
+            return {}
+        rows = (await self.session.execute(
+            select(Programme.id, Programme.name).where(Programme.id.in_(ids))
+        )).all()
+        return {r[0]: r[1] for r in rows}
+
     async def list_modules(self, programme_id: uuid.UUID) -> list[dict]:
-        return [self._module_out(m) for m in await self.repo.modules_for_programme(programme_id)]
+        home = await self.repo.modules_for_programme(programme_id)
+        electives = await self.repo.elective_modules_for_programme(programme_id)
+        names = await self._programme_names({m.programme_id for m in electives})
+        out = [self._module_out(m) for m in home]
+        out += [self._module_out(m, is_elective=True, home_programme_name=names.get(m.programme_id))
+                for m in electives]
+        return out
+
+    async def available_electives(self, programme_id: uuid.UUID) -> list[dict]:
+        """Modules that could be added here as electives: every module whose home is a DIFFERENT
+        programme and that is not already offered here. Grouped-ready (carries its home programme)."""
+        offered = {m.id for m in await self.repo.elective_modules_for_programme(programme_id)}
+        home = {m.id for m in await self.repo.modules_for_programme(programme_id)}
+        candidates = [m for m in await self.repo.all_modules()
+                      if m.programme_id != programme_id and m.id not in offered and m.id not in home]
+        names = await self._programme_names({m.programme_id for m in candidates})
+        return [{
+            "id": m.id, "code": m.code, "title": m.title, "credits": m.credits, "level": m.level,
+            "home_programme_id": m.programme_id, "home_programme_name": names.get(m.programme_id),
+        } for m in candidates]
+
+    async def link_elective(self, programme_id: uuid.UUID, module_id: uuid.UUID) -> dict:
+        from app.modules.taught.models import ModuleOffering
+
+        programme = await self._programme(programme_id)
+        if programme is None:
+            raise NotFoundError("Programme not found")
+        module = await self.repo.get_module(module_id)
+        if module is None:
+            raise NotFoundError("Module not found")
+        if module.programme_id == programme_id:
+            raise WorkflowError("That module already belongs to this programme")
+        if await self.repo.get_offering(programme_id, module_id) is not None:
+            raise ConflictError("That module is already offered here as an elective")
+        self.repo.add(ModuleOffering(programme_id=programme_id, module_id=module_id))
+        await self.session.commit()
+        return {"programme_id": programme_id, "module_id": module_id, "linked": True}
+
+    async def link_programme_electives(
+        self, programme_id: uuid.UUID, source_programme_id: uuid.UUID
+    ) -> dict:
+        """Offer ALL of another programme's home modules here as electives, in one action."""
+        from app.modules.taught.models import ModuleOffering
+
+        if source_programme_id == programme_id:
+            raise WorkflowError("Choose a different programme to borrow electives from")
+        if await self._programme(programme_id) is None:
+            raise NotFoundError("Programme not found")
+        source = await self.repo.modules_for_programme(source_programme_id)
+        linked = 0
+        for m in source:
+            if await self.repo.get_offering(programme_id, m.id) is not None:
+                continue
+            self.repo.add(ModuleOffering(programme_id=programme_id, module_id=m.id))
+            linked += 1
+        if linked:
+            await self.session.commit()
+        return {"programme_id": programme_id, "source_programme_id": source_programme_id,
+                "modules_linked": linked}
+
+    async def unlink_elective(self, programme_id: uuid.UUID, module_id: uuid.UUID) -> dict:
+        offering = await self.repo.get_offering(programme_id, module_id)
+        if offering is None:
+            raise NotFoundError("That module is not offered here as an elective")
+        await self.session.delete(offering)
+        await self.session.commit()
+        return {"programme_id": programme_id, "module_id": module_id, "unlinked": True}
 
     async def create_module(self, programme_id: uuid.UUID, data: ModuleCreate) -> dict:
         programme = await self._programme(programme_id)

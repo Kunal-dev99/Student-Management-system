@@ -76,7 +76,30 @@ class ModuleOut(_Camel):
     level: int = 7
     is_core: bool = True
     convenor_person_id: uuid.UUID | None = None
+    # Shared/elective modules: True when this module is offered here but belongs to another
+    # programme (home_programme_name names it). Home modules are is_elective=False.
+    is_elective: bool = False
+    home_programme_name: str | None = None
     assessments: list[AssessmentOut] = []
+
+
+class ElectiveCandidateOut(_Camel):
+    """A module from another programme that could be linked here as an elective."""
+    id: uuid.UUID
+    code: str
+    title: str
+    credits: int
+    level: int = 7
+    home_programme_id: uuid.UUID
+    home_programme_name: str | None = None
+
+
+class LinkElectiveRequest(_Camel):
+    module_id: uuid.UUID
+
+
+class LinkProgrammeElectivesRequest(_Camel):
+    source_programme_id: uuid.UUID
 
 
 # --- Enrolments & results (per student) ---

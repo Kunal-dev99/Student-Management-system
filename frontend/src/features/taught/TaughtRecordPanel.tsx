@@ -13,9 +13,9 @@ import {
 import { useToast } from '@/components/ui/use-toast'
 import { useCan } from '@/shared/auth/Can'
 import {
-  useAddAssessment, useComputeAward, useCondoneModule, useCreateModule, useEnrolModule,
-  useProgrammeModules, useRecordResult, useSetEnrolmentStatus, useTaughtBoardSummary, useTaughtRecord,
-  useUpsertDissertation,
+  useAddAssessment, useAvailableElectives, useComputeAward, useCondoneModule, useCreateModule,
+  useEnrolModule, useLinkElective, useProgrammeModules, useRecordResult, useSetEnrolmentStatus,
+  useTaughtBoardSummary, useTaughtRecord, useUnlinkElective, useUpsertDissertation,
   type AssessmentType, type ClassificationBand, type Enrolment, type ModuleOutcome,
 } from './api'
 
@@ -261,7 +261,11 @@ export function TaughtRecordPanel({ studentId, programmeId }: { studentId: strin
                 <Select value={enrolModuleId} onValueChange={setEnrolModuleId}>
                   <SelectTrigger className="h-8 w-64"><SelectValue placeholder="Enrol on module…" /></SelectTrigger>
                   <SelectContent>
-                    {(modules.data ?? []).map((m) => <SelectItem key={m.id} value={m.id}>{m.code} — {m.title}</SelectItem>)}
+                    {(modules.data ?? []).map((m) => (
+                      <SelectItem key={m.id} value={m.id}>
+                        {m.code} — {m.title}{m.isElective ? ` · elective (${m.homeProgrammeName ?? 'other programme'})` : ''}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
                 <Input className="h-8 w-28" placeholder="2026/27" value={academicYear} onChange={(e) => setAcademicYear(e.target.value)} />
@@ -341,7 +345,11 @@ function ModuleManager({ programmeId }: { programmeId: string }) {
   const modules = useProgrammeModules(programmeId)
   const createModule = useCreateModule(programmeId)
   const addAssessment = useAddAssessment(programmeId)
+  const availableElectives = useAvailableElectives(programmeId)
+  const linkElective = useLinkElective(programmeId)
+  const unlinkElective = useUnlinkElective(programmeId)
   const [mod, setMod] = useState({ code: '', title: '', credits: '', level: '7', isCore: true })
+  const [electiveId, setElectiveId] = useState('')
   const [asmt, setAsmt] = useState<Record<string, { title: string; assessmentType: AssessmentType; weightPct: string; passMark: string; resitCap: string }>>({})
   const err = (e: unknown) => toast({ title: 'Action failed', description: (e as Error).message, variant: 'destructive' })
 
@@ -349,6 +357,20 @@ function ModuleManager({ programmeId }: { programmeId: string }) {
     <div className="mt-2 space-y-3">
       {(modules.data ?? []).map((m) => {
         const a = asmt[m.id] ?? { title: '', assessmentType: 'essay' as AssessmentType, weightPct: '', passMark: '', resitCap: '' }
+        // Electives belong to another programme — show them read-only here with a way to remove.
+        if (m.isElective) {
+          return (
+            <div key={m.id} className="rounded-md border border-dashed border-border/60 p-2 text-sm flex flex-wrap items-center gap-2">
+              <span className="font-medium">{m.code} — {m.title}</span>
+              <span className="text-helper num">{m.credits} cr</span>
+              <Badge variant="secondary">elective · {m.homeProgrammeName ?? 'other programme'}</Badge>
+              <Button size="sm" variant="ghost" className="h-7 ml-auto" disabled={unlinkElective.isPending}
+                onClick={async () => { try { await unlinkElective.mutateAsync(m.id); toast({ title: 'Elective removed' }) } catch (e) { err(e) } }}>
+                Remove
+              </Button>
+            </div>
+          )
+        }
         return (
           <div key={m.id} className="rounded-md border border-border/60 p-2 text-sm">
             <div className="flex items-center gap-2">
@@ -410,6 +432,30 @@ function ModuleManager({ programmeId }: { programmeId: string }) {
           }}>
           <Plus className="h-3.5 w-3.5 mr-1" /> Add module
         </Button>
+      </div>
+
+      {/* Shared / elective modules — offer a module that belongs to another programme here. */}
+      <div className="border-t border-border/60 pt-3">
+        <p className="text-label mb-1.5">Add an elective from another programme</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <Select value={electiveId} onValueChange={setElectiveId}>
+            <SelectTrigger className="h-8 w-72"><SelectValue placeholder="Choose a module from another programme…" /></SelectTrigger>
+            <SelectContent>
+              {(availableElectives.data ?? []).map((m) => (
+                <SelectItem key={m.id} value={m.id}>{m.code} — {m.title} ({m.homeProgrammeName ?? 'other'})</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button size="sm" disabled={!electiveId || linkElective.isPending}
+            onClick={async () => {
+              try { await linkElective.mutateAsync(electiveId); setElectiveId(''); toast({ title: 'Elective added' }) } catch (e) { err(e) }
+            }}>
+            <Plus className="h-3.5 w-3.5 mr-1" /> Add elective
+          </Button>
+          {(availableElectives.data ?? []).length === 0 && (
+            <span className="text-helper">No modules from other programmes are available to borrow.</span>
+          )}
+        </div>
       </div>
     </div>
   )

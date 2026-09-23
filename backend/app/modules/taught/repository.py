@@ -12,6 +12,7 @@ from app.modules.taught.models import (
     Dissertation,
     ModuleAssessment,
     ModuleEnrolment,
+    ModuleOffering,
     TaughtAward,
     TaughtModule,
 )
@@ -29,6 +30,28 @@ class TaughtRepository:
             .order_by(TaughtModule.code)
         )
         return list(res.scalars().unique().all())
+
+    async def elective_modules_for_programme(self, programme_id: uuid.UUID) -> list[TaughtModule]:
+        """Modules OFFERED on this programme as electives (home programme is a different one)."""
+        res = await self.session.execute(
+            select(TaughtModule)
+            .join(ModuleOffering, ModuleOffering.module_id == TaughtModule.id)
+            .where(ModuleOffering.programme_id == programme_id)
+            .order_by(TaughtModule.code)
+        )
+        return list(res.scalars().unique().all())
+
+    async def all_modules(self) -> list[TaughtModule]:
+        res = await self.session.execute(select(TaughtModule).order_by(TaughtModule.code))
+        return list(res.scalars().unique().all())
+
+    async def get_offering(self, programme_id: uuid.UUID, module_id: uuid.UUID) -> ModuleOffering | None:
+        return (await self.session.execute(
+            select(ModuleOffering).where(
+                ModuleOffering.programme_id == programme_id,
+                ModuleOffering.module_id == module_id,
+            )
+        )).scalar_one_or_none()
 
     async def get_module(self, module_id: uuid.UUID) -> TaughtModule | None:
         return (await self.session.execute(
