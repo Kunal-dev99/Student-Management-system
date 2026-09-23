@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AuthError, PermissionError
 from app.core.principal import Principal
+from app.core.tenant_context import set_current_tenant
 from app.db.session import get_session
 from app.modules.identity.repository import IdentityRepository
 from app.modules.identity.service import IdentityService
@@ -33,11 +34,16 @@ async def get_current_principal(
 
 
 async def _set_tenant_context(session: AsyncSession, principal: Principal) -> None:
-    """Set `app.current_tenant` on the Postgres session so RLS can read it.
+    """Set the acting tenant for this request (MT-2).
 
-    Silent no-op for principals without a tenant (Phase 1 skeleton) and on non-Postgres
-    dialects (SQLite tests) — SET LOCAL is a Postgres-only construct.
+    Two sinks read the tenant: the ORM (insert-time stamping via ``TenantMixin``, from the
+    ContextVar) and Postgres RLS (the `app.current_tenant` session variable). We always set
+    the ContextVar so new rows are stamped even on SQLite; the session variable is set only
+    on Postgres, where `SET LOCAL` and RLS exist.
     """
+    # Always available to the ORM default, on any dialect.
+    set_current_tenant(principal.tenant_id)
+
     if principal.tenant_id is None:
         return
     if session.bind is None or session.bind.dialect.name != "postgresql":

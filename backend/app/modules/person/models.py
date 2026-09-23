@@ -11,11 +11,11 @@ from datetime import date, datetime
 from sqlalchemy import JSON, Boolean, Date, DateTime, Enum, ForeignKey, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db.base import Base, TimestampMixin, UUIDMixin
+from app.db.base import Base, TenantMixin, TimestampMixin, UUIDMixin
 from app.modules.person.constants import PersonContactChannel, PersonRelationshipType
 
 
-class Person(UUIDMixin, TimestampMixin, Base):
+class Person(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "person"
 
     external_person_ref: Mapped[str | None] = mapped_column(

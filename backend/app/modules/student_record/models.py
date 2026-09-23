@@ -13,7 +13,7 @@ from decimal import Decimal
 from sqlalchemy import JSON, Date, DateTime, Enum, ForeignKey, Integer, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db.base import Base, TimestampMixin, UUIDMixin
+from app.db.base import Base, TenantMixin, TimestampMixin, UUIDMixin
 from app.modules.student_record.constants import (
     LifecycleEventStatus,
     LifecycleEventType,
@@ -23,7 +23,7 @@ from app.modules.student_record.constants import (
 )
 
 
-class Department(UUIDMixin, TimestampMixin, Base):
+class Department(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "department"
     name: Mapped[str] = mapped_column(String(200))
     code: Mapped[str] = mapped_column(String(30), unique=True)
@@ -44,7 +44,7 @@ class ResearchArea(UUIDMixin, TimestampMixin, Base):
     )
 
 
-class Programme(UUIDMixin, TimestampMixin, Base):
+class Programme(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "programme"
     name: Mapped[str] = mapped_column(String(200))
     code: Mapped[str] = mapped_column(String(30), unique=True)
@@ -70,7 +70,7 @@ class Programme(UUIDMixin, TimestampMixin, Base):
     grading_policy: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
 
-class Student(UUIDMixin, TimestampMixin, Base):
+class Student(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "student"
 
     person_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("person.id"), index=True)
