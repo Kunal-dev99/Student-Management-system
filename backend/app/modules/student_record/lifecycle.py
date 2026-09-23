@@ -382,6 +382,8 @@ class LifecycleService:
             select(Milestone).where(
                 Milestone.student_id == student.id,
                 Milestone.status != MilestoneStatus.decided,
+                Milestone.status != MilestoneStatus.cancelled,  # cancelled (e.g. superseded by a
+                #   programme change) don't move — and shouldn't clutter the preview
                 Milestone.due_date.is_not(None),
             )
         )).scalars().unique().all()
@@ -600,16 +602,24 @@ class LifecycleService:
         rows = (await self.session.execute(
             select(Milestone).where(Milestone.student_id == student.id)
         )).scalars().unique().all()
+        # Resolve display names from the definitions up front — a template milestone stores no name
+        # of its own (it derives it from the definition), so we must not lose that name when we
+        # annotate the cancellation.
+        cancel_def_ids = {m.milestone_definition_id for m in rows if m.milestone_definition_id}
+        cancel_def_names: dict = {}
+        if cancel_def_ids:
+            for d in (await self.session.execute(
+                select(MilestoneDefinition).where(MilestoneDefinition.id.in_(cancel_def_ids))
+            )).scalars().all():
+                cancel_def_names[d.id] = d.name
         for m in rows:
             if m.status == MilestoneStatus.decided or m.status == MilestoneStatus.cancelled:
                 continue
             m.status = MilestoneStatus.cancelled
-            # Preserve the reason inline (Milestone has no dedicated note column) — the existing
-            # name (or definition-derived name) is kept intact by prefixing.
-            if m.name:
-                m.name = f"{m.name} ({cancel_note})"
-            else:
-                m.name = cancel_note
+            # Preserve the reason inline (Milestone has no dedicated note column) while keeping the
+            # real name — the milestone's own name, else its definition's, else a generic label.
+            base = m.name or cancel_def_names.get(m.milestone_definition_id) or "Milestone"
+            m.name = f"{base} ({cancel_note})"
             cancelled += 1
 
         # 3) Generate the new programme's milestone schedule from the effective date. We inline the
@@ -751,7 +761,8 @@ class LifecycleService:
             rows = await self.session.execute(
                 select(Milestone).where(
                     Milestone.student_id == student.id,
-                    Milestone.status != MilestoneStatus.decided,   # decided = historical fact
+                    Milestone.status != MilestoneStatus.decided,     # decided = historical fact
+                    Milestone.status != MilestoneStatus.cancelled,   # cancelled don't shift
                     Milestone.due_date.is_not(None),
                 )
             )

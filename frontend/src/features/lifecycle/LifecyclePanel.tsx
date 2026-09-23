@@ -87,8 +87,9 @@ function DecisionDialog({
       <DialogTrigger asChild>
         <Button size="sm" variant={variant}>{label}</Button>
       </DialogTrigger>
-      <DialogContent>
-        <DialogHeader><DialogTitle>{title}</DialogTitle></DialogHeader>
+      <DialogContent className="flex max-h-[88vh] flex-col overflow-hidden">
+        <DialogHeader className="flex-none"><DialogTitle>{title}</DialogTitle></DialogHeader>
+        <div className="-mr-2 flex-1 space-y-4 overflow-y-auto pr-2">
         {(impactNote || intensityEventId) && (
           <div className="rounded-md border border-[hsl(var(--warning)/0.3)] bg-[hsl(var(--warning)/0.08)] p-3 text-sm">
             {narrated
@@ -109,7 +110,8 @@ function DecisionDialog({
             onChange={(e) => setNote(e.target.value)}
             placeholder="Recorded against the decision for audit." />
         </div>
-        <DialogFooter>
+        </div>
+        <DialogFooter className="flex-none">
           <Button disabled={pending} onClick={async () => {
             const ok = await onConfirm(note.trim() || undefined)
             if (ok) { setOpen(false); setNote('') }
@@ -194,9 +196,9 @@ function RequestDialog({ studentId, student }: { studentId: string; student?: St
       <DialogTrigger asChild>
         <Button size="sm"><Plus className="h-4 w-4 mr-1" /> Request…</Button>
       </DialogTrigger>
-      <DialogContent>
-        <DialogHeader><DialogTitle>Request a lifecycle change</DialogTitle></DialogHeader>
-        <div className="space-y-3">
+      <DialogContent className="flex max-h-[88vh] flex-col overflow-hidden">
+        <DialogHeader className="flex-none"><DialogTitle>Request a lifecycle change</DialogTitle></DialogHeader>
+        <div className="-mr-2 flex-1 space-y-3 overflow-y-auto pr-2">
           <div className="space-y-1.5">
             <Label>Type</Label>
             <Select value={eventType} onValueChange={(v) => setEventType(v as LifecycleEventType)}>
@@ -342,7 +344,7 @@ function RequestDialog({ studentId, student }: { studentId: string; student?: St
             due dates move only when an approver signs this off.
           </p>
         </div>
-        <DialogFooter>
+        <DialogFooter className="flex-none">
           <Button onClick={submit} disabled={!complete || request.isPending}>
             {request.isPending ? 'Submitting…' : 'Submit request'}
           </Button>
