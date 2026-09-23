@@ -15,6 +15,14 @@ if not exist "node_modules" (
     pause & exit /b 1
 )
 
+REM --- Free port 3000 before binding (self-reliant: kill any stale Next server) ---
+echo Freeing port 3000 if anything is holding it...
+for /f "tokens=5" %%A in ('netstat -ano ^| findstr ":3000 " ^| findstr LISTENING') do (
+    echo   port 3000 busy - killing PID %%A
+    taskkill /F /PID %%A >nul 2>&1
+)
+ping -n 3 127.0.0.1 >nul
+
 REM Canonical backend origin - must match start-backend.bat
 set "BACKEND_ORIGIN=http://127.0.0.1:8000"
 
@@ -33,6 +41,9 @@ if exist ".next\routes-manifest.json" (
 
 if defined NEED_BUILD (
     echo Building frontend ^(baking BACKEND_ORIGIN=%BACKEND_ORIGIN%^) - one-time, ~1 min...
+    REM OneDrive turns .next files into reparse points that Next's own cleaner
+    REM chokes on (EINVAL readlink). Wipe .next ourselves first so the build is clean.
+    if exist ".next" rmdir /s /q ".next" 2>nul
     call npm run build
     if errorlevel 1 (
         echo.

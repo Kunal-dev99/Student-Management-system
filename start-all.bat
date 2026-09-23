@@ -6,7 +6,7 @@ REM  starts (so the login page never proxies to a dead backend and
 REM  users never see ECONNREFUSED spam), then open the app.
 REM
 REM  Canonical ports:
-REM    backend  :8000   (bound to 0.0.0.0, all interfaces)
+REM    backend  :8000
 REM    frontend :3000
 REM ============================================================
 cd /d "%~dp0"
@@ -21,8 +21,8 @@ if not exist "frontend\node_modules" (
 )
 
 echo.
-echo Freeing ports 8000 (backend) and 3000 (frontend) if anything is holding them...
-for %%P in (8000 8001 3000) do (
+echo Freeing ports 8000 (backend) and 3000 (frontend), plus stray 8001/8010, if held...
+for %%P in (8000 8001 8010 3000) do (
     for /f "tokens=5" %%A in ('netstat -ano ^| findstr ":%%P " ^| findstr LISTENING') do (
         echo   port %%P busy - killing PID %%A
         taskkill /F /PID %%A >nul 2>&1
