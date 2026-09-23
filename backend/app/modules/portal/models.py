@@ -13,10 +13,10 @@ from datetime import datetime
 from sqlalchemy import DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base, TimestampMixin, UUIDMixin
+from app.db.base import Base, TenantMixin, TimestampMixin, UUIDMixin
 
 
-class PortalMessage(UUIDMixin, TimestampMixin, Base):
+class PortalMessage(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """One message between a student and one of their supervisors.
 
     `author_role` is either `student` or `supervisor` — it's what the reader uses to

@@ -13,10 +13,10 @@ from datetime import datetime
 from sqlalchemy import JSON, DateTime, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base, TimestampMixin, UUIDMixin
+from app.db.base import Base, TenantMixin, TimestampMixin, UUIDMixin
 
 
-class AssistantUnmatchedQuery(UUIDMixin, TimestampMixin, Base):
+class AssistantUnmatchedQuery(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """One row per query the fuzzy router flagged as unmatched or clarify."""
     __tablename__ = "assistant_unmatched_query"
 

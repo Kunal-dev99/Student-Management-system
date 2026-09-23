@@ -11,11 +11,11 @@ from datetime import datetime
 from sqlalchemy import JSON, DateTime, Enum, Index, String
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base, UUIDMixin
+from app.db.base import Base, TenantMixin, UUIDMixin
 from app.modules.integration.constants import Direction, IntegrationStatus
 
 
-class IntegrationLog(UUIDMixin, Base):
+class IntegrationLog(UUIDMixin, TenantMixin, Base):
     __tablename__ = "integration_log"
 
     direction: Mapped[Direction] = mapped_column(Enum(Direction, name="integration_direction"))

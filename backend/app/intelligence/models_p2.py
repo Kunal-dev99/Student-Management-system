@@ -13,12 +13,12 @@ from datetime import datetime
 from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base, TimestampMixin, UUIDMixin
+from app.db.base import Base, TenantMixin, TimestampMixin, UUIDMixin
 
 
 # ---- Interventions -----------------------------------------------------------
 
-class InterventionPlan(UUIDMixin, TimestampMixin, Base):
+class InterventionPlan(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """A drafted or confirmed intervention over a case.
 
     Actions live in `intervention_action`, one row per allow-listed step. The plan
@@ -54,7 +54,7 @@ class InterventionPlan(UUIDMixin, TimestampMixin, Base):
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
-class InterventionAction(UUIDMixin, TimestampMixin, Base):
+class InterventionAction(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """One step inside a plan — allow-listed type, target and (optional) owner."""
     __tablename__ = "intervention_action"
     __table_args__ = (
@@ -88,7 +88,7 @@ class InterventionAction(UUIDMixin, TimestampMixin, Base):
     error_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
 
-class InterventionOutcome(UUIDMixin, TimestampMixin, Base):
+class InterventionOutcome(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """Before/after snapshots recorded when a plan's reassessment fires.
 
     Never a causal claim — describes what changed in the observable state around the
@@ -109,7 +109,7 @@ class InterventionOutcome(UUIDMixin, TimestampMixin, Base):
 
 # ---- Supervision commitments -------------------------------------------------
 
-class SupervisionCommitment(UUIDMixin, TimestampMixin, Base):
+class SupervisionCommitment(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """One agreed action extracted from a supervision meeting.
 
     Extends the meeting record without replacing it — the meeting row remains the
@@ -142,7 +142,7 @@ class SupervisionCommitment(UUIDMixin, TimestampMixin, Base):
 
 # ---- Engagement trajectory ---------------------------------------------------
 
-class EngagementEvent(UUIDMixin, TimestampMixin, Base):
+class EngagementEvent(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """One deterministic supervision interaction fact — the trajectory's raw data.
 
     A time series built from these events is the "Engagement Trajectory" replacing
@@ -166,7 +166,7 @@ class EngagementEvent(UUIDMixin, TimestampMixin, Base):
     payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
 
-class EngagementSnapshot(UUIDMixin, TimestampMixin, Base):
+class EngagementSnapshot(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """One computed trajectory point — persists what the badge said + why it moved."""
     __tablename__ = "engagement_snapshot"
     __table_args__ = (

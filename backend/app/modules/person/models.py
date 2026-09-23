@@ -40,7 +40,7 @@ class Person(UUIDMixin, TenantMixin, TimestampMixin, Base):
     )
 
 
-class PersonRelationship(UUIDMixin, TimestampMixin, Base):
+class PersonRelationship(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "person_relationship"
 
     person_id: Mapped[uuid.UUID] = mapped_column(
@@ -58,7 +58,7 @@ class PersonRelationship(UUIDMixin, TimestampMixin, Base):
 
 # --- F2 — contacts + merge record --------------------------------------------
 
-class PersonContact(UUIDMixin, TimestampMixin, Base):
+class PersonContact(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """A way to reach a person other than the primary email on Person.
 
     The notifier must honour do_not_contact; nothing else in the platform may bypass it.
@@ -79,7 +79,7 @@ class PersonContact(UUIDMixin, TimestampMixin, Base):
     person: Mapped[Person] = relationship(back_populates="contacts")
 
 
-class PersonMergeRecord(UUIDMixin, Base):
+class PersonMergeRecord(UUIDMixin, TenantMixin, Base):
     """Immutable evidence of a merge — the losing person's row is gone, this stays.
 
     ``fk_touched`` records every (table, column, rows_updated) tuple that the merge rewrote,

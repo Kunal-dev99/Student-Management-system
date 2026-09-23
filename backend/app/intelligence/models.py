@@ -18,10 +18,10 @@ from datetime import datetime
 from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base, TimestampMixin, UUIDMixin
+from app.db.base import Base, TenantMixin, TimestampMixin, UUIDMixin
 
 
-class EvidenceClaim(UUIDMixin, TimestampMixin, Base):
+class EvidenceClaim(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """One factual claim attached to an AI artefact — the trust envelope.
 
     Every user-visible AI conclusion should carry at least one EvidenceClaim so a reader can
@@ -62,7 +62,7 @@ class EvidenceClaim(UUIDMixin, TimestampMixin, Base):
     """Free-form small envelope: display label, unit, dashboard link, etc."""
 
 
-class PredictionSnapshot(UUIDMixin, TimestampMixin, Base):
+class PredictionSnapshot(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """One mature prediction persisted alongside its model version.
 
     Feeds the Risk Storyline: how did this student's score move over time? Never compare
@@ -93,7 +93,7 @@ class PredictionSnapshot(UUIDMixin, TimestampMixin, Base):
     """Snapshot of health signals at scoring time: PSI, matured AUC, calibration."""
 
 
-class DriverSnapshot(UUIDMixin, TimestampMixin, Base):
+class DriverSnapshot(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """Feature-level driver captured next to a prediction — the "why did it move" data.
 
     Populated from permutation importance (baseline) or on-demand sensitivity runs. Never
@@ -117,7 +117,7 @@ class DriverSnapshot(UUIDMixin, TimestampMixin, Base):
     input_value: Mapped[str | None] = mapped_column(String(120), nullable=True)
 
 
-class IntelligenceTelemetry(UUIDMixin, TimestampMixin, Base):
+class IntelligenceTelemetry(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """One row per app/ai call — feeds the fallback / latency / cost dashboards.
 
     Populated by the app/ai gateway (not by callers). Lets the platform prove which calls

@@ -12,10 +12,10 @@ from datetime import datetime
 from sqlalchemy import DateTime, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base, TimestampMixin, UUIDMixin
+from app.db.base import Base, TenantMixin, TimestampMixin, UUIDMixin
 
 
-class Document(UUIDMixin, TimestampMixin, Base):
+class Document(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "document"
 
     owner_type: Mapped[str] = mapped_column(String(50), index=True)

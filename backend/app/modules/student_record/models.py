@@ -29,7 +29,7 @@ class Department(UUIDMixin, TenantMixin, TimestampMixin, Base):
     code: Mapped[str] = mapped_column(String(30), unique=True)
 
 
-class ResearchArea(UUIDMixin, TimestampMixin, Base):
+class ResearchArea(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "research_area"
     name: Mapped[str] = mapped_column(String(200))
     code: Mapped[str] = mapped_column(String(30), unique=True)
@@ -101,7 +101,7 @@ class Student(UUIDMixin, TenantMixin, TimestampMixin, Base):
     )
 
 
-class StudentLifecycleEvent(UUIDMixin, TimestampMixin, Base):
+class StudentLifecycleEvent(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """A suspension, extension or mode change (arch §8.6; CIO vision GAP-06).
 
     Events are **requested then approved** — dates only move once an approver signs off, and both
@@ -156,7 +156,7 @@ class StudentLifecycleEvent(UUIDMixin, TimestampMixin, Base):
     decision_note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
-class ResearchProject(UUIDMixin, TimestampMixin, Base):
+class ResearchProject(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """The student's research work — and the hinge of the funding lineage (Phase 6.3).
 
     Student → **ResearchProject** → ResearchAward → Funder → FundingArrangement → Stipend.

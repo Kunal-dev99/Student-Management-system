@@ -16,10 +16,10 @@ from datetime import datetime
 from sqlalchemy import JSON, DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base, TimestampMixin, UUIDMixin
+from app.db.base import Base, TenantMixin, TimestampMixin, UUIDMixin
 
 
-class AssistantWriteIntent(UUIDMixin, TimestampMixin, Base):
+class AssistantWriteIntent(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "assistant_write_intent"
 
     proposed_by_user_id: Mapped[uuid.UUID | None] = mapped_column(

@@ -11,10 +11,10 @@ from datetime import datetime
 from sqlalchemy import JSON, DateTime, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base, UUIDMixin
+from app.db.base import Base, TenantMixin, UUIDMixin
 
 
-class AuditLog(UUIDMixin, Base):
+class AuditLog(UUIDMixin, TenantMixin, Base):
     __tablename__ = "audit_log"
 
     actor_user_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True, index=True)

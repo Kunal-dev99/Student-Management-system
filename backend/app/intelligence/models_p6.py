@@ -7,10 +7,10 @@ from datetime import datetime
 from sqlalchemy import JSON, DateTime, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base, TimestampMixin, UUIDMixin
+from app.db.base import Base, TenantMixin, TimestampMixin, UUIDMixin
 
 
-class PolicyVersion(UUIDMixin, TimestampMixin, Base):
+class PolicyVersion(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """A registered, approved policy document version — the input to the compiler."""
     __tablename__ = "policy_version"
 
@@ -24,7 +24,7 @@ class PolicyVersion(UUIDMixin, TimestampMixin, Base):
     )
 
 
-class PolicyProposal(UUIDMixin, TimestampMixin, Base):
+class PolicyProposal(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """One compiler-drafted mapping proposal — the trust boundary for governance."""
     __tablename__ = "policy_proposal"
 

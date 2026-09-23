@@ -13,10 +13,10 @@ from datetime import datetime
 from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, LargeBinary, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base, TimestampMixin, UUIDMixin
+from app.db.base import Base, TenantMixin, TimestampMixin, UUIDMixin
 
 
-class MlDataset(UUIDMixin, TimestampMixin, Base):
+class MlDataset(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "ml_dataset"
 
     target_key: Mapped[str] = mapped_column(String(50), index=True)
@@ -34,7 +34,7 @@ class MlDataset(UUIDMixin, TimestampMixin, Base):
     )
 
 
-class MlModel(UUIDMixin, TimestampMixin, Base):
+class MlModel(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """A named predictive capability for one governed target (PL-3, doc §9 ml_models).
 
     A model is the stable identity ("Progression Delay Risk model"); versions carry the
@@ -50,7 +50,7 @@ class MlModel(UUIDMixin, TimestampMixin, Base):
     )
 
 
-class MlTrainingRun(UUIDMixin, TimestampMixin, Base):
+class MlTrainingRun(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """One execution of the bounded candidate search over one dataset version (doc §9)."""
     __tablename__ = "ml_training_run"
 
@@ -67,7 +67,7 @@ class MlTrainingRun(UUIDMixin, TimestampMixin, Base):
     )
 
 
-class MlModelVersion(UUIDMixin, TimestampMixin, Base):
+class MlModelVersion(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """One trained candidate (doc §9 ml_model_versions). Lifecycle status:
     trained → candidate → review → approved → production (promotion is PL-4; training can
     only ever produce `trained`/`candidate`)."""
@@ -98,7 +98,7 @@ class MlModelVersion(UUIDMixin, TimestampMixin, Base):
     governance_log: Mapped[list] = mapped_column(JSON, default=list)
 
 
-class MlPrediction(UUIDMixin, TimestampMixin, Base):
+class MlPrediction(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """One scored student from one batch run of one production version (PL-5, doc §9).
 
     Append-only: every batch keeps its rows (PL-6 monitoring needs prediction history to
@@ -126,7 +126,7 @@ class MlPrediction(UUIDMixin, TimestampMixin, Base):
     scored_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
-class MlFinding(UUIDMixin, TimestampMixin, Base):
+class MlFinding(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "ml_finding"
 
     dataset_id: Mapped[uuid.UUID] = mapped_column(

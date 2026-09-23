@@ -14,7 +14,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base, TimestampMixin, UUIDMixin
+from app.db.base import Base, TenantMixin, TimestampMixin, UUIDMixin
 
 
 class ReferenceRequestStatus(str, enum.Enum):
@@ -50,7 +50,7 @@ class OfferConditionStatus(str, enum.Enum):
     waived = "waived"
 
 
-class ReferenceRequest(UUIDMixin, TimestampMixin, Base):
+class ReferenceRequest(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "reference_request"
 
     application_id: Mapped[uuid.UUID] = mapped_column(
@@ -70,7 +70,7 @@ class ReferenceRequest(UUIDMixin, TimestampMixin, Base):
     response_document_ref: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
 
-class Interview(UUIDMixin, TimestampMixin, Base):
+class Interview(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "interview"
 
     application_id: Mapped[uuid.UUID] = mapped_column(
@@ -87,7 +87,7 @@ class Interview(UUIDMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
-class InterviewPanellist(UUIDMixin, TimestampMixin, Base):
+class InterviewPanellist(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "interview_panellist"
 
     interview_id: Mapped[uuid.UUID] = mapped_column(
@@ -101,7 +101,7 @@ class InterviewPanellist(UUIDMixin, TimestampMixin, Base):
     )
 
 
-class OfferCondition(UUIDMixin, TimestampMixin, Base):
+class OfferCondition(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """First-class offer condition — replaces the free-form ``conditions`` JSON on Offer.
 
     ``conditions`` on Offer stays for backward compatibility; new conditions live here and are the

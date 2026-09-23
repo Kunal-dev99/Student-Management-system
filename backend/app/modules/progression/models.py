@@ -11,7 +11,7 @@ from datetime import date, datetime
 from sqlalchemy import JSON, Boolean, Date, DateTime, Enum, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db.base import Base, TimestampMixin, UUIDMixin
+from app.db.base import Base, TenantMixin, TimestampMixin, UUIDMixin
 from app.modules.progression.constants import (
     AppealStatus,
     MilestoneOrigin,
@@ -21,7 +21,7 @@ from app.modules.progression.constants import (
 )
 
 
-class MilestoneDefinition(UUIDMixin, TimestampMixin, Base):
+class MilestoneDefinition(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "milestone_definition"
 
     programme_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("programme.id", ondelete="CASCADE"), index=True)
@@ -39,7 +39,7 @@ class MilestoneDefinition(UUIDMixin, TimestampMixin, Base):
     registration_effect: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
 
-class Milestone(UUIDMixin, TimestampMixin, Base):
+class Milestone(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "milestone"
 
     student_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("student.id", ondelete="CASCADE"), index=True)
@@ -67,7 +67,7 @@ class Milestone(UUIDMixin, TimestampMixin, Base):
     )
 
 
-class ProgressionReview(UUIDMixin, TimestampMixin, Base):
+class ProgressionReview(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "progression_review"
 
     milestone_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("milestone.id", ondelete="CASCADE"), unique=True)
@@ -95,7 +95,7 @@ class ProgressionReview(UUIDMixin, TimestampMixin, Base):
     )
 
 
-class ReviewPanelMember(UUIDMixin, TimestampMixin, Base):
+class ReviewPanelMember(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """A member of a progression review panel (arch §8.8).
 
     A valid panel needs a chair and an assessor independent of the supervisory team; the service
@@ -113,7 +113,7 @@ class ReviewPanelMember(UUIDMixin, TimestampMixin, Base):
     review: Mapped[ProgressionReview] = relationship(back_populates="panel")
 
 
-class ProgressionAppeal(UUIDMixin, TimestampMixin, Base):
+class ProgressionAppeal(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """A student's appeal against a progression decision (arch §8.8)."""
     __tablename__ = "progression_appeal"
 

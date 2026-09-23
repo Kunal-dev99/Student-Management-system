@@ -14,7 +14,7 @@ from decimal import Decimal
 from sqlalchemy import Date, DateTime, Enum, ForeignKey, Index, Integer, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base, TimestampMixin, UUIDMixin
+from app.db.base import Base, TenantMixin, TimestampMixin, UUIDMixin
 from app.modules.funding.constants import (
     FundingStatus,
     FundingType,
@@ -24,27 +24,27 @@ from app.modules.funding.constants import (
 )
 
 
-class FundingSource(UUIDMixin, TimestampMixin, Base):
+class FundingSource(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "funding_source"
     name: Mapped[str] = mapped_column(String(200))          # e.g. "UKRI EPSRC"
     funder_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
 
-class CostCentre(UUIDMixin, TimestampMixin, Base):
+class CostCentre(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """A finance ledger bucket — institution-configurable via Settings → List of values."""
     __tablename__ = "cost_centre"
     name: Mapped[str] = mapped_column(String(200))
     code: Mapped[str] = mapped_column(String(50), unique=True)
 
 
-class ProjectCode(UUIDMixin, TimestampMixin, Base):
+class ProjectCode(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """An internal project/grant code — institution-configurable via Settings → List of values."""
     __tablename__ = "project_code"
     name: Mapped[str] = mapped_column(String(200))
     code: Mapped[str] = mapped_column(String(50), unique=True)
 
 
-class FundingArrangement(UUIDMixin, TimestampMixin, Base):
+class FundingArrangement(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "funding_arrangement"
 
     student_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("student.id", ondelete="CASCADE"), index=True)
@@ -76,7 +76,7 @@ class FundingArrangement(UUIDMixin, TimestampMixin, Base):
     __table_args__ = (Index("ix_funding_arrangement_student_status", "student_id", "status"),)
 
 
-class StipendPayment(UUIDMixin, TimestampMixin, Base):
+class StipendPayment(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """One instalment of a stipend (arch §8.9, §10.1).
 
     The platform schedules and tracks instalments; Finance remains the system of record for the
@@ -102,7 +102,7 @@ class StipendPayment(UUIDMixin, TimestampMixin, Base):
     __table_args__ = (Index("ix_stipend_payment_arrangement_status", "arrangement_id", "status"),)
 
 
-class FeeWaiver(UUIDMixin, TimestampMixin, Base):
+class FeeWaiver(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """A tuition/bench fee waiver attached to a student (arch §8.9)."""
     __tablename__ = "fee_waiver"
 

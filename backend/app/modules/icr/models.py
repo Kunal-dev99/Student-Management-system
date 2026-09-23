@@ -20,12 +20,12 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base, TimestampMixin, UUIDMixin
+from app.db.base import Base, TenantMixin, TimestampMixin, UUIDMixin
 
 
 # --- Gap 2 -----------------------------------------------------------------
 
-class ClinicalPlacement(UUIDMixin, TimestampMixin, Base):
+class ClinicalPlacement(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """A Specialist Registrar rotation post held alongside an ICR MD(Res) studentship.
 
     Recorded here (not in supervision or student_record) because it is a clinical-training fact
@@ -49,7 +49,7 @@ class ClinicalPlacement(UUIDMixin, TimestampMixin, Base):
 
 # --- Gap 3 -----------------------------------------------------------------
 
-class IndependentTutor(UUIDMixin, TimestampMixin, Base):
+class IndependentTutor(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """Outside-the-lab tutor for an ICR student.
 
     The invariant enforced by the service: ``tutor_person`` must not share the student's
@@ -74,7 +74,7 @@ class IndependentTutor(UUIDMixin, TimestampMixin, Base):
     )
 
 
-class IndependentTutorNote(UUIDMixin, TimestampMixin, Base):
+class IndependentTutorNote(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """A private tutor-notes channel — visible only to the tutor and admins, not the supervisor.
 
     The service enforces read access; storage is plain, but the API guards on identity.
@@ -93,7 +93,7 @@ class IndependentTutorNote(UUIDMixin, TimestampMixin, Base):
 
 # --- Gap 4 -----------------------------------------------------------------
 
-class BenchFeeAllocation(UUIDMixin, TimestampMixin, Base):
+class BenchFeeAllocation(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """A per-student experimental budget separate from the stipend.
 
     Draw-downs (sequencing runs, mass-spec time) are recorded against the allocation.
@@ -114,7 +114,7 @@ class BenchFeeAllocation(UUIDMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
-class BenchFeeDrawdown(UUIDMixin, TimestampMixin, Base):
+class BenchFeeDrawdown(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """One draw-down against a bench-fee allocation."""
     __tablename__ = "icr_bench_fee_drawdown"
 
@@ -130,7 +130,7 @@ class BenchFeeDrawdown(UUIDMixin, TimestampMixin, Base):
 
 # --- Gap 5 -----------------------------------------------------------------
 
-class PartnerAffiliation(UUIDMixin, TimestampMixin, Base):
+class PartnerAffiliation(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """A student's affiliation with a partner institution (Royal Marsden honorary contract,
     Imperial co-registration, etc.) — dates + compliance flags.
 

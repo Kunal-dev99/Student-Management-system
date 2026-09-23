@@ -14,10 +14,10 @@ from datetime import datetime
 from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base, TimestampMixin, UUIDMixin
+from app.db.base import Base, TenantMixin, TimestampMixin, UUIDMixin
 
 
-class NotificationPreference(UUIDMixin, TimestampMixin, Base):
+class NotificationPreference(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "notification_preference"
 
     user_id: Mapped[uuid.UUID] = mapped_column(
@@ -33,7 +33,7 @@ class NotificationPreference(UUIDMixin, TimestampMixin, Base):
     quiet_end: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
-class EmailBounce(UUIDMixin, TimestampMixin, Base):
+class EmailBounce(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """F6 — one row per bounce event received from the mail provider.
 
     A hard bounce deactivates the email channel for the affected user; a soft bounce is recorded

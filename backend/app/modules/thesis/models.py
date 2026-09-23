@@ -11,7 +11,7 @@ from datetime import date, datetime
 from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db.base import Base, TimestampMixin, UUIDMixin
+from app.db.base import Base, TenantMixin, TimestampMixin, UUIDMixin
 from app.modules.thesis.constants import (
     CorrectionKind,
     ExaminationOutcome,
@@ -21,7 +21,7 @@ from app.modules.thesis.constants import (
 )
 
 
-class Thesis(UUIDMixin, TimestampMixin, Base):
+class Thesis(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "thesis"
 
     student_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("student.id", ondelete="CASCADE"), unique=True, index=True)
@@ -38,7 +38,7 @@ class Thesis(UUIDMixin, TimestampMixin, Base):
     )
 
 
-class ExaminerNomination(UUIDMixin, TimestampMixin, Base):
+class ExaminerNomination(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "examiner_nomination"
 
     thesis_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("thesis.id", ondelete="CASCADE"), index=True)
@@ -53,7 +53,7 @@ class ExaminerNomination(UUIDMixin, TimestampMixin, Base):
     approved_by_user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
 
-class Examination(UUIDMixin, TimestampMixin, Base):
+class Examination(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "examination"
 
     thesis_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("thesis.id", ondelete="CASCADE"), unique=True, index=True)
@@ -70,7 +70,7 @@ class Examination(UUIDMixin, TimestampMixin, Base):
     thesis: Mapped[Thesis] = relationship(back_populates="examination")
 
 
-class ThesisCorrection(UUIDMixin, TimestampMixin, Base):
+class ThesisCorrection(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """A corrections period opened by a pass-with-corrections / major-corrections outcome (4B.8)."""
     __tablename__ = "thesis_correction"
 

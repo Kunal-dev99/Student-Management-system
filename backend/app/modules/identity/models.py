@@ -11,6 +11,7 @@ from datetime import datetime
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Table, Column
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.tenant_context import resolve_tenant_for_write
 from app.db.base import Base, TimestampMixin, UUIDMixin
 # MT-1 — ensure the Tenant model is registered in Base.metadata whenever User is
 # imported (User carries a FK to tenant.id). Without this, tests that build the
@@ -51,8 +52,11 @@ class User(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "users"
     # MT-1 — nullable during Phase 1 (skeleton). Backfilled to the default tenant
     # by mt1_tenant_skeleton migration; will become NOT NULL in Phase 2.
+    # MT-4: stamp new users with the acting tenant (falls back to the default deployment),
+    # so a user created after MT-1 always carries a tenant and never bypasses RLS.
     tenant_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("tenant.id", ondelete="RESTRICT"), nullable=True, index=True
+        ForeignKey("tenant.id", ondelete="RESTRICT"), nullable=True, index=True,
+        default=resolve_tenant_for_write,
     )
     person_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("person.id", ondelete="SET NULL"), nullable=True

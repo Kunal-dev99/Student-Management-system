@@ -7,11 +7,11 @@ from datetime import date, datetime
 from sqlalchemy import Date, DateTime, Enum, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base, TimestampMixin, UUIDMixin
+from app.db.base import Base, TenantMixin, TimestampMixin, UUIDMixin
 from app.modules.completion.constants import CompletionStatus
 
 
-class Completion(UUIDMixin, TimestampMixin, Base):
+class Completion(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "completion"
 
     student_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("student.id", ondelete="CASCADE"), unique=True, index=True)
@@ -23,7 +23,7 @@ class Completion(UUIDMixin, TimestampMixin, Base):
     graduation_date: Mapped[date | None] = mapped_column(Date, nullable=True)
 
 
-class Award(UUIDMixin, TimestampMixin, Base):
+class Award(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "award"
 
     student_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("student.id", ondelete="CASCADE"), index=True)

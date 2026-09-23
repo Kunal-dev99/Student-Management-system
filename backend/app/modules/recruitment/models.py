@@ -8,7 +8,7 @@ from decimal import Decimal
 from sqlalchemy import JSON, Date, DateTime, Enum, ForeignKey, Integer, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db.base import Base, TimestampMixin, UUIDMixin
+from app.db.base import Base, TenantMixin, TimestampMixin, UUIDMixin
 from app.modules.recruitment.constants import (
     ApplicationRoute,
     CandidateStage,
@@ -17,7 +17,7 @@ from app.modules.recruitment.constants import (
 )
 
 
-class ResearchOpportunity(UUIDMixin, TimestampMixin, Base):
+class ResearchOpportunity(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "research_opportunity"
 
     title: Mapped[str] = mapped_column(String(300))
@@ -50,7 +50,7 @@ class ResearchOpportunity(UUIDMixin, TimestampMixin, Base):
     )
 
 
-class Application(UUIDMixin, TimestampMixin, Base):
+class Application(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "application"
 
     person_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("person.id"), index=True)
@@ -82,7 +82,7 @@ class Application(UUIDMixin, TimestampMixin, Base):
     )
 
 
-class CandidateStageHistory(UUIDMixin, TimestampMixin, Base):
+class CandidateStageHistory(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "candidate_stage_history"
 
     application_id: Mapped[uuid.UUID] = mapped_column(
@@ -99,7 +99,7 @@ class CandidateStageHistory(UUIDMixin, TimestampMixin, Base):
     application: Mapped[Application] = relationship(back_populates="history")
 
 
-class ApplicationAssessment(UUIDMixin, TimestampMixin, Base):
+class ApplicationAssessment(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "application_assessment"
 
     application_id: Mapped[uuid.UUID] = mapped_column(

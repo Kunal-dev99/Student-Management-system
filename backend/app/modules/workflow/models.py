@@ -13,11 +13,11 @@ from datetime import datetime
 from sqlalchemy import JSON, Boolean, DateTime, Enum, ForeignKey, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base, TimestampMixin, UUIDMixin
+from app.db.base import Base, TenantMixin, TimestampMixin, UUIDMixin
 from app.modules.workflow.constants import NotificationStatus, TaskStatus
 
 
-class WorkflowDefinition(UUIDMixin, TimestampMixin, Base):
+class WorkflowDefinition(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """A named, versioned state machine defined in data (arch §9.1) — new flows without code."""
     __tablename__ = "workflow_definition"
 
@@ -32,7 +32,7 @@ class WorkflowDefinition(UUIDMixin, TimestampMixin, Base):
     __table_args__ = (Index("uq_workflow_def_key_version", "key", "version", unique=True),)
 
 
-class WorkflowInstance(UUIDMixin, TimestampMixin, Base):
+class WorkflowInstance(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """A running flow bound to an aggregate (arch §9.1)."""
     __tablename__ = "workflow_instance"
 
@@ -43,7 +43,7 @@ class WorkflowInstance(UUIDMixin, TimestampMixin, Base):
     context: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
 
-class Task(UUIDMixin, TimestampMixin, Base):
+class Task(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "task"
 
     title: Mapped[str] = mapped_column(String(300))
@@ -69,7 +69,7 @@ class Task(UUIDMixin, TimestampMixin, Base):
     __table_args__ = (Index("ix_task_role_status", "assignee_role", "status"),)
 
 
-class Notification(UUIDMixin, TimestampMixin, Base):
+class Notification(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "notification"
 
     recipient_user_id: Mapped[uuid.UUID] = mapped_column(
@@ -83,7 +83,7 @@ class Notification(UUIDMixin, TimestampMixin, Base):
     )
 
 
-class OutboxEvent(UUIDMixin, Base):
+class OutboxEvent(UUIDMixin, TenantMixin, Base):
     __tablename__ = "outbox_event"
 
     aggregate_type: Mapped[str] = mapped_column(String(50), index=True)

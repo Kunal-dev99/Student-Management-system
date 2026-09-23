@@ -11,7 +11,7 @@ from datetime import date, datetime
 from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base, TimestampMixin, UUIDMixin
+from app.db.base import Base, TenantMixin, TimestampMixin, UUIDMixin
 from app.modules.supervision.constants import (
     MeetingFormat,
     SupervisionStatus,
@@ -19,7 +19,7 @@ from app.modules.supervision.constants import (
 )
 
 
-class SupervisorRelationship(UUIDMixin, TimestampMixin, Base):
+class SupervisorRelationship(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "supervisor_relationship"
 
     student_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("student.id", ondelete="CASCADE"), index=True)
@@ -36,7 +36,7 @@ class SupervisorRelationship(UUIDMixin, TimestampMixin, Base):
     weighting_pct: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
-class SupervisionMeeting(UUIDMixin, TimestampMixin, Base):
+class SupervisionMeeting(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """A recorded supervision meeting (arch §8.7 — the supervisory record).
 
     Institutions must evidence regular supervision. Each meeting captures what was discussed,

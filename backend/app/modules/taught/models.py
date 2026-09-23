@@ -26,10 +26,11 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db.base import Base, TimestampMixin, UUIDMixin
+from app.db.base import Base, TenantMixin, TimestampMixin, UUIDMixin
 from app.modules.taught.constants import (
     AssessmentType,
     ClassificationBand,
@@ -38,7 +39,7 @@ from app.modules.taught.constants import (
 )
 
 
-class TaughtModule(UUIDMixin, TimestampMixin, Base):
+class TaughtModule(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """A unit of study on a taught programme."""
     __tablename__ = "taught_module"
 
@@ -61,7 +62,27 @@ class TaughtModule(UUIDMixin, TimestampMixin, Base):
     )
 
 
-class ModuleEnrolment(UUIDMixin, TimestampMixin, Base):
+class ModuleOffering(UUIDMixin, TenantMixin, TimestampMixin, Base):
+    """A module offered on a programme OTHER than its home programme — an elective/shared module.
+
+    A module always has one home programme (``TaughtModule.programme_id``); this link table lets the
+    same module be offered as an elective on additional programmes without duplicating it. Additive:
+    programmes with no offerings behave exactly as before (home modules only).
+    """
+    __tablename__ = "module_offering"
+    __table_args__ = (
+        UniqueConstraint("programme_id", "module_id", name="uq_module_offering_programme_module"),
+    )
+
+    programme_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("programme.id", ondelete="CASCADE"), index=True
+    )
+    module_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("taught_module.id", ondelete="CASCADE"), index=True
+    )
+
+
+class ModuleEnrolment(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """A student taking a module in a particular academic year."""
     __tablename__ = "module_enrolment"
 
@@ -92,7 +113,7 @@ class ModuleEnrolment(UUIDMixin, TimestampMixin, Base):
     )
 
 
-class ModuleAssessment(UUIDMixin, TimestampMixin, Base):
+class ModuleAssessment(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """A piece of assessment within a module (weights within a module should sum to 100)."""
     __tablename__ = "module_assessment"
 
@@ -115,7 +136,7 @@ class ModuleAssessment(UUIDMixin, TimestampMixin, Base):
     module: Mapped[TaughtModule] = relationship(back_populates="assessments")
 
 
-class AssessmentResult(UUIDMixin, TimestampMixin, Base):
+class AssessmentResult(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """A student's mark for one assessment, tied to their module enrolment.
 
     A resit produces a second row for the same (enrolment, assessment) with ``is_resit=True`` —
@@ -145,7 +166,7 @@ class AssessmentResult(UUIDMixin, TimestampMixin, Base):
     enrolment: Mapped[ModuleEnrolment] = relationship(back_populates="results")
 
 
-class Dissertation(UUIDMixin, TimestampMixin, Base):
+class Dissertation(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """The taught student's dissertation — one per student, distinct from the research thesis flow."""
     __tablename__ = "dissertation"
 
@@ -170,7 +191,7 @@ class Dissertation(UUIDMixin, TimestampMixin, Base):
     grade: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
 
-class TaughtAward(UUIDMixin, TimestampMixin, Base):
+class TaughtAward(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """The final classification for a taught student (credit-weighted average -> band).
 
     Kept as its own row (not a column on Student) so it carries its own decided-by/decided-at audit

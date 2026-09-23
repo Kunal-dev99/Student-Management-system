@@ -23,11 +23,11 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base, TimestampMixin, UUIDMixin
+from app.db.base import Base, TenantMixin, TimestampMixin, UUIDMixin
 from app.modules.exports.constants import AdvisoryStatus, ExportStatus, SpecVersionStatus
 
 
-class ExportJob(UUIDMixin, Base):
+class ExportJob(UUIDMixin, TenantMixin, Base):
     __tablename__ = "export_job"
 
     kind: Mapped[str] = mapped_column(String(60), index=True)
@@ -42,7 +42,7 @@ class ExportJob(UUIDMixin, Base):
 
 # --- Phase 6.6 — statutory reporting as configuration (CIO vision GAP-05) ---
 
-class ReportProfile(UUIDMixin, TimestampMixin, Base):
+class ReportProfile(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """A statutory return, versioned by academic year (e.g. HESA Student 2026/27).
 
     Treating the return as configuration means a statutory change is a data edit, not a code
@@ -75,7 +75,7 @@ class ReportProfile(UUIDMixin, TimestampMixin, Base):
     __table_args__ = (Index("uq_report_profile_version", "code", "academic_year", "version", unique=True),)
 
 
-class ReportFieldMapping(UUIDMixin, TimestampMixin, Base):
+class ReportFieldMapping(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """One target field of a statutory return, and where its value comes from."""
     __tablename__ = "report_field_mapping"
 

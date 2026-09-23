@@ -20,7 +20,7 @@ from datetime import date, datetime
 from sqlalchemy import JSON, Boolean, Date, DateTime, Enum, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base, TimestampMixin, UUIDMixin
+from app.db.base import Base, TenantMixin, TimestampMixin, UUIDMixin
 from app.modules.supervision.constants import SupervisorRole as _CoreSupervisorRole
 
 
@@ -45,7 +45,7 @@ class AssignmentRequestState(str, enum.Enum):
 SupervisorRole = _CoreSupervisorRole
 
 
-class SupervisorProfile(UUIDMixin, TimestampMixin, Base):
+class SupervisorProfile(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "supervisor_profile"
 
     person_id: Mapped[uuid.UUID] = mapped_column(
@@ -62,7 +62,7 @@ class SupervisorProfile(UUIDMixin, TimestampMixin, Base):
     bio: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
-class SupervisorProfileArea(UUIDMixin, TimestampMixin, Base):
+class SupervisorProfileArea(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """Many-to-many between supervisor profile and research_area."""
     __tablename__ = "supervisor_profile_area"
 
@@ -74,7 +74,7 @@ class SupervisorProfileArea(UUIDMixin, TimestampMixin, Base):
     )
 
 
-class SupervisorAssignmentRequest(UUIDMixin, TimestampMixin, Base):
+class SupervisorAssignmentRequest(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "supervisor_assignment_request"
 
     student_id: Mapped[uuid.UUID] = mapped_column(

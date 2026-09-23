@@ -24,9 +24,8 @@ _A = "00000000-0000-0000-0000-0000000000aa"
 _B = "00000000-0000-0000-0000-0000000000bb"
 
 _PREDICATE = (
-    "current_setting('app.current_tenant', true) IS NULL "
-    "OR current_setting('app.current_tenant', true) = '' "
-    "OR tenant_id = current_setting('app.current_tenant', true)::uuid"
+    "NULLIF(current_setting('app.current_tenant', true), '') IS NULL "
+    "OR tenant_id = NULLIF(current_setting('app.current_tenant', true), '')::uuid"
 )
 
 

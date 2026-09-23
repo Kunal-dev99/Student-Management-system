@@ -7,10 +7,10 @@ from datetime import datetime
 from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base, TimestampMixin, UUIDMixin
+from app.db.base import Base, TenantMixin, TimestampMixin, UUIDMixin
 
 
-class DocumentVersion(UUIDMixin, TimestampMixin, Base):
+class DocumentVersion(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """Immutable version of a document (from the object store), with extraction metadata."""
     __tablename__ = "document_version"
 
@@ -31,7 +31,7 @@ class DocumentVersion(UUIDMixin, TimestampMixin, Base):
     page_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
-class DocumentChunk(UUIDMixin, TimestampMixin, Base):
+class DocumentChunk(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """One extracted passage with a stable locator for evidence pointers."""
     __tablename__ = "document_chunk"
 
@@ -46,7 +46,7 @@ class DocumentChunk(UUIDMixin, TimestampMixin, Base):
     text: Mapped[str] = mapped_column(String(8000))
 
 
-class ChangeFinding(UUIDMixin, TimestampMixin, Base):
+class ChangeFinding(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """One detected material change between two document versions.
 
     NEVER an ethics decision — the "for_review" suffix in ethics_relevant_change_for_review

@@ -11,10 +11,10 @@ import uuid
 from sqlalchemy import JSON, Boolean, ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base, TimestampMixin, UUIDMixin
+from app.db.base import Base, TenantMixin, TimestampMixin, UUIDMixin
 
 
-class InstitutionSetting(UUIDMixin, TimestampMixin, Base):
+class InstitutionSetting(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "institution_setting"
 
     key: Mapped[str] = mapped_column(String(100), unique=True, index=True)
@@ -24,7 +24,7 @@ class InstitutionSetting(UUIDMixin, TimestampMixin, Base):
     )
 
 
-class ValueSetOverride(UUIDMixin, TimestampMixin, Base):
+class ValueSetOverride(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """Per-institution label / description / availability for a platform value.
 
     The value code itself (the shipped enum member) stays stable — code paths, migrations

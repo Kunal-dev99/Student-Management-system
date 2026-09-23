@@ -20,11 +20,11 @@ from decimal import Decimal
 from sqlalchemy import Date, DateTime, Enum, ForeignKey, Integer, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base, TimestampMixin, UUIDMixin
+from app.db.base import Base, TenantMixin, TimestampMixin, UUIDMixin
 from app.modules.research.constants import AwardStatus, DemandStatus
 
 
-class ResearchAward(UUIDMixin, TimestampMixin, Base):
+class ResearchAward(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "research_award"
 
     award_ref: Mapped[str] = mapped_column(String(100), unique=True, index=True)  # funder's number
@@ -44,7 +44,7 @@ class ResearchAward(UUIDMixin, TimestampMixin, Base):
     synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
-class ResearchDemand(UUIDMixin, TimestampMixin, Base):
+class ResearchDemand(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """A stated need for a researcher — the object that exists before any position is advertised."""
     __tablename__ = "research_demand"
 

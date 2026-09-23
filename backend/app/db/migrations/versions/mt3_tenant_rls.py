@@ -34,10 +34,12 @@ depends_on = None
 _TABLES: tuple[str, ...] = ("person", "programme", "student", "department")
 
 # Isolate when a tenant is set; bypass when the context is absent (system/seed paths).
+# NULLIF(..., '') guards the ::uuid cast: a custom GUC reverts to '' (not NULL) after a
+# SET LOCAL on a pooled connection, and ''::uuid raises; NULLIF makes both unset and ''
+# behave as NULL (bypass) so the cast only ever sees a real uuid.
 _PREDICATE = (
-    "current_setting('app.current_tenant', true) IS NULL "
-    "OR current_setting('app.current_tenant', true) = '' "
-    "OR tenant_id = current_setting('app.current_tenant', true)::uuid"
+    "NULLIF(current_setting('app.current_tenant', true), '') IS NULL "
+    "OR tenant_id = NULLIF(current_setting('app.current_tenant', true), '')::uuid"
 )
 
 

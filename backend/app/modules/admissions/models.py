@@ -7,11 +7,11 @@ from datetime import datetime
 from sqlalchemy import JSON, DateTime, Enum, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base import Base, TimestampMixin, UUIDMixin
+from app.db.base import Base, TenantMixin, TimestampMixin, UUIDMixin
 from app.modules.admissions.constants import OfferStatus
 
 
-class Offer(UUIDMixin, TimestampMixin, Base):
+class Offer(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "offer"
 
     application_id: Mapped[uuid.UUID] = mapped_column(
