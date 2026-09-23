@@ -10,6 +10,9 @@ export type ProgrammeType = 'research' | 'taught'
 export interface GradingPolicy {
   passMark?: number
   resitCap?: number
+  /** Degrading resit caps: [cap for 2nd sit, cap for 3rd sit, …]; the last value repeats for
+   * further attempts. When set, it overrides the flat `resitCap`. */
+  resitCapLadder?: number[]
   condonementCredits?: number
   distinctionMark?: number
   meritMark?: number

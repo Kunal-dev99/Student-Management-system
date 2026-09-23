@@ -28,8 +28,11 @@ import {
 } from '@/features/programmes/api'
 import { ProgrammeModulesEditor } from '@/features/taught/ProgrammeModulesEditor'
 
+/** The numeric grading-policy fields (everything except the array-valued resitCapLadder). */
+type NumericPolicyKey = Exclude<keyof GradingPolicy, 'resitCapLadder'>
+
 /** Labels, range and default for each grading-policy field (mirrors DEFAULT_GRADING_POLICY). */
-const POLICY_FIELDS: { key: keyof GradingPolicy; label: string; fallback: number; min: number; max: number; unit: string }[] = [
+const POLICY_FIELDS: { key: NumericPolicyKey; label: string; fallback: number; min: number; max: number; unit: string }[] = [
   { key: 'passMark', label: 'Module pass mark', fallback: 50, min: 0, max: 100, unit: '%' },
   { key: 'resitCap', label: 'Resit cap', fallback: 50, min: 0, max: 100, unit: '%' },
   { key: 'condonementCredits', label: 'Max condonement credits', fallback: 30, min: 0, max: 180, unit: ' cr' },
@@ -299,11 +302,21 @@ function GradingPolicyEditor({ programme, onPatch }: {
 }) {
   const policy = programme.gradingPolicy ?? {}
 
-  const save = (key: keyof GradingPolicy, val: number | null) => {
+  const save = (key: NumericPolicyKey, val: number | null) => {
     const next: GradingPolicy = { ...policy }
     if (val === null) delete next[key]
     else next[key] = val
     if ((policy[key] ?? null) === (val ?? null)) return   // no change → skip the round-trip
+    onPatch(programme.id, { gradingPolicy: next })
+  }
+
+  const saveLadder = (text: string) => {
+    const nums = text.split(/[,\s]+/).map((t) => t.trim()).filter(Boolean)
+      .map(Number).filter((n) => Number.isFinite(n) && n >= 0 && n <= 100)
+    if ((policy.resitCapLadder ?? []).join(',') === nums.join(',')) return  // no change
+    const next: GradingPolicy = { ...policy }
+    if (nums.length === 0) delete next.resitCapLadder
+    else next.resitCapLadder = nums
     onPatch(programme.id, { gradingPolicy: next })
   }
 
@@ -317,6 +330,22 @@ function GradingPolicyEditor({ programme, onPatch }: {
             onCommit={(v) => save(f.key, v)} />
         ))}
       </div>
+
+      {/* Degrading resit-cap ladder — an advanced override of the flat resit cap above. */}
+      <div className="card-elevated mt-3 p-4">
+        <label className="text-sm font-medium block mb-1" htmlFor="resit-ladder">
+          Resit cap ladder <span className="text-helper font-normal">(optional, degrading)</span>
+        </label>
+        <Input id="resit-ladder" className="h-8 w-64" placeholder="e.g. 50, 45, 40"
+          defaultValue={(policy.resitCapLadder ?? []).join(', ')}
+          onBlur={(e) => saveLadder(e.target.value)} />
+        <p className="text-helper mt-1.5">
+          Caps for the 2nd sit, 3rd sit, … (comma-separated); the last value repeats for further
+          attempts. When set, it overrides the flat “Resit cap” above — a per-assessment cap still
+          overrides both. Leave blank to use the flat cap.
+        </p>
+      </div>
+
       <p className="text-helper mt-2">
         Leave a field blank to use the platform default (shown as the placeholder). These drive
         module pass/fail, capped resits, board condonement and the final classification bands for
