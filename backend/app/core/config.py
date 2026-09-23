@@ -40,6 +40,11 @@ class Settings(BaseSettings):
     redis_url: str | None = None
     broker_url: str | None = None
 
+    # MT-5 — the platform's base domain (e.g. "pgr.icr.ac.uk"). A tenant is the label in
+    # front of it: icr.pgr.icr.ac.uk -> tenant "icr"; the bare base domain is the apex (no
+    # tenant). When unset (dev), only "<sub>.localhost" subdomains are resolved.
+    tenant_base_domain: str | None = None
+
     object_store_endpoint: str | None = None
     object_store_bucket: str | None = None
     # Phase 4A.2 — file storage. "local" writes under storage_root; "s3" is a later swap.
