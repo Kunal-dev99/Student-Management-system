@@ -1,0 +1,30 @@
+# ============================================================================
+# PGR Platform — Caddy for LOCAL HTTPS testing.
+#
+# Serves the app at https://localhost with Caddy's own internal CA (no public
+# domain / Let's Encrypt needed). Same split routing as production.
+#
+# Run:  caddy run --config deploy/Caddyfile.local
+# First run installs Caddy's local CA into your trust store (may prompt for admin),
+# so the browser trusts https://localhost with no warning.
+#
+# Ports here match the current dev setup (backend :8001, frontend :3000).
+# ============================================================================
+
+https://localhost {
+	tls internal
+
+	encode zstd gzip
+	request_body {
+		max_size 50MB
+	}
+
+	@api path /api/* /health/*
+	handle @api {
+		reverse_proxy 127.0.0.1:8001
+	}
+
+	handle {
+		reverse_proxy 127.0.0.1:3000
+	}
+}

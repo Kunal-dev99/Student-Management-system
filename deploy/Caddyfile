@@ -1,0 +1,81 @@
+# ============================================================================
+# PGR Platform — Caddy reverse proxy (production)
+#
+# Fronts the two app processes behind one HTTPS origin:
+#   - FastAPI backend  (uvicorn)         default 127.0.0.1:8001
+#   - Next.js frontend (npm run start)   default 127.0.0.1:3000
+#
+# Caddy terminates TLS (automatic certificates) and SPLITS traffic:
+#   /api/*  and  /health/*   -> backend   (skips the Next server; no double hop)
+#   everything else          -> frontend  (pages, _next assets, static)
+#
+# Because the browser talks to ONE origin, /api/v1 is same-origin — no CORS needed.
+#
+# Configure per environment with env vars (defaults after the colon):
+#   PGR_DOMAIN     the public hostname            (e.g. pgr.icr.ac.uk)
+#   PGR_BACKEND    host:port of the FastAPI app    (default 127.0.0.1:8001)
+#   PGR_FRONTEND   host:port of the Next app       (default 127.0.0.1:3000)
+#   TLS_EMAIL      ACME account email for certs
+#
+# Run:  caddy run --config deploy/Caddyfile
+# (see deploy/CADDY.md for TLS modes, service install, and a localhost variant)
+# ============================================================================
+
+{
+	# ACME account email for Let's Encrypt / ZeroSSL certificate issuance + renewal.
+	email {$TLS_EMAIL:admin@example.com}
+	# Uncomment to stage certs while testing so you don't hit rate limits:
+	# acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+}
+
+# Security headers applied to frontend (HTML) responses. The backend sets its own
+# security headers on API responses (SecurityHeadersMiddleware), so we don't double them there.
+(app_security) {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+}
+
+{$PGR_DOMAIN:pgr.example.com} {
+	encode zstd gzip
+
+	# Uploads: the cohort CSV import and document uploads need headroom.
+	# Raise if you expect large document uploads (thesis PDFs, etc.).
+	request_body {
+		max_size 50MB
+	}
+
+	# --- API + health checks -> FastAPI backend ---
+	# Streaming endpoints (SSE for Composer, etc.) work through reverse_proxy unchanged;
+	# WebSocket upgrades are handled automatically.
+	@api path /api/* /health/*
+	handle @api {
+		reverse_proxy {$PGR_BACKEND:127.0.0.1:8001} {
+			# Pass the real client + scheme so the app logs/links are correct behind TLS.
+			header_up X-Forwarded-Host {host}
+			# Active health check keeps Caddy from routing to a backend that is down.
+			health_uri /health/ready
+			health_interval 15s
+			health_timeout 5s
+		}
+	}
+
+	# --- Everything else -> Next.js frontend ---
+	handle {
+		import app_security
+		reverse_proxy {$PGR_FRONTEND:127.0.0.1:3000}
+	}
+
+	# Access log. Change the path for your OS (Windows e.g. C:/caddy/logs/pgr.access.log).
+	log {
+		output file /var/log/caddy/pgr-access.log {
+			roll_size 20MB
+			roll_keep 10
+		}
+		format json
+	}
+}
