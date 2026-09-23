@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///./pgr_dev.db"
     database_replica_url: str | None = None
 
-    @field_validator("database_url", "database_replica_url")
+    @field_validator("database_url", "database_replica_url", "app_database_url")
     @classmethod
     def _use_asyncpg_driver(cls, v: str | None) -> str | None:
         # Managed Postgres providers (Render, Heroku, etc.) hand out a bare
@@ -44,6 +44,15 @@ class Settings(BaseSettings):
     # front of it: icr.pgr.icr.ac.uk -> tenant "icr"; the bare base domain is the apex (no
     # tenant). When unset (dev), only "<sub>.localhost" subdomains are resolved.
     tenant_base_domain: str | None = None
+
+    # MT-6 — fail-closed app DB role. When APP_DATABASE_URL is set, the API request path
+    # connects as this NON-OWNER role, whose RLS policy is fail-closed: an unset tenant
+    # context sees NO rows (vs the owner role, which bypasses so seeds/migrations/worker
+    # keep working). Unset (dev) -> the API uses the owner connection, unchanged.
+    app_database_url: str | None = None
+    # Role/password the MT-6 migration provisions for that connection (change in prod).
+    app_db_role: str = "pgr_app"
+    app_db_password: str = "pgr_app_dev_only"
 
     object_store_endpoint: str | None = None
     object_store_bucket: str | None = None

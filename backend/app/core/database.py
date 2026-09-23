@@ -44,3 +44,21 @@ ReadSessionFactory = async_sessionmaker(
 )
 
 USING_REPLICA = bool(_settings.database_replica_url)
+
+# MT-6 — the API request path connects through the fail-closed, NON-OWNER app role when
+# APP_DATABASE_URL is configured; otherwise it falls back to the owner engine (dev default,
+# unchanged). The owner engine (`engine`/`SessionFactory`) is kept for migrations, seeds and
+# the background worker, which run without a tenant context and must bypass RLS.
+app_engine: AsyncEngine = (
+    create_async_engine(
+        _settings.app_database_url, echo=False, future=True, pool_pre_ping=True, **_POOL
+    )
+    if _settings.app_database_url
+    else engine
+)
+
+AppSessionFactory = async_sessionmaker(
+    bind=app_engine, class_=AsyncSession, expire_on_commit=False
+)
+
+USING_APP_ROLE = bool(_settings.app_database_url)

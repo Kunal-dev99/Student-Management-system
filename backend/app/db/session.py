@@ -5,11 +5,13 @@ from collections.abc import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import ReadSessionFactory, SessionFactory
+from app.core.database import AppSessionFactory, ReadSessionFactory
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
-    async with SessionFactory() as session:
+    # MT-6: the API request path uses the fail-closed app role when configured, else the
+    # owner engine (AppSessionFactory falls back to it). Worker/seed keep SessionFactory.
+    async with AppSessionFactory() as session:
         try:
             yield session
         except Exception:
