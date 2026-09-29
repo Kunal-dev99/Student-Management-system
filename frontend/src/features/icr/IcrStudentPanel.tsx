@@ -28,6 +28,7 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useToast } from '@/components/ui/use-toast'
 import { ApiError } from '@/shared/api/client'
+import { useLovList } from '@/features/settings/api'
 import {
   useAddAffiliation, useAddDrawdown, useAddTutorNote, useAffiliations, useAllocateBenchFee,
   useAssignTutor, useBenchFees, useCurrentTutor, useDrawdowns, useEndAffiliation, useEndPlacement,
@@ -182,6 +183,7 @@ function IndependentTutorSection({ studentId }: { studentId: string }) {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [tutorPersonId, setTutorPersonId] = useState('')
   const [tutorDepartmentId, setTutorDepartmentId] = useState('')
+  const depts = useLovList('departments', dialogOpen)
 
   const tutor = q.data?.currentTutor ?? null
   const notes = useTutorNotes(tutor?.id ?? null)
@@ -271,9 +273,19 @@ function IndependentTutorSection({ studentId }: { studentId: string }) {
                       onChange={(e) => setTutorPersonId(e.target.value)} placeholder="uuid" />
                   </div>
                   <div className="space-y-1.5">
-                    <Label htmlFor="tdid">Tutor department id (optional)</Label>
-                    <Input id="tdid" className="font-mono text-xs" value={tutorDepartmentId}
-                      onChange={(e) => setTutorDepartmentId(e.target.value)} placeholder="uuid (leave blank if unknown)" />
+                    <Label htmlFor="tdid">Tutor department <span className="text-muted-foreground">(optional)</span></Label>
+                    <Select value={tutorDepartmentId || '__none'}
+                      onValueChange={(v) => setTutorDepartmentId(v === '__none' ? '' : v)}>
+                      <SelectTrigger id="tdid"><SelectValue placeholder="Select a department…" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none">None</SelectItem>
+                        {(depts.data ?? []).map((d) => (
+                          <SelectItem key={d.id} value={d.id}>
+                            {String(d.name ?? '')}{d.code ? ` (${String(d.code)})` : ''}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
                 <DialogFooter>
@@ -301,6 +313,7 @@ function BenchFeesSection({ studentId }: { studentId: string }) {
   const [amount, setAmount] = useState('')
   const [validFrom, setValidFrom] = useState(TODAY)
   const [costCentre, setCostCentre] = useState('')
+  const costCentres = useLovList('cost-centres', allocOpen)
 
   const submit = async () => {
     try {
@@ -344,9 +357,19 @@ function BenchFeesSection({ studentId }: { studentId: string }) {
                   </div>
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="cc">Cost centre (optional)</Label>
-                  <Input id="cc" value={costCentre} onChange={(e) => setCostCentre(e.target.value)}
-                    placeholder="CC-BENCH" />
+                  <Label htmlFor="cc">Cost centre <span className="text-muted-foreground">(optional)</span></Label>
+                  <Select value={costCentre || '__none'}
+                    onValueChange={(v) => setCostCentre(v === '__none' ? '' : v)}>
+                    <SelectTrigger id="cc"><SelectValue placeholder="Select a cost centre…" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none">None</SelectItem>
+                      {(costCentres.data ?? []).map((c) => (
+                        <SelectItem key={c.id} value={String(c.code ?? c.id)}>
+                          {String(c.name ?? c.code ?? '')}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
               <DialogFooter>
