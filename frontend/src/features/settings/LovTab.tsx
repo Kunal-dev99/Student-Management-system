@@ -11,14 +11,13 @@
  */
 
 import { useEffect, useState } from 'react'
-import { ChevronRight, Eye, EyeOff, Pencil, Plus, RotateCcw, Trash2 } from 'lucide-react'
+import { Pencil, Plus, RotateCcw, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger,
@@ -33,7 +32,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import {
   useCreateLovRow, useDeleteLovRow, useLovKinds, useLovList, useResetValueSet,
   useUpdateLovRow, useUpsertValueSet, useValueSets,
-  type LovKind, type LovRow, type ValueSetValue,
+  type LovKind, type LovRow, type ValueSet, type ValueSetValue,
 } from '@/features/settings/api'
 
 const FIELD_LABELS: Record<string, string> = {
@@ -402,80 +401,56 @@ function ValueEditorDialog({
   )
 }
 
-function ValueSetsSection() {
-  const [open, setOpen] = useState(false)
-  const valueSets = useValueSets(open) // fetch lazily on first expand
-  const [editing, setEditing] = useState<{ enumName: string; value: ValueSetValue } | null>(null)
+/** "StudentStatus" -> "Student status"; "funding_type" -> "Funding type". */
+function humanizeEnum(name: string): string {
+  const s = name.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ').trim()
+  return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase()
+}
 
-  const areas: string[] = []
-  for (const vs of valueSets.data ?? []) {
-    if (!areas.includes(vs.area)) areas.push(vs.area)
-  }
-
+/** Right pane for one value set — its values as a table, each editable (label/description/hide). */
+function ValueSetEditor({ vs }: { vs: ValueSet }) {
+  const [editing, setEditing] = useState<ValueSetValue | null>(null)
   return (
-    <Collapsible open={open} onOpenChange={setOpen} className="card-elevated px-4 py-3">
-      <CollapsibleTrigger asChild>
-        <button className="flex w-full items-center gap-2 text-left">
-          <ChevronRight className={cn('h-4 w-4 text-muted-foreground transition-transform', open && 'rotate-90')} />
-          <span className="text-sm font-medium">Platform value sets</span>
-          <Badge variant="outline" className="ml-1">configurable</Badge>
-        </button>
-      </CollapsibleTrigger>
-      <CollapsibleContent>
-        <div className="pt-3 space-y-4">
-          <p className="text-helper">
-            Every value here can be renamed, described and hidden per institution. The
-            underlying code stays stable so data and business logic keep working.
-          </p>
-          {valueSets.isLoading && <Skeleton className="h-24 w-full" />}
-          {areas.map((area) => (
-            <div key={area} className="space-y-2">
-              <p className="text-label">{area}</p>
-              <div className="space-y-3">
-                {valueSets.data?.filter((vs) => vs.area === area).map((vs) => (
-                  <div key={vs.name} className="rounded-md border border-border p-3">
-                    <p className="text-xs font-mono text-muted-foreground mb-2">{vs.name}</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {vs.values.map((v) => (
-                        <button
-                          key={v.code}
-                          type="button"
-                          onClick={() => setEditing({ enumName: vs.name, value: v })}
-                          className={cn(
-                            'group inline-flex items-center gap-1 rounded-sm border px-2 py-0.5 text-xs transition-colors',
-                            v.hidden
-                              ? 'border-dashed border-warning/50 bg-warning/5 text-muted-foreground line-through'
-                              : v.overridden
-                                ? 'border-primary/40 bg-primary/5 text-foreground hover:border-primary'
-                                : 'border-border bg-surface-2 text-muted-foreground hover:border-primary/40',
-                          )}
-                          title={v.description ?? undefined}
-                        >
-                          {v.hidden
-                            ? <EyeOff className="h-3 w-3" />
-                            : <Eye className="h-3 w-3 opacity-0 group-hover:opacity-60" />}
-                          <span>{v.label}</span>
-                          <span className="text-muted-foreground/60 font-mono">·{v.code}</span>
-                          <Pencil className="h-3 w-3 opacity-0 group-hover:opacity-60" />
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      </CollapsibleContent>
+    <div className="space-y-3">
+      <p className="text-helper">
+        Rename, describe or hide any value for your institution. The underlying code stays
+        stable, so data and business logic keep working.
+      </p>
+      <div className="card-elevated overflow-hidden">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Label</TableHead>
+              <TableHead>Code</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead className="w-16 text-right">Edit</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {vs.values.map((v) => (
+              <TableRow key={v.code} className={cn(v.hidden && 'opacity-60')}>
+                <TableCell className={cn('font-medium', v.hidden && 'line-through')}>{v.label}</TableCell>
+                <TableCell className="font-mono text-xs text-muted-foreground">{v.code}</TableCell>
+                <TableCell className="space-x-1">
+                  {v.overridden && <Badge variant="info">Customised</Badge>}
+                  {v.hidden && <Badge variant="warning">Hidden</Badge>}
+                  {!v.overridden && !v.hidden && <span className="text-helper text-xs">Default</span>}
+                </TableCell>
+                <TableCell className="text-right">
+                  <Button variant="ghost" size="sm" className="h-7 px-2" title={`Configure ${v.code}`}
+                    onClick={() => setEditing(v)}>
+                    <Pencil className="h-3.5 w-3.5" />
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
       {editing && (
-        <ValueEditorDialog
-          enumName={editing.enumName}
-          value={editing.value}
-          open
-          onClose={() => setEditing(null)}
-        />
+        <ValueEditorDialog enumName={vs.name} value={editing} open onClose={() => setEditing(null)} />
       )}
-    </Collapsible>
+    </div>
   )
 }
 
@@ -485,31 +460,46 @@ function ValueSetsSection() {
 
 export function LovTab() {
   const kinds = useLovKinds()
-  const [active, setActive] = useState<string>('departments')
-  const activeKind = kinds.data?.find((k) => k.kind === active)
+  const valueSets = useValueSets(true)
+  const [sel, setSel] = useState<{ type: 'kind' | 'vs'; id: string }>({ type: 'kind', id: 'departments' })
+
+  const activeKind = kinds.data?.find((k) => k.kind === sel.id)
+  const activeVs = valueSets.data?.find((v) => v.name === sel.id)
+
+  const NavItem = ({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) => (
+    <button type="button" onClick={onClick}
+      className={cn('w-full truncate rounded-md px-3 py-1.5 text-left text-sm transition-colors',
+        active ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-surface-2 hover:text-foreground')}>
+      {label}
+    </button>
+  )
 
   return (
-    <div className="space-y-4">
-      {kinds.isLoading && <Skeleton className="h-64 w-full" />}
-      {kinds.data && (
-        <>
-          <div className="flex flex-wrap items-center gap-1.5">
-            {kinds.data.map((k) => (
-              <Button
-                key={k.kind}
-                size="sm"
-                variant={active === k.kind ? 'default' : 'outline'}
-                onClick={() => setActive(k.kind)}
-                className="uppercase tracking-wide"
-              >
-                {k.label}s
-              </Button>
-            ))}
-          </div>
-          {activeKind && <LovTable key={activeKind.kind} kind={activeKind} />}
-        </>
-      )}
-      <ValueSetsSection />
+    <div className="grid gap-5 md:grid-cols-[210px_minmax(0,1fr)]">
+      {/* Single switcher: reference lists + value-set overrides, one click to any of them. */}
+      <nav className="space-y-4 self-start">
+        <div className="space-y-0.5">
+          <p className="px-1 pb-1 text-label">Reference lists</p>
+          {kinds.isLoading && <Skeleton className="h-40 w-full" />}
+          {kinds.data?.map((k) => (
+            <NavItem key={k.kind} active={sel.type === 'kind' && sel.id === k.kind}
+              label={`${k.label}s`} onClick={() => setSel({ type: 'kind', id: k.kind })} />
+          ))}
+        </div>
+        <div className="space-y-0.5">
+          <p className="px-1 pb-1 text-label">Value-set overrides</p>
+          {valueSets.isLoading && <Skeleton className="h-40 w-full" />}
+          {valueSets.data?.map((v) => (
+            <NavItem key={v.name} active={sel.type === 'vs' && sel.id === v.name}
+              label={humanizeEnum(v.name)} onClick={() => setSel({ type: 'vs', id: v.name })} />
+          ))}
+        </div>
+      </nav>
+
+      <div className="min-w-0">
+        {sel.type === 'kind' && activeKind && <LovTable key={activeKind.kind} kind={activeKind} />}
+        {sel.type === 'vs' && activeVs && <ValueSetEditor key={activeVs.name} vs={activeVs} />}
+      </div>
     </div>
   )
 }
