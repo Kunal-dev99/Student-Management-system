@@ -56,6 +56,12 @@ async def _programme(session, p: dict) -> Programme:
     return prog
 
 
+def _asmt_sig(title, atype, weight, passm, cap) -> tuple:
+    """A comparable signature so we only rewrite a module's assessments when they differ."""
+    fnum = lambda v: (None if v in (None, "") else float(v))  # noqa: E731
+    return (str(title), str(atype), fnum(weight), fnum(passm), fnum(cap))
+
+
 async def _module(session, programme_id, m: dict) -> TaughtModule:
     mod = (await session.execute(
         select(TaughtModule).where(
@@ -63,12 +69,28 @@ async def _module(session, programme_id, m: dict) -> TaughtModule:
         )
     )).scalar_one_or_none()
     if mod is None:
-        mod = TaughtModule(
-            programme_id=programme_id, code=m["code"], title=m["title"],
-            credits=m.get("credits") or 0, level=m.get("level") or 7,
-            is_core=bool(m.get("is_core", True)), term=m.get("term"),
-        )
+        mod = TaughtModule(programme_id=programme_id, code=m["code"], title=m["title"])
         session.add(mod)
+    # Keep the module row in step with the seed (title/credits/level/core/term are authoritative).
+    mod.title = m["title"]
+    mod.credits = m.get("credits") or 0
+    mod.level = m.get("level") or 7
+    mod.is_core = bool(m.get("is_core", True))
+    mod.term = m.get("term")
+    await session.flush()
+
+    # Reconcile assessments: only rewrite when the current set differs from the seed (so a messy
+    # set - wrong weights, a stray component - is corrected, but a matching module is left alone).
+    existing = (await session.execute(
+        select(ModuleAssessment).where(ModuleAssessment.module_id == mod.id)
+    )).scalars().all()
+    have = sorted(_asmt_sig(a.title, a.assessment_type.value, a.weight_pct, a.pass_mark,
+                            getattr(a, "resit_cap", None)) for a in existing)
+    want = sorted(_asmt_sig(a["title"], a["assessment_type"], a.get("weight_pct"),
+                            a.get("pass_mark"), a.get("resit_cap")) for a in m.get("assessments", []))
+    if have != want:
+        for a in existing:
+            await session.delete(a)
         await session.flush()
         for a in m.get("assessments", []):
             asmt = ModuleAssessment(

@@ -7,11 +7,17 @@
       "taught_total_credits": 180,
       "duration_months": null,
       "grading_policy": {
+        "passMark": 50,
+        "resitCap": 50,
         "resitCapLadder": [
           50,
           45,
           40
-        ]
+        ],
+        "condonementCredits": 30,
+        "distinctionMark": 70,
+        "meritMark": 60,
+        "passMarkAward": 50
       },
       "modules": [
         {
@@ -20,7 +26,7 @@
           "credits": 30,
           "level": 7,
           "is_core": true,
-          "term": null,
+          "term": "Autumn 2026",
           "assessments": [
             {
               "title": "Critical essay",
@@ -37,14 +43,6 @@
               "pass_mark": "50.00",
               "resit_cap": null,
               "resit_allowed": true
-            },
-            {
-              "title": "session 1",
-              "assessment_type": "exam",
-              "weight_pct": "3.00",
-              "pass_mark": "40.00",
-              "resit_cap": "3.00",
-              "resit_allowed": true
             }
           ]
         },
@@ -54,7 +52,7 @@
           "credits": 30,
           "level": 7,
           "is_core": true,
-          "term": null,
+          "term": "Autumn 2026",
           "assessments": [
             {
               "title": "Trial protocol coursework",
@@ -80,7 +78,7 @@
           "credits": 30,
           "level": 7,
           "is_core": true,
-          "term": null,
+          "term": "Spring 2027",
           "assessments": [
             {
               "title": "Case essay",
@@ -106,12 +104,20 @@
           "credits": 30,
           "level": 7,
           "is_core": true,
-          "term": null,
+          "term": "Spring 2027",
           "assessments": [
             {
               "title": "Written exam",
               "assessment_type": "exam",
-              "weight_pct": "100.00",
+              "weight_pct": "60.00",
+              "pass_mark": "50.00",
+              "resit_cap": null,
+              "resit_allowed": true
+            },
+            {
+              "title": "Poster presentation",
+              "assessment_type": "presentation",
+              "weight_pct": "40.00",
               "pass_mark": "50.00",
               "resit_cap": null,
               "resit_allowed": true
@@ -123,9 +129,18 @@
           "title": "Research Methods & Biostatistics",
           "credits": 30,
           "level": 7,
-          "is_core": false,
-          "term": "Spring 2027",
-          "assessments": []
+          "is_core": true,
+          "term": "Autumn 2026",
+          "assessments": [
+            {
+              "title": "Research proposal",
+              "assessment_type": "coursework",
+              "weight_pct": "100.00",
+              "pass_mark": "50.00",
+              "resit_cap": null,
+              "resit_allowed": true
+            }
+          ]
         }
       ],
       "students": [
