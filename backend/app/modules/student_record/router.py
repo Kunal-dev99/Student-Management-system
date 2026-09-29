@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.authorization import student_scope
@@ -21,7 +21,13 @@ from app.modules.student_record.constants import (
     LifecycleEventType,
     StudentStatus,
 )
-from app.modules.student_record.import_service import CohortImportService, ImportDefaults
+from app.modules.student_record.custom_fields import CustomFieldService
+from app.modules.student_record.import_service import (
+    DEFAULT_IMPORT_TEMPLATE,
+    CohortImportService,
+    ImportDefaults,
+    sanitize_template,
+)
 from app.modules.student_record.repository import StudentRepository
 from app.modules.student_record.lifecycle import LifecycleService
 from app.modules.student_record.schemas import (
@@ -196,6 +202,137 @@ async def import_commit(
     )
 
 
+IMPORT_TEMPLATE_KEY = "cohort_import_template"
+
+
+async def _load_import_template(session: AsyncSession) -> list[dict]:
+    from sqlalchemy import select as _select
+
+    from app.modules.settings.models import InstitutionSetting
+
+    row = (
+        await session.execute(
+            _select(InstitutionSetting).where(InstitutionSetting.key == IMPORT_TEMPLATE_KEY)
+        )
+    ).scalar_one_or_none()
+    cols = (row.value or {}).get("columns") if row else None
+    return sanitize_template(cols) if cols else list(DEFAULT_IMPORT_TEMPLATE)
+
+
+@router.get("/import/template", summary="Cohort import template (which columns appear)")
+async def get_import_template(
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("student.write")),
+) -> dict:
+    return {"columns": await _load_import_template(session)}
+
+
+@router.put("/import/template", summary="Configure the cohort import template")
+async def set_import_template(
+    body: dict,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_permission("admin.configure")),
+) -> dict:
+    from sqlalchemy import select as _select
+
+    from app.modules.settings.models import InstitutionSetting
+
+    cols = sanitize_template((body or {}).get("columns"))
+    if not any(c["enabled"] for c in cols):
+        raise ValidationAppError("At least one column must be enabled.")
+    required_disabled = [c["field"] for c in cols if c["required"] and not c["enabled"]]
+    if required_disabled:
+        raise ValidationAppError("A required column cannot be disabled: " + ", ".join(required_disabled))
+    row = (
+        await session.execute(
+            _select(InstitutionSetting).where(InstitutionSetting.key == IMPORT_TEMPLATE_KEY)
+        )
+    ).scalar_one_or_none()
+    if row is not None:
+        row.value = {"columns": cols}
+        row.updated_by_user_id = principal.user_id
+    else:
+        session.add(
+            InstitutionSetting(
+                key=IMPORT_TEMPLATE_KEY,
+                value={"columns": cols},
+                updated_by_user_id=principal.user_id,
+            )
+        )
+    await session.commit()
+    return {"columns": cols}
+
+
+# --- Admin-defined custom student attributes (HESA gap capture) --------------------------------
+# Declared before /{student_id} so "custom-fields" isn't captured as a student id.
+
+def _custom_field_out(f) -> dict:
+    return {
+        "id": str(f.id), "key": f.key, "label": f.label, "dataType": f.data_type,
+        "reason": f.reason, "sourcePath": f"custom.{f.key}",
+        "createdAt": f.created_at.isoformat() if f.created_at else None,
+    }
+
+
+@router.get("/custom-fields", summary="List admin-defined custom student attributes")
+async def list_custom_fields(
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("student.read")),
+) -> list[dict]:
+    return [_custom_field_out(f) for f in await CustomFieldService(session).list_fields()]
+
+
+@router.post("/custom-fields", status_code=201, summary="Create a custom student attribute")
+async def create_custom_field(
+    body: dict,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_permission("admin.configure")),
+) -> dict:
+    field = await CustomFieldService(session).create_field(
+        label=(body or {}).get("label", ""),
+        data_type=(body or {}).get("dataType", "string"),
+        reason=(body or {}).get("reason", ""),
+        user_id=principal.user_id,
+    )
+    return _custom_field_out(field)
+
+
+@router.delete("/custom-fields/{field_id}", status_code=204, response_class=Response,
+               summary="Delete a custom student attribute and its values")
+async def delete_custom_field(
+    field_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("admin.configure")),
+):
+    await CustomFieldService(session).delete_field(field_id)
+    return Response(status_code=204)
+
+
+@router.get("/custom-fields/{field_id}/values",
+            summary="Every student with their value for this attribute (entry grid)")
+async def get_custom_field_values(
+    field_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("student.read")),
+) -> dict:
+    svc = CustomFieldService(session)
+    field = await svc.get_field(field_id)
+    return {"field": _custom_field_out(field), "rows": await svc.field_values(field_id)}
+
+
+@router.put("/custom-fields/{field_id}/values", summary="Enter/update values per student")
+async def set_custom_field_values(
+    field_id: uuid.UUID,
+    body: dict,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_permission("student.write")),
+) -> dict:
+    filled = await CustomFieldService(session).set_values(
+        field_id, entries=(body or {}).get("values", []), user_id=principal.user_id,
+    )
+    return {"filled": filled}
+
+
 @router.get("/{student_id}", response_model=StudentOut, summary="Get a student (row-scoped)")
 async def get_student(
     student_id: uuid.UUID,
@@ -260,16 +397,21 @@ async def list_lifecycle_events(
     out: list[LifecycleEventOut] = []
     for e in events:
         row = svc.out(e)
-        # ICR G6 — attach a deterministic impact preview to a PENDING intensity change, so the
-        # approver sees what it will do before deciding.
-        if (e.event_type is LifecycleEventType.intensity_change
-                and e.status is LifecycleEventStatus.requested and e.intensity_pct):
-            if student is None:
-                student = await svc._get_student(student_id)
-            row["impact"] = await svc.intensity_impact_preview(
-                student, prev_pct=e.previous_intensity_pct or await svc._current_intensity(student),
-                new_pct=e.intensity_pct, effective=e.start_date,
-            )
+        # ICR G6 — attach a deterministic impact preview to a PENDING date-moving request, so the
+        # table and the approver see what it will do before deciding (not just intensity changes:
+        # a mode change or extension that showed no effect until approval read as a broken app).
+        if e.status is LifecycleEventStatus.requested:
+            if e.event_type is LifecycleEventType.intensity_change and e.intensity_pct:
+                if student is None:
+                    student = await svc._get_student(student_id)
+                row["impact"] = await svc.intensity_impact_preview(
+                    student, prev_pct=e.previous_intensity_pct or await svc._current_intensity(student),
+                    new_pct=e.intensity_pct, effective=e.start_date,
+                )
+            elif e.event_type in (LifecycleEventType.mode_change, LifecycleEventType.extension):
+                if student is None:
+                    student = await svc._get_student(student_id)
+                row["impact"] = await svc.event_impact_preview(student, e)
         out.append(LifecycleEventOut.model_validate(row))
     return out
 

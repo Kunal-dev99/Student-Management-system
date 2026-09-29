@@ -423,6 +423,86 @@ class LifecycleService:
             "summary": summary,
         }
 
+    async def _milestone_shifts(self, student: Student, days_delta: int) -> list[dict]:
+        """The undecided, dated milestones that would move by ``days_delta``, with their
+        current -> projected due dates. Shared by every impact preview."""
+        from datetime import timedelta
+
+        from app.modules.progression.models import Milestone, MilestoneDefinition
+
+        rows = (await self.session.execute(
+            select(Milestone).where(
+                Milestone.student_id == student.id,
+                Milestone.status != MilestoneStatus.decided,
+                Milestone.status != MilestoneStatus.cancelled,
+                Milestone.due_date.is_not(None),
+            )
+        )).scalars().unique().all()
+        def_ids = {m.milestone_definition_id for m in rows if m.milestone_definition_id}
+        names: dict = {}
+        if def_ids:
+            for d in (await self.session.execute(
+                select(MilestoneDefinition).where(MilestoneDefinition.id.in_(def_ids))
+            )).scalars().all():
+                names[d.id] = d.name
+        return sorted(
+            [
+                {
+                    "name": m.name or names.get(m.milestone_definition_id) or "Milestone",
+                    "currentDue": m.due_date.isoformat(),
+                    "projectedDue": (m.due_date + timedelta(days=days_delta)).isoformat(),
+                }
+                for m in rows
+            ],
+            key=lambda x: x["currentDue"],
+        )
+
+    async def event_impact_preview(
+        self, student: Student, event: StudentLifecycleEvent
+    ) -> dict | None:
+        """What approving a PENDING extension or mode change WOULD do to the timeline — the same
+        deterministic arithmetic approval uses. This mirrors the intensity-change preview so every
+        date-moving request shows its effect up front, instead of appearing to do nothing until
+        approved (ICR feedback: partial visibility reads as a broken app)."""
+        from datetime import timedelta
+
+        if event.event_type is LifecycleEventType.extension:
+            days_delta = int(event.extension_days or 0)
+            verb = f"Extends the registration by {days_delta} day(s)"
+        elif event.event_type is LifecycleEventType.mode_change:
+            from app.modules.settings.service import setting_value
+            factor = await setting_value(self.session, "lifecycle.part_time_factor")
+            days_delta = self._mode_change_days(student, event, factor)
+            to_mode = event.new_mode.value if hasattr(event.new_mode, "value") else event.new_mode
+            verb = f"Moves study to {str(to_mode or '?').replace('_', ' ')}"
+        else:
+            return None
+
+        base = {
+            "daysDelta": days_delta,
+            "startDate": student.start_date.isoformat() if student.start_date else None,
+            "currentEnd": student.expected_end_date.isoformat() if student.expected_end_date else None,
+        }
+        if not student.expected_end_date or not days_delta:
+            return {
+                **base,
+                "projectedEnd": student.expected_end_date.isoformat() if student.expected_end_date else None,
+                "milestonesAffected": 0, "milestones": [],
+                "summary": f"{verb}. The expected end date does not change.",
+            }
+        projected_end = student.expected_end_date + timedelta(days=days_delta)
+        milestones = await self._milestone_shifts(student, days_delta)
+        direction = "extend" if days_delta > 0 else "shorten"
+        summary = (
+            f"{verb}. Would {direction} the expected end by {abs(days_delta)} day(s) to "
+            f"{projected_end.isoformat()}"
+            + (f", shifting {len(milestones)} undecided milestone(s)." if milestones else ".")
+        )
+        return {
+            **base, "projectedEnd": projected_end.isoformat(),
+            "milestonesAffected": len(milestones), "milestones": milestones, "summary": summary,
+        }
+
     async def intensity_impact_narrated(self, event_id: uuid.UUID) -> dict:
         """The deterministic impact plus an AI-worded paragraph over the SAME figures (ICR G6).
 

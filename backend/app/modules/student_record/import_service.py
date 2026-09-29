@@ -108,6 +108,42 @@ class RowResult:
         }
 
 
+# --- configurable import template (which columns the cohort import expects) ------------------
+# The field set is fixed (each maps to a known importer field); an admin chooses which appear
+# and which are required. `surname` and `programme` default to required (the importer needs a
+# name and a programme unless a default programme is supplied).
+IMPORT_TEMPLATE_FIELDS: list[tuple[str, str]] = [
+    ("studentRef", "Student ref"), ("firstName", "First name"), ("surname", "Surname"),
+    ("email", "Email"), ("programme", "Programme"), ("startDate", "Start date"),
+    ("studyMode", "Study mode"), ("status", "Status"), ("funder", "Funder"),
+]
+DEFAULT_IMPORT_TEMPLATE: list[dict] = [
+    {"field": f, "label": lbl, "enabled": True, "required": f in ("surname", "programme")}
+    for f, lbl in IMPORT_TEMPLATE_FIELDS
+]
+
+
+def sanitize_template(columns) -> list[dict]:
+    """Validate a submitted template: known fields only, keep order, append any missing as
+    disabled so the full field set is always present for the admin to toggle."""
+    labels = dict(IMPORT_TEMPLATE_FIELDS)
+    out, seen = [], set()
+    for c in (columns or []):
+        f = (c or {}).get("field")
+        if f in labels and f not in seen:
+            seen.add(f)
+            out.append({
+                "field": f,
+                "label": str((c.get("label") or labels[f]))[:60],
+                "enabled": bool(c.get("enabled", True)),
+                "required": bool(c.get("required", False)),
+            })
+    for f, lbl in IMPORT_TEMPLATE_FIELDS:
+        if f not in seen:
+            out.append({"field": f, "label": lbl, "enabled": False, "required": False})
+    return out
+
+
 @dataclass
 class ImportDefaults:
     """Whole-cohort fallbacks applied to blank cells (chosen once in the import dialog)."""

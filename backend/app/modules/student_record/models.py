@@ -10,7 +10,9 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import JSON, Date, DateTime, Enum, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import (
+    JSON, Date, DateTime, Enum, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TenantMixin, TimestampMixin, UUIDMixin
@@ -179,3 +181,47 @@ class ResearchProject(UUIDMixin, TenantMixin, TimestampMixin, Base):
     start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     student: Mapped[Student] = relationship(back_populates="project")
+
+
+# --- Admin-defined custom student attributes (HESA gap capture) --------------------------------
+# When a statutory return needs an attribute the core model doesn't hold, an admin defines a custom
+# field (one click, no code release) and enters its value per student. Stored as definition + value
+# rows (not a runtime ALTER TABLE), so it is tenant-scoped, survives migrations and can't corrupt
+# the student table. Statutory mappings read these via the `custom.<key>` source path.
+
+class StudentCustomField(UUIDMixin, TenantMixin, TimestampMixin, Base):
+    __tablename__ = "student_custom_field"
+    __table_args__ = (UniqueConstraint("tenant_id", "key", name="uq_custom_field_tenant_key"),)
+
+    # Stable machine key used in the `custom.<key>` mapping path; derived from the label at create.
+    key: Mapped[str] = mapped_column(String(60), index=True)
+    label: Mapped[str] = mapped_column(String(120))
+    # string | number | date | code — drives the entry-grid input and the picker's type badge.
+    data_type: Mapped[str] = mapped_column(String(20), default="string")
+    # Why this attribute was created — mandatory commentary, shown in the picker and the audit trail.
+    reason: Mapped[str] = mapped_column(Text)
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    values: Mapped[list["StudentCustomValue"]] = relationship(
+        back_populates="field", cascade="all, delete-orphan", lazy="selectin"
+    )
+
+
+class StudentCustomValue(UUIDMixin, TenantMixin, TimestampMixin, Base):
+    __tablename__ = "student_custom_value"
+    __table_args__ = (
+        UniqueConstraint("custom_field_id", "student_id", name="uq_custom_value_field_student"),
+    )
+
+    custom_field_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("student_custom_field.id", ondelete="CASCADE"), index=True
+    )
+    student_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("student.id", ondelete="CASCADE"), index=True
+    )
+    value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    updated_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    field: Mapped[StudentCustomField] = relationship(back_populates="values")

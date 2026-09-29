@@ -131,3 +131,62 @@ async def test_file_without_programme_column_is_rejected(ctx):
     r = await c.post("/api/v1/students/import/preview", headers=h,
                      files=_upload("name,email\nJo Bloggs,jo@t.com\n"))
     assert r.status_code == 400, r.text  # whole-file validation error (not a per-row one)
+
+
+# --- Settings-configurable import template -------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_import_template_defaults_and_full_field_set(ctx):
+    c, h, _ = ctx
+    r = await c.get("/api/v1/students/import/template", headers=h)
+    assert r.status_code == 200, r.text
+    cols = r.json()["columns"]
+    fields = [col["field"] for col in cols]
+    # All nine known fields are always present so the admin can toggle any of them.
+    assert fields == [
+        "studentRef", "firstName", "surname", "email", "programme",
+        "startDate", "studyMode", "status", "funder",
+    ]
+    required = {col["field"] for col in cols if col["required"]}
+    assert required == {"surname", "programme"}
+
+
+@pytest.mark.asyncio
+async def test_import_template_save_and_reload(ctx):
+    c, h, _ = ctx
+    payload = {"columns": [
+        {"field": "surname", "label": "Family name", "enabled": True, "required": True},
+        {"field": "email", "label": "Email", "enabled": True, "required": False},
+        {"field": "programme", "label": "Programme", "enabled": True, "required": True},
+    ]}
+    put = await c.put("/api/v1/students/import/template", headers=h, json=payload)
+    assert put.status_code == 200, put.text
+    saved = put.json()["columns"]
+    # Submitted columns keep order; the rest are appended disabled so the full set persists.
+    assert [col["field"] for col in saved[:3]] == ["surname", "email", "programme"]
+    assert saved[0]["label"] == "Family name"
+    assert len(saved) == 9
+    disabled = {col["field"] for col in saved if not col["enabled"]}
+    assert "studentRef" in disabled and "funder" in disabled
+
+    again = await c.get("/api/v1/students/import/template", headers=h)
+    assert again.json()["columns"][0]["label"] == "Family name"
+
+
+@pytest.mark.asyncio
+async def test_import_template_requires_at_least_one_column(ctx):
+    c, h, _ = ctx
+    payload = {"columns": [{"field": "surname", "label": "S", "enabled": False, "required": False}]}
+    r = await c.put("/api/v1/students/import/template", headers=h, json=payload)
+    assert r.status_code == 400, r.text
+
+
+@pytest.mark.asyncio
+async def test_import_template_rejects_required_but_disabled(ctx):
+    c, h, _ = ctx
+    payload = {"columns": [
+        {"field": "surname", "label": "S", "enabled": True, "required": True},
+        {"field": "programme", "label": "P", "enabled": False, "required": True},
+    ]}
+    r = await c.put("/api/v1/students/import/template", headers=h, json=payload)
+    assert r.status_code == 400, r.text

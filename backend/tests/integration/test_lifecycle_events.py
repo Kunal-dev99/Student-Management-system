@@ -205,6 +205,43 @@ async def test_extension_adds_days_and_stacks_with_suspension(ctx):
 
 
 @pytest.mark.asyncio
+async def test_pending_mode_change_and_extension_expose_projected_impact(ctx):
+    """A requested (unapproved) mode change or extension must carry a deterministic impact
+    preview in the events list — so the table/summary show what WILL happen, instead of the
+    change appearing to do nothing until approval (ICR feedback)."""
+    c, token, ids, _ = ctx
+    h = await token("a@t.com")
+
+    # Mode change full -> part time from 2027-01-01: remaining 731 days (2028 is a leap year),
+    # part-time factor 2.0 → +731 days projected.
+    await c.post(f"/api/v1/students/{ids['student']}/lifecycle-events", headers=h, json={
+        "eventType": "mode_change", "reason": "Reduced hours for caring responsibilities",
+        "startDate": "2027-01-01", "newMode": "part_time",
+    })
+    await c.post(f"/api/v1/students/{ids['student']}/lifecycle-events", headers=h, json={
+        "eventType": "extension", "reason": "Extra lab time", "startDate": "2027-01-01",
+        "extensionDays": 45,
+    })
+
+    events = (await c.get(f"/api/v1/students/{ids['student']}/lifecycle-events", headers=h)).json()
+    by_type = {e["eventType"]: e for e in events}
+
+    mode = by_type["mode_change"]
+    assert mode["status"] == "requested"
+    assert mode["impact"] is not None, "a pending mode change must preview its impact"
+    assert mode["impact"]["daysDelta"] == 731
+    assert mode["impact"]["projectedEnd"] == (ORIGINAL_END + timedelta(days=731)).isoformat()
+
+    ext = by_type["extension"]
+    assert ext["impact"] is not None
+    assert ext["impact"]["daysDelta"] == 45
+
+    # Nothing was approved — the student's real dates stay put.
+    student = (await c.get(f"/api/v1/students/{ids['student']}", headers=h)).json()
+    assert student["expectedEndDate"] == ORIGINAL_END.isoformat()
+
+
+@pytest.mark.asyncio
 async def test_rejected_request_leaves_dates_untouched(ctx):
     c, token, ids, _ = ctx
     h = await token("a@t.com")
