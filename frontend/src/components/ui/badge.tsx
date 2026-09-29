@@ -29,12 +29,16 @@ const badgeVariants = cva(
 )
 
 export interface BadgeProps
-  extends React.HTMLAttributes<HTMLDivElement>,
+  extends React.HTMLAttributes<HTMLSpanElement>,
     VariantProps<typeof badgeVariants> {}
 
+// Rendered as an inline <span> (not a block <div>): the badge is already `inline-flex`, so this
+// looks identical, but it is valid inside <p>, table cells and inline text everywhere it is used.
+// A <div> inside a <p> is invalid HTML — the browser hoists it out, desyncing React's DOM tree so
+// that later text-node updates (e.g. a status changing requested → approved) silently fail to paint.
 function Badge({ className, variant, ...props }: BadgeProps) {
   return (
-    <div className={cn(badgeVariants({ variant }), className)} {...props} />
+    <span className={cn(badgeVariants({ variant }), className)} {...props} />
   )
 }
 

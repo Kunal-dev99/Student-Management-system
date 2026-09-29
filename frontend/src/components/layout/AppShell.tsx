@@ -92,7 +92,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!canAsk) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key.toLowerCase() !== 'k' || !(e.metaKey || e.ctrlKey)) return
+      // `e.key` can be undefined for some synthetic/IME/autofill keydown events — guard it so the
+      // handler never throws (it would surface as an unhandled runtime error).
+      if (e.key?.toLowerCase() !== 'k' || !(e.metaKey || e.ctrlKey)) return
       const el = document.activeElement as HTMLElement | null
       const typing =
         el instanceof HTMLInputElement ||

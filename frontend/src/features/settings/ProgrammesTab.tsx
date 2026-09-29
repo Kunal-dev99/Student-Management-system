@@ -365,6 +365,28 @@ function GradingPolicyEditor({ programme, onPatch }: {
         module pass/fail, capped resits, board condonement and the final classification bands for
         this programme.
       </p>
+
+      {/* Make the override order explicit — these are programme-wide, but pass mark and resit cap
+          can be tightened per assessment on the Modules tab. */}
+      <div className="mt-3 rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground space-y-1">
+        <p className="font-medium text-foreground">Where each value applies</p>
+        <p>
+          These settings are <span className="font-medium">programme-wide</span> — they apply to every
+          module and assessment on this programme.
+        </p>
+        <p>
+          <span className="font-medium">Pass mark</span> and <span className="font-medium">resit cap</span>{' '}
+          can be overridden <span className="font-medium">per assessment</span> in the{' '}
+          <span className="font-medium">Modules</span> tab. Resolution order (most specific wins):{' '}
+          platform default → this programme policy → per-assessment value. For a resit cap, a
+          per-assessment cap beats the ladder, which beats the flat cap.
+        </p>
+        <p>
+          <span className="font-medium">Condonement credits</span> and the{' '}
+          <span className="font-medium">classification bands</span> (Distinction / Merit / Award pass)
+          are programme-level only — used by the exam board at classification, not per module.
+        </p>
+      </div>
     </div>
   )
 }

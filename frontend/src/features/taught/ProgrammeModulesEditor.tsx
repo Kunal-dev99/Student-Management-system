@@ -59,6 +59,35 @@ export function ProgrammeModulesEditor({ programmeId }: { programmeId: string })
         </div>
       </div>
 
+      {/* Add-module form pinned at the top so it's always visible, not hidden below a long list. */}
+      <div className="card-elevated mb-3 border-primary/30 bg-[hsl(var(--primary)/0.04)] p-3">
+        <div className="mb-2 flex items-center gap-1.5 text-sm font-medium">
+          <Plus className="h-4 w-4 text-primary" /> Add a module to this programme
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Input className="h-8 w-28" placeholder="Code" value={mod.code} onChange={(e) => setMod((s) => ({ ...s, code: e.target.value }))} />
+          <Input className="h-8 w-56" placeholder="Module title" value={mod.title} onChange={(e) => setMod((s) => ({ ...s, title: e.target.value }))} />
+          <Input className="h-8 w-24" type="number" placeholder="Credits" value={mod.credits} onChange={(e) => setMod((s) => ({ ...s, credits: e.target.value }))} />
+          <Input className="h-8 w-20" type="number" placeholder="Level" value={mod.level} onChange={(e) => setMod((s) => ({ ...s, level: e.target.value }))} />
+          <label className="flex items-center gap-1.5 text-sm text-helper">
+            <input type="checkbox" checked={mod.isCore} onChange={(e) => setMod((s) => ({ ...s, isCore: e.target.checked }))} /> Core
+          </label>
+          <Button size="sm" disabled={!mod.code || !mod.title || createModule.isPending}
+            onClick={async () => {
+              try {
+                await createModule.mutateAsync({
+                  code: mod.code, title: mod.title, credits: mod.credits ? Number(mod.credits) : 0,
+                  level: mod.level ? Number(mod.level) : undefined, isCore: mod.isCore,
+                })
+                setMod({ code: '', title: '', credits: '', level: '7', isCore: true })
+                toast({ title: 'Module created' })
+              } catch (e) { err(e) }
+            }}>
+            <Plus className="h-3.5 w-3.5 mr-1" /> {createModule.isPending ? 'Adding…' : 'Add module'}
+          </Button>
+        </div>
+      </div>
+
       <div className="card-elevated p-3 space-y-3">
         {modules.isLoading ? <Skeleton className="h-20 w-full" /> : (
           <>
@@ -105,31 +134,8 @@ export function ProgrammeModulesEditor({ programmeId }: { programmeId: string })
               )
             })}
             {modules.data && modules.data.length === 0 && (
-              <p className="text-helper">No modules yet. Add the programme&apos;s modules below — core ones enrol students automatically.</p>
+              <p className="text-helper">No modules yet — use <span className="font-medium">Add a module to this programme</span> above. Core modules enrol students automatically.</p>
             )}
-
-            <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-border/50">
-              <Input className="h-8 w-28" placeholder="Code" value={mod.code} onChange={(e) => setMod((s) => ({ ...s, code: e.target.value }))} />
-              <Input className="h-8 w-56" placeholder="Module title" value={mod.title} onChange={(e) => setMod((s) => ({ ...s, title: e.target.value }))} />
-              <Input className="h-8 w-24" type="number" placeholder="Credits" value={mod.credits} onChange={(e) => setMod((s) => ({ ...s, credits: e.target.value }))} />
-              <Input className="h-8 w-20" type="number" placeholder="Level" value={mod.level} onChange={(e) => setMod((s) => ({ ...s, level: e.target.value }))} />
-              <label className="flex items-center gap-1.5 text-sm text-helper">
-                <input type="checkbox" checked={mod.isCore} onChange={(e) => setMod((s) => ({ ...s, isCore: e.target.checked }))} /> Core
-              </label>
-              <Button size="sm" disabled={!mod.code || !mod.title || createModule.isPending}
-                onClick={async () => {
-                  try {
-                    await createModule.mutateAsync({
-                      code: mod.code, title: mod.title, credits: mod.credits ? Number(mod.credits) : 0,
-                      level: mod.level ? Number(mod.level) : undefined, isCore: mod.isCore,
-                    })
-                    setMod({ code: '', title: '', credits: '', level: '7', isCore: true })
-                    toast({ title: 'Module created' })
-                  } catch (e) { err(e) }
-                }}>
-                <Plus className="h-3.5 w-3.5 mr-1" /> Add module
-              </Button>
-            </div>
           </>
         )}
       </div>

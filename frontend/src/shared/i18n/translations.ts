@@ -1119,7 +1119,11 @@ const SKIP_TAGS = new Set(['SCRIPT', 'STYLE', 'TEXTAREA', 'INPUT', 'CODE', 'PRE'
 // text children, and caching on the parent caused sibling text nodes to overwrite each
 // other, producing duplicated words like "Score Score"). A WeakMap keeps the cache
 // alive only as long as the node is in the DOM.
-const ORIGINAL_CACHE: WeakMap<Text, string> = new WeakMap()
+// `original` is the English source; `written` is the exact value we last wrote to the node.
+// Keeping `written` lets us tell OUR own writes apart from React reusing this same Text node for
+// new content: if the current value isn't what we wrote, React changed it, so the cached original
+// is stale and must be re-derived — otherwise the observer would revert every React text update.
+const ORIGINAL_CACHE: WeakMap<Text, { original: string; written: string }> = new WeakMap()
 
 // Reverse index — every known translation → its English source. Used to detect
 // text nodes we've already translated (in case a browser extension re-renders text
@@ -1155,23 +1159,28 @@ export function translateSubtree(root: Node, lang: LanguageCode) {
   let n: Node | null
   while ((n = walker.nextNode())) nodes.push(n as Text)
   for (const node of nodes) {
-    // Resolve the original English source for this specific node.
-    let original = ORIGINAL_CACHE.get(node)
-    if (original == null) {
-      const current = node.nodeValue ?? ''
+    const current = node.nodeValue ?? ''
+    // Resolve the original English source for this specific node. Re-derive it whenever the
+    // node's current value isn't the one we last wrote: that means React (or an extension)
+    // replaced the text, so the new value is the new source. Without this, a node React reuses
+    // for changed content (e.g. an updated date or status) would be reverted to its first value.
+    let entry = ORIGINAL_CACHE.get(node)
+    if (entry == null || entry.written !== current) {
       const trimmedCurrent = current.trim()
       // If the current text is already a known translation of something, back-solve
       // to the English source so subsequent language switches work correctly.
-      original = rev.get(trimmedCurrent)
+      const original = rev.get(trimmedCurrent)
         ? current.replace(trimmedCurrent, rev.get(trimmedCurrent)!)
         : current
-      ORIGINAL_CACHE.set(node, original)
+      entry = { original, written: current }
     }
-    const trimmed = original.trim()
+    const trimmed = entry.original.trim()
     const hit = dict[trimmed]
-    const nextValue = hit ? original.replace(trimmed, hit) : original
+    const nextValue = hit ? entry.original.replace(trimmed, hit) : entry.original
     // Only assign if the value would actually change — avoids waking the
     // MutationObserver unnecessarily.
     if (node.nodeValue !== nextValue) node.nodeValue = nextValue
+    // Record what the node now holds so the next pass can distinguish our write from React's.
+    ORIGINAL_CACHE.set(node, { original: entry.original, written: nextValue })
   }
 }
