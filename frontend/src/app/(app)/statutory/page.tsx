@@ -14,6 +14,8 @@ import {
 import { PageHeader } from '@/components/common/PageHeader'
 import { PageSection } from '@/components/common/PageSection'
 import { JargonTip } from '@/features/statutory/JargonTip'
+import { CustomAttributesDialog } from '@/features/statutory/CustomAttributesDialog'
+import { ImportSpecDialog } from '@/features/statutory/ImportSpecDialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -534,9 +536,9 @@ function AddFieldDialog({
           <Button size="sm"><Plus className="h-4 w-4 mr-1" /> Add field</Button>
         </DialogTrigger>
       )}
-      <DialogContent>
-        <DialogHeader><DialogTitle>Map a field</DialogTitle></DialogHeader>
-        <div className="space-y-3">
+      <DialogContent className="flex max-h-[88vh] flex-col overflow-hidden">
+        <DialogHeader className="flex-none"><DialogTitle>Map a field</DialogTitle></DialogHeader>
+        <div className="-mr-2 flex-1 space-y-3 overflow-y-auto pr-2">
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label htmlFor="f-target">Target field</Label>
@@ -586,7 +588,7 @@ function AddFieldDialog({
             <Label htmlFor="f-required">Required by the specification</Label>
           </div>
         </div>
-        <DialogFooter>
+        <DialogFooter className="flex-none">
           <Button
             disabled={!targetField.trim() || !sourceExpression.trim() || add.isPending}
             onClick={async () => {
@@ -649,9 +651,9 @@ function EditFieldDialog({
           </Button>
         )}
       </DialogTrigger>
-      <DialogContent>
-        <DialogHeader><DialogTitle>Map {field.targetField}</DialogTitle></DialogHeader>
-        <div className="space-y-3">
+      <DialogContent className="flex max-h-[88vh] flex-col overflow-hidden">
+        <DialogHeader className="flex-none"><DialogTitle>Map {field.targetField}</DialogTitle></DialogHeader>
+        <div className="-mr-2 flex-1 space-y-3 overflow-y-auto pr-2">
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label>Target field</Label>
@@ -695,7 +697,7 @@ function EditFieldDialog({
             <Label htmlFor="e-required">Required by the specification</Label>
           </div>
         </div>
-        <DialogFooter>
+        <DialogFooter className="flex-none">
           <Button
             disabled={!sourceExpression.trim() || update.isPending}
             onClick={async () => {
@@ -729,6 +731,20 @@ function DeleteFieldButton({ profileId, field }: { profileId: string; field: Fie
   const { toast } = useToast()
   const confirm = useConfirm()
   const del = useDeleteField(profileId)
+  // A field the spec marks required must not be deletable — dropping it produces an invalid
+  // return. The button is disabled with an explanation (the API enforces this too). If the reason
+  // is missing data, the fix is to add a custom attribute and re-map, not to delete the field.
+  if (field.required) {
+    return (
+      <Button
+        size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground/50 cursor-not-allowed"
+        disabled
+        title={`${field.targetField} is required by the specification and can't be deleted. Re-map it to a different source (or a custom attribute) instead.`}
+      >
+        <Trash2 className="h-4 w-4" />
+      </Button>
+    )
+  }
   return (
     <Button
       size="icon" variant="ghost" className="h-8 w-8 text-danger hover:text-danger"
@@ -1794,6 +1810,23 @@ function MissingFieldsTable({
     finally { setPendingField(null) }
   }
 
+  // Restore a required field that isn't in the profile yet as an UNMAPPED placeholder (empty
+  // source). It reappears in the Fields tab (amber, "set source") so a field deleted by mistake
+  // can be brought straight back, then mapped to a source or a custom attribute when ready.
+  const addUnmapped = async (m: CompileMissing) => {
+    setPendingField(m.field)
+    try {
+      await add.mutateAsync({
+        targetField: m.field,
+        sourceExpression: '',
+        required: true,
+        allowedValues: m.allowed ?? undefined,
+      })
+      toast({ title: `Added ${m.field} to fields`, description: 'Unmapped — set a source or map it to a custom attribute.' })
+    } catch (e) { err(toast, `Could not add ${m.field}`)(e) }
+    finally { setPendingField(null) }
+  }
+
   // A "Map every suggested" pill lets the user resolve every missing field the spec has an answer
   // for in one action — the fastest path from "Not Ready" to a real conversation about the rest.
   const withSuggestion = missing.filter((m) => !!m.specDefaultSource)
@@ -1867,10 +1900,20 @@ function MissingFieldsTable({
                         </Button>
                       </div>
                     ) : (
-                      <Button size="sm" variant="outline" className="h-7 text-xs"
-                        onClick={() => setOpenField(m.field)}>
-                        <Plus className="h-3.5 w-3.5 mr-1" /> Map…
-                      </Button>
+                      <div className="inline-flex items-center gap-1">
+                        <Button size="sm" variant="outline" className="h-7 text-xs whitespace-nowrap"
+                          disabled={busy || add.isPending}
+                          title="Bring this required field back into the Fields tab as an unmapped placeholder"
+                          onClick={() => addUnmapped(m)}>
+                          <Plus className="h-3.5 w-3.5 mr-1" /> {busy ? 'Adding…' : 'Add to fields'}
+                        </Button>
+                        <Button size="sm" variant="ghost" className="h-7 text-xs"
+                          disabled={busy}
+                          title="Open the form to map it to a source now"
+                          onClick={() => setOpenField(m.field)}>
+                          Map…
+                        </Button>
+                      </div>
                     )}
                   </TableCell>
                 )}
@@ -1930,7 +1973,7 @@ function SignOffCard({ profileId, canSignOff }: { profileId: string; canSignOff:
           </Badge>
         ) : (
           <Badge variant="destructive" className="inline-flex items-center gap-1">
-            <ShieldAlert className="h-3.5 w-3.5" /> Not ready — {r.missing.length} mandatory field{r.missing.length === 1 ? '' : 's'} unmapped
+            <ShieldAlert className="h-3.5 w-3.5" /> Not ready — {r.missing.length + (r.unmappedRequired?.length ?? 0)} mandatory field{r.missing.length + (r.unmappedRequired?.length ?? 0) === 1 ? '' : 's'} unmapped
           </Badge>
         )}
         <span className="text-helper num">
@@ -1976,6 +2019,16 @@ function SignOffCard({ profileId, canSignOff }: { profileId: string; canSignOff:
               missing={r.missing}
               canConfigure={canManageFields}
             />
+          )}
+          {(r.unmappedRequired?.length ?? 0) > 0 && (
+            <div className="flex items-start gap-2 rounded-md border border-[hsl(var(--warning)/0.3)] bg-[hsl(var(--warning)/0.08)] px-3 py-2 text-sm">
+              <ShieldAlert className="h-4 w-4 shrink-0 text-[hsl(var(--warning))]" />
+              <span>
+                <span className="font-medium">{r.unmappedRequired!.length} required field{r.unmappedRequired!.length === 1 ? '' : 's'} still need a source</span>
+                {' '}(<span className="font-mono text-xs">{r.unmappedRequired!.slice(0, 8).join(', ')}{r.unmappedRequired!.length > 8 ? ', …' : ''}</span>).
+                {' '}They&apos;re in the <span className="font-medium">Fields</span> tab, highlighted — set a source (or map to a custom attribute) to unblock sign-off.
+              </span>
+            </div>
           )}
           {canSignOff && (
             <div className="flex items-center gap-2">
@@ -2061,6 +2114,13 @@ function computeTabStatuses(
   const detailLoaded = detail !== undefined
   const missing = compile?.missing.length ?? 0
   const totalFields = detail?.fields.length ?? 0
+  // A present field is "resolved" when it produces a value — from a source OR a default. Only a
+  // field with neither is unmapped, so the pill can't claim "25 mapped" while amber rows remain,
+  // nor call a defaulted field unmapped (it ships its default).
+  const unmappedPresent = detail?.fields.filter(
+    (f) => !(f.sourceExpression ?? '').trim() && !(f.defaultValue ?? '').trim(),
+  ).length ?? 0
+  const mappedFields = totalFields - unmappedPresent
   const emptyDefaults = detail?.fields.filter((f) =>
     (f.required || !f.sourceExpression?.trim()) && !(f.defaultValue ?? '').length,
   ).length ?? 0
@@ -2074,18 +2134,22 @@ function computeTabStatuses(
 
   return {
     fields: {
-      done: compileLoaded && detailLoaded && missing === 0 && totalFields > 0,
+      done: compileLoaded && detailLoaded && unmappedPresent === 0 && missing === 0 && totalFields > 0,
       // Empty label ('') during load — with `placeholderData: keepPreviousData` this only shows
       // on the very first page load before ANY compile/detail landed, and the empty pill is far
       // less noisy than the previous amber "loading…" that flashed on every mutation.
+      // Honest count: present-but-unmapped fields (and any absent required ones) are "unmapped";
+      // only when every present field has a source does it read "N mapped".
       label: !compileLoaded || !detailLoaded
         ? ''
-        : missing === 0 && totalFields > 0
-          ? `${totalFields} mapped`
-          : `${missing} unmapped`,
+        : unmappedPresent + missing > 0
+          ? `${unmappedPresent + missing} unmapped`
+          : totalFields > 0
+            ? `${mappedFields} mapped`
+            : '',
       tone: !compileLoaded || !detailLoaded
         ? 'idle'
-        : missing === 0 && totalFields > 0 ? 'ok' : 'warn',
+        : unmappedPresent + missing === 0 && totalFields > 0 ? 'ok' : 'warn',
     },
     defaults: {
       done: detailLoaded && emptyDefaults === 0,
@@ -2238,6 +2302,7 @@ export default function StatutoryPage() {
         description="A statutory return is configuration, not code — HESA is an external specification, expressed as a versioned profile of field mappings."
         actions={canConfigure ? (
           <div className="flex items-center gap-2">
+            <ImportSpecDialog />
             <FromSpecDialog onCreated={setSelectedId} />
             <NewProfileDialog />
           </div>
@@ -2374,6 +2439,7 @@ export default function StatutoryPage() {
                 {tab === 'fields' && (
                   <div className="flex items-center gap-2">
                     {canConfigure && !detail.data?.signedOff && <AddFieldDialog profileId={selectedId} />}
+                    {canConfigure && <CustomAttributesDialog />}
                     {canConfigure && detail.data && <CloneDialog profile={detail.data} />}
                   </div>
                 )}
@@ -2409,8 +2475,16 @@ export default function StatutoryPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {detail.data.fields.map((f) => (
-                        <TableRow key={f.id}>
+                      {detail.data.fields.map((f) => {
+                        // A field is unresolved only when it has neither a source nor a default —
+                        // those get the warning tint. A defaulted field ships its default, so it's
+                        // fine (shown as "uses default").
+                        const unresolved = !f.sourceExpression && !(f.defaultValue ?? '').trim()
+                        return (
+                        <TableRow
+                          key={f.id}
+                          className={unresolved ? 'bg-[hsl(var(--warning)/0.07)]' : undefined}
+                        >
                           <TableCell className="num text-muted-foreground">{f.position}</TableCell>
                           <TableCell className="font-mono text-xs font-medium">{f.targetField}</TableCell>
                           <TableCell className="font-mono text-xs">
@@ -2424,15 +2498,21 @@ export default function StatutoryPage() {
                                 trigger={
                                   <button
                                     type="button"
-                                    className={`text-left text-primary hover:underline focus:underline focus:outline-none ${!f.sourceExpression ? 'italic text-muted-foreground' : ''}`}
+                                    className={`text-left hover:underline focus:underline focus:outline-none ${
+                                      f.sourceExpression ? 'text-primary'
+                                        : unresolved ? 'italic text-[hsl(var(--warning))]'
+                                          : 'italic text-muted-foreground'
+                                    }`}
                                     title="Edit this mapping"
                                   >
-                                    {f.sourceExpression || 'unmapped — set source'}
+                                    {f.sourceExpression || (unresolved ? 'unmapped — set source' : 'uses default')}
                                   </button>
                                 }
                               />
                             ) : (
-                              <span className="text-muted-foreground">{f.sourceExpression || <span className="italic">unmapped</span>}</span>
+                              <span className="text-muted-foreground">
+                                {f.sourceExpression || <span className="italic">{unresolved ? 'unmapped' : 'uses default'}</span>}
+                              </span>
                             )}
                           </TableCell>
                           <TableCell className="text-xs text-muted-foreground">{f.keyedAt ?? '—'}</TableCell>
@@ -2451,7 +2531,7 @@ export default function StatutoryPage() {
                             </TableCell>
                           )}
                         </TableRow>
-                      ))}
+                      )})}
                     </TableBody>
                   </Table>
                 ) : (

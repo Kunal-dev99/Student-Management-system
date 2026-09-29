@@ -9,7 +9,7 @@
  * signing off a return. Nothing here scrapes anything.
  */
 import { useState, type ReactNode } from 'react'
-import { CheckCircle2, FileUp, ListTree, ShieldCheck, XCircle } from 'lucide-react'
+import { CheckCircle2, ExternalLink, FileUp, ListTree, ShieldCheck, XCircle } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { ErrorState } from '@/components/common/ErrorState'
 import { Button } from '@/components/ui/button'
@@ -23,9 +23,9 @@ import {
 import { useToast } from '@/components/ui/use-toast'
 import { ApiError } from '@/shared/api/client'
 import {
-  useAcceptAdvisory, useAdvisories, useIngestAdvisory, useIngestAdvisoryFromUrl,
+  useAcceptAdvisory, useAdvisories, useAdvisorySources, useIngestAdvisory, useIngestAdvisoryFromUrl,
   useIngestAdvisoryUpload, useRejectAdvisory,
-  type Advisory, type AdvisoryChange, type ChangeType,
+  type Advisory, type AdvisoryChange, type ChangeType, type AdvisorySource,
 } from '@/features/statutory/api'
 
 const CHANGE_LABEL: Record<ChangeType, string> = {
@@ -112,11 +112,22 @@ function IngestDialog() {
   const [rawText, setRawText] = useState('')
   const [url, setUrl] = useState('')
   const [file, setFile] = useState<File | null>(null)
+  const { data: sourcesData } = useAdvisorySources()
+  const sources = sourcesData?.sources ?? []
+  const [pickedSource, setPickedSource] = useState<AdvisorySource | null>(null)
+
+  const pickSource = (s: AdvisorySource) => {
+    setPickedSource(s)
+    setUrl(s.url)
+    setPackCode(s.packCode)
+    if (s.academicYear) setAcademicYear(s.academicYear)
+    if (!title.trim()) setTitle(s.name)
+  }
 
   const busy = ingest.isPending || ingestUrl.isPending || ingestUpload.isPending
   const reset = () => {
     setMode('paste'); setPackCode('HESA_STUDENT'); setAcademicYear(''); setTitle('')
-    setRawText(''); setUrl(''); setFile(null)
+    setRawText(''); setUrl(''); setFile(null); setPickedSource(null)
   }
 
   const announce = (adv: Advisory) => {
@@ -214,14 +225,47 @@ function IngestDialog() {
           </div>
         )}
         {mode === 'url' && (
-          <div className="space-y-1.5">
-            <Label htmlFor="a-url">Advisory URL</Label>
-            <Input id="a-url" value={url} onChange={(e) => setUrl(e.target.value)}
-              placeholder="https://www.hesa.ac.uk/…/coding-manual" />
-            <p className="text-helper">
-              The platform fetches the page, an AI drafts the change directives from it, and the diff
-              lands below for your review. Set the academic year the changes apply to.
-            </p>
+          <div className="space-y-2">
+            {sources.length > 0 && (
+              <div className="space-y-1.5">
+                <Label>Real HESA sources</Label>
+                <div className="flex flex-wrap gap-1.5">
+                  {sources.map((s) => (
+                    <button key={s.id} type="button" onClick={() => pickSource(s)}
+                      title={s.description}
+                      className={`rounded-full border px-2.5 py-1 text-xs ${
+                        pickedSource?.id === s.id
+                          ? 'border-primary bg-primary/10 text-primary'
+                          : 'border-border text-muted-foreground hover:text-foreground'
+                      }`}>
+                      {s.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="space-y-1.5">
+              <Label htmlFor="a-url">Advisory URL</Label>
+              <Input id="a-url" value={url} onChange={(e) => { setUrl(e.target.value); setPickedSource(null) }}
+                placeholder="https://www.hesa.ac.uk/…/coding-manual" />
+            </div>
+            {pickedSource?.botProtected ? (
+              <div className="flex items-start gap-2 rounded-md border border-[hsl(var(--warning)/0.3)] bg-[hsl(var(--warning)/0.08)] px-3 py-2 text-sm">
+                <ExternalLink className="h-4 w-4 shrink-0 text-[hsl(var(--warning))]" />
+                <span>
+                  HESA blocks automated fetch, so the server usually can&apos;t read this page directly.{' '}
+                  <a href={pickedSource.url} target="_blank" rel="noopener noreferrer" className="font-medium underline">
+                    Open it in your browser
+                  </a>, find the changed field(s), then <span className="font-medium">save the page (or its PDF) and use &quot;Upload file&quot;</span> — or copy the text into &quot;Paste directives&quot;. Trying the fetch is fine; if it&apos;s blocked you&apos;ll get a clear message.
+                </span>
+              </div>
+            ) : (
+              <p className="text-helper">
+                The platform fetches the page, an AI drafts the change directives from it, and the diff
+                lands below for your review. If the source blocks bots, you&apos;ll be told to open it and
+                upload instead. Set the academic year the changes apply to.
+              </p>
+            )}
           </div>
         )}
         {mode === 'upload' && (

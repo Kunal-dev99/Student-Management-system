@@ -344,6 +344,9 @@ export interface CompileReport {
   specFieldCount: number
   mappedFieldCount: number
   missing: CompileMissing[]
+  /** Present-but-unmapped required fields — not "missing" (they're in the Fields tab) but they
+   *  still block sign-off. Target-field codes only. */
+  unmappedRequired?: string[]
   signOffReady: boolean
   suppressions?: RuleSuppression[]
 }
@@ -527,6 +530,47 @@ export interface Advisory {
   /** Present only on a freshly-ingested response. */
   parseWarnings?: string[]
 }
+
+export interface ImportedSpec {
+  packCode: string
+  academicYear: string
+  version: number
+  name: string
+  fieldCount: number
+  ruleCount: number
+}
+
+/** Import a FULL spec pack from a CSV/JSON file → a new active version for that code+year. */
+export function useImportSpec() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (form: FormData) => uploadFile<ImportedSpec>('/report-advisories/import-spec', form),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['report-advisories'] })
+      qc.invalidateQueries({ queryKey: ['report-profile-specs'] })
+      qc.invalidateQueries({ queryKey: ['report-profiles'] })
+    },
+  })
+}
+
+export interface AdvisorySource {
+  id: string
+  packCode: string
+  academicYear: string | null
+  name: string
+  url: string
+  kind: string
+  botProtected: boolean
+  description: string
+}
+
+/** Curated real HESA sources to ingest an advisory from. */
+export const useAdvisorySources = () =>
+  useQuery({
+    queryKey: ['report-advisories', 'sources'],
+    queryFn: () => api.get<{ sources: AdvisorySource[] }>('/report-advisories/sources'),
+    staleTime: 60 * 60 * 1000,
+  })
 
 export const useAdvisories = () =>
   useQuery({
