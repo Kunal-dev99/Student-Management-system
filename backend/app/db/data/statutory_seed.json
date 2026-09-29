@@ -1,0 +1,1348 @@
+{
+  "spec_versions": [
+    {
+      "pack_code": "HESA_STUDENT",
+      "academic_year": "2027/28",
+      "version": 2,
+      "name": "HESA_STUDENT",
+      "status": "active",
+      "fields": [
+        {
+          "field": "OWNSTU",
+          "description": "Institution's own student identifier",
+          "source": "student.ref",
+          "keyed_at": "Student record › reference"
+        },
+        {
+          "field": "HUSID",
+          "description": "HESA unique student identifier",
+          "source": "student.husid",
+          "keyed_at": "Generated (institution code + year + sequence + check digit)"
+        },
+        {
+          "field": "SURNAME",
+          "description": "Family name",
+          "source": "person.familyName",
+          "transform": "upper",
+          "keyed_at": "Person › family name"
+        },
+        {
+          "field": "FNAMES",
+          "description": "Forenames",
+          "source": "person.givenName",
+          "keyed_at": "Person › given name"
+        },
+        {
+          "field": "BIRTHDTE",
+          "description": "Date of birth (YYYYMMDD)",
+          "source": "person.dateOfBirth",
+          "transform": "date_compact",
+          "keyed_at": "Person › date of birth"
+        },
+        {
+          "field": "SEXID",
+          "description": "Sex identifier",
+          "allowed": [
+            "10",
+            "11",
+            "12",
+            "13"
+          ],
+          "source": "",
+          "keyed_at": "Person › sex (not yet captured)"
+        },
+        {
+          "field": "NATION",
+          "description": "Nationality (ISO alpha-2)",
+          "source": "person.nationality",
+          "transform": "upper",
+          "keyed_at": "Person › nationality"
+        },
+        {
+          "field": "ETHNIC",
+          "description": "Ethnicity code",
+          "allowed": [
+            "10",
+            "15",
+            "16",
+            "17",
+            "18",
+            "19",
+            "20",
+            "21",
+            "22",
+            "29",
+            "31",
+            "32",
+            "33",
+            "34",
+            "41",
+            "42",
+            "43",
+            "49",
+            "50",
+            "98"
+          ],
+          "source": "",
+          "keyed_at": "Person › ethnicity (not yet captured)"
+        },
+        {
+          "field": "DISABLE",
+          "description": "Disability indicator",
+          "allowed": [
+            "00",
+            "51",
+            "53",
+            "54",
+            "55",
+            "56",
+            "57",
+            "58",
+            "96"
+          ],
+          "source": "",
+          "keyed_at": "Person › disability (not yet captured)"
+        },
+        {
+          "field": "COURSEID",
+          "description": "Programme identifier",
+          "source": "programme.code",
+          "keyed_at": "Programme › code"
+        },
+        {
+          "field": "COURSETYP",
+          "description": "Course type",
+          "allowed": [
+            "A",
+            "B",
+            "C",
+            "D",
+            "E"
+          ],
+          "source": "",
+          "keyed_at": "Programme (not yet captured)"
+        },
+        {
+          "field": "STULOAD",
+          "description": "Student instance load (FTE, revised)",
+          "source": "student.intensityPct",
+          "transform": "int",
+          "keyed_at": "Lifecycle › study intensity (ICR G4)"
+        },
+        {
+          "field": "MODE",
+          "description": "Mode of study",
+          "allowed": [
+            "01",
+            "02",
+            "03",
+            "31",
+            "99"
+          ],
+          "source": "student.mode",
+          "transform": "hesa_mode",
+          "keyed_at": "Student record › study mode"
+        },
+        {
+          "field": "STUDYLEVEL",
+          "description": "Level of study",
+          "allowed": [
+            "D00",
+            "M11",
+            "H11",
+            "I11"
+          ],
+          "source": "",
+          "keyed_at": "Programme › level (not yet captured)"
+        },
+        {
+          "field": "COMDATE",
+          "description": "Commencement date (YYYYMMDD)",
+          "source": "student.startDate",
+          "transform": "date_compact",
+          "keyed_at": "Student record › start date"
+        },
+        {
+          "field": "ENDDATE",
+          "description": "Expected end date (YYYYMMDD)",
+          "source": "student.expectedEndDate",
+          "transform": "date_compact",
+          "keyed_at": "Student record › expected end"
+        },
+        {
+          "field": "FEESTAT",
+          "description": "Fee status",
+          "allowed": [
+            "1",
+            "2",
+            "3",
+            "4",
+            "9"
+          ],
+          "source": "",
+          "keyed_at": "Funding (not yet captured)"
+        },
+        {
+          "field": "MSTUFEE",
+          "description": "Major source of tuition fee",
+          "allowed": [
+            "01",
+            "02",
+            "10",
+            "20",
+            "30",
+            "40",
+            "50",
+            "90",
+            "99"
+          ],
+          "source": "",
+          "keyed_at": "Funding (not yet captured)"
+        },
+        {
+          "field": "FUNDCODE",
+          "description": "Funding council code",
+          "allowed": [
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9"
+          ],
+          "source": "",
+          "keyed_at": "Funding (not yet captured)"
+        },
+        {
+          "field": "DOMICILE",
+          "description": "Domicile (ISO alpha-2)",
+          "source": "",
+          "keyed_at": "Person › domicile (not yet captured)"
+        },
+        {
+          "field": "TERMTIME",
+          "description": "Term-time accommodation",
+          "allowed": [
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "9"
+          ],
+          "source": "",
+          "keyed_at": "Not yet captured"
+        },
+        {
+          "field": "THESIS",
+          "description": "Thesis / topic reference",
+          "source": "research.topic",
+          "keyed_at": "Research project › topic"
+        },
+        {
+          "field": "SUPERVISED",
+          "description": "Supervised student indicator",
+          "allowed": [
+            "Y",
+            "N"
+          ],
+          "source": "",
+          "default": "Y",
+          "keyed_at": "Supervision (PGR = Y)"
+        },
+        {
+          "field": "ENTRYROUTE",
+          "description": "How the student entered the programme",
+          "allowed": [
+            "OPPORTUNITY",
+            "PROPOSAL"
+          ],
+          "source": "student.entryRoute",
+          "transform": "hesa_route",
+          "keyed_at": "Recruitment › entry route"
+        },
+        {
+          "field": "SEXORT",
+          "description": "Sexual orientation",
+          "source": "",
+          "required": true,
+          "allowed": [
+            "10",
+            "11",
+            "12",
+            "13",
+            "98"
+          ],
+          "keyed_at": "Person > orientation"
+        }
+      ],
+      "rules": [
+        {
+          "kind": "order",
+          "fields": [
+            "COMDATE",
+            "ENDDATE"
+          ],
+          "message": "ENDDATE must be on or after COMDATE"
+        },
+        {
+          "kind": "format_yyyymmdd",
+          "fields": [
+            "BIRTHDTE",
+            "COMDATE",
+            "ENDDATE"
+          ],
+          "message": "must be a valid YYYYMMDD date"
+        }
+      ],
+      "disabled_rule_keys": []
+    },
+    {
+      "pack_code": "HESA_STUDENT",
+      "academic_year": "2028/29",
+      "version": 2,
+      "name": "HESA Student",
+      "status": "active",
+      "fields": [
+        {
+          "field": "OWNSTU",
+          "description": "Institution's own student identifier",
+          "source": "student.ref",
+          "keyed_at": "Student record › reference"
+        },
+        {
+          "field": "HUSID",
+          "description": "HESA unique student identifier",
+          "source": "student.husid",
+          "keyed_at": "Generated (institution code + year + sequence + check digit)"
+        },
+        {
+          "field": "SURNAME",
+          "description": "Family name",
+          "source": "person.familyName",
+          "transform": "upper",
+          "keyed_at": "Person › family name"
+        },
+        {
+          "field": "FNAMES",
+          "description": "Forenames",
+          "source": "person.givenName",
+          "keyed_at": "Person › given name"
+        },
+        {
+          "field": "BIRTHDTE",
+          "description": "Date of birth (YYYYMMDD)",
+          "source": "person.dateOfBirth",
+          "transform": "date_compact",
+          "keyed_at": "Person › date of birth"
+        },
+        {
+          "field": "SEXID",
+          "description": "Sex identifier",
+          "allowed": [
+            "10",
+            "11",
+            "12",
+            "13"
+          ],
+          "source": "",
+          "keyed_at": "Person › sex (not yet captured)"
+        },
+        {
+          "field": "NATION",
+          "description": "Nationality (ISO alpha-2)",
+          "source": "person.nationality",
+          "transform": "upper",
+          "keyed_at": "Person › nationality"
+        },
+        {
+          "field": "ETHNIC",
+          "description": "Ethnicity code",
+          "allowed": [
+            "10",
+            "15",
+            "16",
+            "17",
+            "18",
+            "19",
+            "20",
+            "21",
+            "22",
+            "29",
+            "31",
+            "32",
+            "33",
+            "34",
+            "41",
+            "42",
+            "43",
+            "49",
+            "50",
+            "98"
+          ],
+          "source": "",
+          "keyed_at": "Person › ethnicity (not yet captured)"
+        },
+        {
+          "field": "DISABLE",
+          "description": "Disability indicator",
+          "allowed": [
+            "00",
+            "51",
+            "53",
+            "54",
+            "55",
+            "56",
+            "57",
+            "58",
+            "96"
+          ],
+          "source": "",
+          "keyed_at": "Person › disability (not yet captured)"
+        },
+        {
+          "field": "COURSEID",
+          "description": "Programme identifier",
+          "source": "programme.code",
+          "keyed_at": "Programme › code"
+        },
+        {
+          "field": "COURSETYP",
+          "description": "Course type",
+          "allowed": [
+            "A",
+            "B",
+            "C",
+            "D",
+            "E"
+          ],
+          "source": "",
+          "keyed_at": "Programme (not yet captured)"
+        },
+        {
+          "field": "STULOAD",
+          "description": "Student instance load (FTE, revised)",
+          "source": "student.intensityPct",
+          "transform": "int",
+          "keyed_at": "Lifecycle › study intensity (ICR G4)"
+        },
+        {
+          "field": "MODE",
+          "description": "Mode of study",
+          "allowed": [
+            "99"
+          ],
+          "source": "student.mode",
+          "transform": "hesa_mode",
+          "keyed_at": "Student record › study mode"
+        },
+        {
+          "field": "STUDYLEVEL",
+          "description": "Level of study",
+          "allowed": [
+            "D00",
+            "M11",
+            "H11",
+            "I11"
+          ],
+          "source": "",
+          "keyed_at": "Programme › level (not yet captured)"
+        },
+        {
+          "field": "COMDATE",
+          "description": "Commencement date (YYYYMMDD)",
+          "source": "student.startDate",
+          "transform": "date_compact",
+          "keyed_at": "Student record › start date"
+        },
+        {
+          "field": "ENDDATE",
+          "description": "Expected end date (YYYYMMDD)",
+          "source": "student.expectedEndDate",
+          "transform": "date_compact",
+          "keyed_at": "Student record › expected end"
+        },
+        {
+          "field": "FEESTAT",
+          "description": "Fee status",
+          "allowed": [
+            "1",
+            "2",
+            "3",
+            "4",
+            "9"
+          ],
+          "source": "",
+          "keyed_at": "Funding (not yet captured)"
+        },
+        {
+          "field": "MSTUFEE",
+          "description": "Major source of tuition fee",
+          "allowed": [
+            "01",
+            "02",
+            "10",
+            "20",
+            "30",
+            "40",
+            "50",
+            "90",
+            "99"
+          ],
+          "source": "",
+          "keyed_at": "Funding (not yet captured)"
+        },
+        {
+          "field": "FUNDCODE",
+          "description": "Funding council code",
+          "allowed": [
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9"
+          ],
+          "source": "",
+          "keyed_at": "Funding (not yet captured)"
+        },
+        {
+          "field": "DOMICILE",
+          "description": "Domicile (ISO alpha-2)",
+          "source": "",
+          "keyed_at": "Person › domicile (not yet captured)"
+        },
+        {
+          "field": "THESIS",
+          "description": "Thesis / topic reference",
+          "source": "research.topic",
+          "keyed_at": "Research project › topic"
+        },
+        {
+          "field": "SUPERVISED",
+          "description": "Supervised student indicator",
+          "allowed": [
+            "Y",
+            "N"
+          ],
+          "source": "",
+          "default": "Y",
+          "keyed_at": "Supervision (PGR = Y)"
+        },
+        {
+          "field": "ENTRYROUTE",
+          "description": "How the student entered the programme",
+          "allowed": [
+            "OPPORTUNITY",
+            "PROPOSAL"
+          ],
+          "source": "student.entryRoute",
+          "transform": "hesa_route",
+          "keyed_at": "Recruitment › entry route"
+        },
+        {
+          "field": "SEXORT",
+          "description": "Sexual orientation",
+          "source": "",
+          "required": true,
+          "allowed": [
+            "10",
+            "11",
+            "12",
+            "13",
+            "98"
+          ],
+          "keyed_at": "Person > orientation"
+        }
+      ],
+      "rules": [
+        {
+          "kind": "order",
+          "fields": [
+            "COMDATE",
+            "ENDDATE"
+          ],
+          "message": "ENDDATE must be on or after COMDATE"
+        },
+        {
+          "kind": "format_yyyymmdd",
+          "fields": [
+            "BIRTHDTE",
+            "COMDATE",
+            "ENDDATE"
+          ],
+          "message": "must be a valid YYYYMMDD date"
+        }
+      ],
+      "disabled_rule_keys": []
+    },
+    {
+      "pack_code": "HESA_STUDENT",
+      "academic_year": "2029/30",
+      "version": 2,
+      "name": "HESA Student",
+      "status": "active",
+      "fields": [
+        {
+          "field": "OWNSTU",
+          "required": true,
+          "description": "Own student id",
+          "source": "student.ref",
+          "keyed_at": "Student record"
+        },
+        {
+          "field": "SEXID",
+          "required": true,
+          "description": "Sex identifier",
+          "allowed": [
+            "10",
+            "11",
+            "12",
+            "13"
+          ],
+          "keyed_at": "Person sex"
+        },
+        {
+          "field": "SURNAME",
+          "required": true,
+          "description": "Family name",
+          "source": "person.familyName",
+          "transform": "upper",
+          "keyed_at": "Person family name"
+        },
+        {
+          "field": "BIRTHDTE",
+          "required": true,
+          "description": "Date of birth",
+          "source": "person.dateOfBirth",
+          "transform": "date_compact",
+          "keyed_at": "Person DOB"
+        },
+        {
+          "field": "MODE",
+          "required": true,
+          "description": "Mode of study",
+          "allowed": [
+            "01",
+            "02",
+            "03",
+            "31"
+          ],
+          "source": "student.mode",
+          "transform": "hesa_mode",
+          "keyed_at": "Study mode"
+        }
+      ],
+      "rules": [],
+      "disabled_rule_keys": []
+    }
+  ],
+  "profiles": [
+    {
+      "code": "h1",
+      "name": "hesa plan",
+      "academic_year": "2026/27",
+      "version": 1,
+      "description": null,
+      "muted_rule_keys": [],
+      "fields": []
+    },
+    {
+      "code": "HESA_STUDENT",
+      "name": "HESA Student Return",
+      "academic_year": "2026/27",
+      "version": 1,
+      "description": "Worked example: the statutory return expressed entirely as configuration.",
+      "muted_rule_keys": [],
+      "fields": [
+        {
+          "target_field": "OWNSTU",
+          "position": 1,
+          "source_expression": "student.ref",
+          "transform": null,
+          "default_value": null,
+          "required": true,
+          "allowed_values": null
+        },
+        {
+          "target_field": "HUSID",
+          "position": 2,
+          "source_expression": "student.husid",
+          "transform": null,
+          "default_value": null,
+          "required": true,
+          "allowed_values": null
+        },
+        {
+          "target_field": "SURNAME",
+          "position": 3,
+          "source_expression": "person.familyName",
+          "transform": "upper",
+          "default_value": null,
+          "required": true,
+          "allowed_values": null
+        },
+        {
+          "target_field": "FNAMES",
+          "position": 4,
+          "source_expression": "person.givenName",
+          "transform": null,
+          "default_value": null,
+          "required": true,
+          "allowed_values": null
+        },
+        {
+          "target_field": "BIRTHDTE",
+          "position": 5,
+          "source_expression": "person.dateOfBirth",
+          "transform": "date_compact",
+          "default_value": "20260917",
+          "required": true,
+          "allowed_values": null
+        },
+        {
+          "target_field": "NATION",
+          "position": 7,
+          "source_expression": "person.nationality",
+          "transform": "upper",
+          "default_value": "UK",
+          "required": true,
+          "allowed_values": null
+        },
+        {
+          "target_field": "ETHNIC",
+          "position": 8,
+          "source_expression": "",
+          "transform": null,
+          "default_value": "98",
+          "required": true,
+          "allowed_values": [
+            "10",
+            "15",
+            "16",
+            "17",
+            "18",
+            "19",
+            "20",
+            "21",
+            "22",
+            "29",
+            "31",
+            "32",
+            "33",
+            "34",
+            "41",
+            "42",
+            "43",
+            "49",
+            "50",
+            "98"
+          ]
+        },
+        {
+          "target_field": "DISABLE",
+          "position": 9,
+          "source_expression": "",
+          "transform": null,
+          "default_value": "00",
+          "required": true,
+          "allowed_values": [
+            "00",
+            "51",
+            "53",
+            "54",
+            "55",
+            "56",
+            "57",
+            "58",
+            "96"
+          ]
+        },
+        {
+          "target_field": "COURSEID",
+          "position": 10,
+          "source_expression": "programme.code",
+          "transform": null,
+          "default_value": "PHD-CS",
+          "required": true,
+          "allowed_values": null
+        },
+        {
+          "target_field": "COURSETYP",
+          "position": 11,
+          "source_expression": "",
+          "transform": null,
+          "default_value": "A",
+          "required": true,
+          "allowed_values": [
+            "A",
+            "B",
+            "C",
+            "D",
+            "E"
+          ]
+        },
+        {
+          "target_field": "STULOAD",
+          "position": 12,
+          "source_expression": "student.intensityPct",
+          "transform": "int",
+          "default_value": "100",
+          "required": true,
+          "allowed_values": null
+        },
+        {
+          "target_field": "MODE",
+          "position": 13,
+          "source_expression": "student.mode",
+          "transform": "hesa_mode",
+          "default_value": "01",
+          "required": true,
+          "allowed_values": [
+            "01",
+            "02",
+            "03",
+            "31"
+          ]
+        },
+        {
+          "target_field": "STUDYLEVEL",
+          "position": 14,
+          "source_expression": "",
+          "transform": null,
+          "default_value": "D00",
+          "required": true,
+          "allowed_values": [
+            "D00",
+            "M11",
+            "H11",
+            "I11"
+          ]
+        },
+        {
+          "target_field": "COMDATE",
+          "position": 15,
+          "source_expression": "student.startDate",
+          "transform": "date_compact",
+          "default_value": "20260928",
+          "required": true,
+          "allowed_values": null
+        },
+        {
+          "target_field": "ENDDATE",
+          "position": 16,
+          "source_expression": "student.expectedEndDate",
+          "transform": "date_compact",
+          "default_value": "20270117",
+          "required": true,
+          "allowed_values": null
+        },
+        {
+          "target_field": "FEESTAT",
+          "position": 17,
+          "source_expression": "",
+          "transform": null,
+          "default_value": "9",
+          "required": true,
+          "allowed_values": [
+            "1",
+            "2",
+            "3",
+            "4",
+            "9"
+          ]
+        },
+        {
+          "target_field": "MSTUFEE",
+          "position": 18,
+          "source_expression": "",
+          "transform": null,
+          "default_value": "99",
+          "required": true,
+          "allowed_values": [
+            "01",
+            "02",
+            "10",
+            "20",
+            "30",
+            "40",
+            "50",
+            "90",
+            "99"
+          ]
+        },
+        {
+          "target_field": "FUNDCODE",
+          "position": 19,
+          "source_expression": "",
+          "transform": null,
+          "default_value": "9",
+          "required": true,
+          "allowed_values": [
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9"
+          ]
+        },
+        {
+          "target_field": "DOMICILE",
+          "position": 20,
+          "source_expression": "",
+          "transform": null,
+          "default_value": "GB",
+          "required": true,
+          "allowed_values": null
+        },
+        {
+          "target_field": "TERMTIME",
+          "position": 21,
+          "source_expression": "",
+          "transform": null,
+          "default_value": "9",
+          "required": true,
+          "allowed_values": [
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "9"
+          ]
+        },
+        {
+          "target_field": "THESIS",
+          "position": 22,
+          "source_expression": "research.topic",
+          "transform": null,
+          "default_value": "sold",
+          "required": true,
+          "allowed_values": null
+        },
+        {
+          "target_field": "SUPERVISED",
+          "position": 23,
+          "source_expression": "",
+          "transform": null,
+          "default_value": "Y",
+          "required": true,
+          "allowed_values": [
+            "Y",
+            "N"
+          ]
+        },
+        {
+          "target_field": "ENTRYROUTE",
+          "position": 24,
+          "source_expression": "student.entryRoute",
+          "transform": "hesa_route",
+          "default_value": "OPPORTUNITY",
+          "required": true,
+          "allowed_values": [
+            "OPPORTUNITY",
+            "PROPOSAL"
+          ]
+        },
+        {
+          "target_field": "SEXID",
+          "position": 24,
+          "source_expression": "",
+          "transform": null,
+          "default_value": "10",
+          "required": true,
+          "allowed_values": [
+            "10",
+            "11",
+            "12",
+            "13"
+          ]
+        },
+        {
+          "target_field": "SEXORT",
+          "position": 25,
+          "source_expression": "custom.sexort",
+          "transform": null,
+          "default_value": "10",
+          "required": true,
+          "allowed_values": [
+            "10",
+            "11",
+            "12",
+            "13",
+            "98"
+          ]
+        }
+      ]
+    },
+    {
+      "code": "HESA_STUDENT",
+      "name": "HESA Student",
+      "academic_year": "2027/28",
+      "version": 1,
+      "description": "Created from spec pack HESA_STUDENT:2026/27",
+      "muted_rule_keys": [],
+      "fields": [
+        {
+          "target_field": "OWNSTU",
+          "position": 1,
+          "source_expression": "student.ref",
+          "transform": null,
+          "default_value": "01",
+          "required": true,
+          "allowed_values": null
+        },
+        {
+          "target_field": "HUSID",
+          "position": 2,
+          "source_expression": "student.husid",
+          "transform": null,
+          "default_value": "34",
+          "required": true,
+          "allowed_values": null
+        },
+        {
+          "target_field": "SURNAME",
+          "position": 3,
+          "source_expression": "person.familyName",
+          "transform": "upper",
+          "default_value": "huy",
+          "required": true,
+          "allowed_values": null
+        },
+        {
+          "target_field": "FNAMES",
+          "position": 4,
+          "source_expression": "person.givenName",
+          "transform": null,
+          "default_value": "uy",
+          "required": true,
+          "allowed_values": null
+        },
+        {
+          "target_field": "BIRTHDTE",
+          "position": 5,
+          "source_expression": "person.dateOfBirth",
+          "transform": "date_compact",
+          "default_value": "19900101",
+          "required": true,
+          "allowed_values": null
+        },
+        {
+          "target_field": "SEXID",
+          "position": 6,
+          "source_expression": "",
+          "transform": null,
+          "default_value": "13",
+          "required": true,
+          "allowed_values": [
+            "10",
+            "11",
+            "12",
+            "13"
+          ]
+        },
+        {
+          "target_field": "NATION",
+          "position": 7,
+          "source_expression": "person.nationality",
+          "transform": "upper",
+          "default_value": "45",
+          "required": true,
+          "allowed_values": null
+        },
+        {
+          "target_field": "ETHNIC",
+          "position": 8,
+          "source_expression": "",
+          "transform": null,
+          "default_value": "98",
+          "required": true,
+          "allowed_values": [
+            "10",
+            "15",
+            "16",
+            "17",
+            "18",
+            "19",
+            "20",
+            "21",
+            "22",
+            "29",
+            "31",
+            "32",
+            "33",
+            "34",
+            "41",
+            "42",
+            "43",
+            "49",
+            "50",
+            "98"
+          ]
+        },
+        {
+          "target_field": "DISABLE",
+          "position": 9,
+          "source_expression": "",
+          "transform": null,
+          "default_value": "96",
+          "required": true,
+          "allowed_values": [
+            "00",
+            "51",
+            "53",
+            "54",
+            "55",
+            "56",
+            "57",
+            "58",
+            "96"
+          ]
+        },
+        {
+          "target_field": "COURSEID",
+          "position": 10,
+          "source_expression": "programme.code",
+          "transform": null,
+          "default_value": "1",
+          "required": true,
+          "allowed_values": null
+        },
+        {
+          "target_field": "COURSETYP",
+          "position": 11,
+          "source_expression": "",
+          "transform": null,
+          "default_value": "A",
+          "required": true,
+          "allowed_values": [
+            "A",
+            "B",
+            "C",
+            "D",
+            "E"
+          ]
+        },
+        {
+          "target_field": "STULOAD",
+          "position": 12,
+          "source_expression": "student.intensityPct",
+          "transform": "int",
+          "default_value": "100",
+          "required": true,
+          "allowed_values": null
+        },
+        {
+          "target_field": "MODE",
+          "position": 13,
+          "source_expression": "student.mode",
+          "transform": "hesa_mode",
+          "default_value": "01",
+          "required": true,
+          "allowed_values": [
+            "01",
+            "02",
+            "03",
+            "31"
+          ]
+        },
+        {
+          "target_field": "STUDYLEVEL",
+          "position": 14,
+          "source_expression": "",
+          "transform": null,
+          "default_value": "D00",
+          "required": true,
+          "allowed_values": [
+            "D00",
+            "M11",
+            "H11",
+            "I11"
+          ]
+        },
+        {
+          "target_field": "COMDATE",
+          "position": 15,
+          "source_expression": "student.startDate",
+          "transform": "date_compact",
+          "default_value": "20260917",
+          "required": true,
+          "allowed_values": null
+        },
+        {
+          "target_field": "ENDDATE",
+          "position": 16,
+          "source_expression": "student.expectedEndDate",
+          "transform": "date_compact",
+          "default_value": "20260908",
+          "required": true,
+          "allowed_values": null
+        },
+        {
+          "target_field": "FEESTAT",
+          "position": 17,
+          "source_expression": "",
+          "transform": null,
+          "default_value": "1",
+          "required": true,
+          "allowed_values": [
+            "1",
+            "2",
+            "3",
+            "4",
+            "9"
+          ]
+        },
+        {
+          "target_field": "MSTUFEE",
+          "position": 18,
+          "source_expression": "",
+          "transform": null,
+          "default_value": "99",
+          "required": true,
+          "allowed_values": [
+            "01",
+            "02",
+            "10",
+            "20",
+            "30",
+            "40",
+            "50",
+            "90",
+            "99"
+          ]
+        },
+        {
+          "target_field": "FUNDCODE",
+          "position": 19,
+          "source_expression": "",
+          "transform": null,
+          "default_value": "7",
+          "required": true,
+          "allowed_values": [
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9"
+          ]
+        },
+        {
+          "target_field": "DOMICILE",
+          "position": 20,
+          "source_expression": "",
+          "transform": null,
+          "default_value": "45",
+          "required": true,
+          "allowed_values": null
+        },
+        {
+          "target_field": "TERMTIME",
+          "position": 21,
+          "source_expression": "",
+          "transform": null,
+          "default_value": "6",
+          "required": true,
+          "allowed_values": [
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "9"
+          ]
+        },
+        {
+          "target_field": "THESIS",
+          "position": 22,
+          "source_expression": "research.topic",
+          "transform": "",
+          "default_value": "iu",
+          "required": true,
+          "allowed_values": null
+        },
+        {
+          "target_field": "SUPERVISED",
+          "position": 23,
+          "source_expression": "",
+          "transform": null,
+          "default_value": "Y",
+          "required": true,
+          "allowed_values": [
+            "Y",
+            "N"
+          ]
+        },
+        {
+          "target_field": "ENTRYROUTE",
+          "position": 24,
+          "source_expression": "student.entryRoute",
+          "transform": "hesa_route",
+          "default_value": "PROPOSAL",
+          "required": true,
+          "allowed_values": [
+            "OPPORTUNITY",
+            "PROPOSAL"
+          ]
+        },
+        {
+          "target_field": "WHATEVER",
+          "position": 25,
+          "source_expression": "person.nationality",
+          "transform": null,
+          "default_value": null,
+          "required": false,
+          "allowed_values": null
+        }
+      ]
+    },
+    {
+      "code": "HESA_student_26",
+      "name": "HESA_draft",
+      "academic_year": "2026/27",
+      "version": 1,
+      "description": null,
+      "muted_rule_keys": [],
+      "fields": []
+    }
+  ],
+  "custom_fields": [
+    {
+      "key": "care_leaver_flag",
+      "label": "Care leaver flag",
+      "data_type": "code",
+      "reason": "HESA CARELEAVER — mandatory, not captured in the core model yet.",
+      "values": [
+        {
+          "student_ref": "ICR-0003",
+          "value": "01"
+        }
+      ]
+    },
+    {
+      "key": "sexort",
+      "label": "SEXORT",
+      "data_type": "code",
+      "reason": "jone",
+      "values": []
+    }
+  ]
+}
