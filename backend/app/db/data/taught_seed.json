@@ -1,0 +1,1343 @@
+{
+  "programmes": [
+    {
+      "code": "MSC-ONC",
+      "name": "MSc Clinical Oncology",
+      "programme_type": "taught",
+      "taught_total_credits": 180,
+      "duration_months": null,
+      "grading_policy": {
+        "resitCapLadder": [
+          50,
+          45,
+          40
+        ]
+      },
+      "modules": [
+        {
+          "code": "ONC501",
+          "title": "Foundations of Oncology",
+          "credits": 30,
+          "level": 7,
+          "is_core": true,
+          "term": null,
+          "assessments": [
+            {
+              "title": "Critical essay",
+              "assessment_type": "essay",
+              "weight_pct": "40.00",
+              "pass_mark": "50.00",
+              "resit_cap": null,
+              "resit_allowed": true
+            },
+            {
+              "title": "Written exam",
+              "assessment_type": "exam",
+              "weight_pct": "60.00",
+              "pass_mark": "50.00",
+              "resit_cap": null,
+              "resit_allowed": true
+            },
+            {
+              "title": "session 1",
+              "assessment_type": "exam",
+              "weight_pct": "3.00",
+              "pass_mark": "40.00",
+              "resit_cap": "3.00",
+              "resit_allowed": true
+            }
+          ]
+        },
+        {
+          "code": "ONC502",
+          "title": "Clinical Trials & Statistics",
+          "credits": 30,
+          "level": 7,
+          "is_core": true,
+          "term": null,
+          "assessments": [
+            {
+              "title": "Trial protocol coursework",
+              "assessment_type": "coursework",
+              "weight_pct": "50.00",
+              "pass_mark": "50.00",
+              "resit_cap": null,
+              "resit_allowed": true
+            },
+            {
+              "title": "Statistics exam",
+              "assessment_type": "exam",
+              "weight_pct": "50.00",
+              "pass_mark": "50.00",
+              "resit_cap": null,
+              "resit_allowed": true
+            }
+          ]
+        },
+        {
+          "code": "ONC503",
+          "title": "Radiotherapy & Imaging",
+          "credits": 30,
+          "level": 7,
+          "is_core": true,
+          "term": null,
+          "assessments": [
+            {
+              "title": "Case essay",
+              "assessment_type": "essay",
+              "weight_pct": "50.00",
+              "pass_mark": "50.00",
+              "resit_cap": null,
+              "resit_allowed": true
+            },
+            {
+              "title": "Seminar presentation",
+              "assessment_type": "presentation",
+              "weight_pct": "50.00",
+              "pass_mark": "50.00",
+              "resit_cap": null,
+              "resit_allowed": true
+            }
+          ]
+        },
+        {
+          "code": "ONC504",
+          "title": "Molecular Therapeutics",
+          "credits": 30,
+          "level": 7,
+          "is_core": true,
+          "term": null,
+          "assessments": [
+            {
+              "title": "Written exam",
+              "assessment_type": "exam",
+              "weight_pct": "100.00",
+              "pass_mark": "50.00",
+              "resit_cap": null,
+              "resit_allowed": true
+            }
+          ]
+        },
+        {
+          "code": "RES701",
+          "title": "Research Methods & Biostatistics",
+          "credits": 30,
+          "level": 7,
+          "is_core": false,
+          "term": "Spring 2027",
+          "assessments": []
+        }
+      ],
+      "students": [
+        {
+          "ref": "ICR-MSC-2601",
+          "given": "Amelia",
+          "family": "Hartley",
+          "email": "amelia.hartley.demo@students.icr.ac.uk",
+          "nationality": null,
+          "date_of_birth": null,
+          "start_date": "2026-09-29",
+          "expected_end_date": null,
+          "original_expected_end_date": null,
+          "study_mode": "full_time",
+          "status": "registered",
+          "enrolments": [
+            {
+              "module_code": "ONC501",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC502",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC503",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC504",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            }
+          ]
+        },
+        {
+          "ref": "ICR-MSC-2602",
+          "given": "Rohan",
+          "family": "Mehta",
+          "email": "rohan.mehta.demo@students.icr.ac.uk",
+          "nationality": null,
+          "date_of_birth": null,
+          "start_date": "2026-09-29",
+          "expected_end_date": null,
+          "original_expected_end_date": null,
+          "study_mode": "full_time",
+          "status": "registered",
+          "enrolments": [
+            {
+              "module_code": "ONC501",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC502",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC503",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC504",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            }
+          ]
+        },
+        {
+          "ref": "ICR-MSC-2603",
+          "given": "Grace",
+          "family": "Okafor",
+          "email": "grace.okafor.demo@students.icr.ac.uk",
+          "nationality": null,
+          "date_of_birth": null,
+          "start_date": "2026-09-29",
+          "expected_end_date": null,
+          "original_expected_end_date": null,
+          "study_mode": "part_time",
+          "status": "registered",
+          "enrolments": [
+            {
+              "module_code": "ONC501",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC502",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC503",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC504",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            }
+          ]
+        },
+        {
+          "ref": "ICR-MSC-2604",
+          "given": "Daniel",
+          "family": "Ferreira",
+          "email": "daniel.ferreira.demo@students.icr.ac.uk",
+          "nationality": null,
+          "date_of_birth": null,
+          "start_date": "2026-09-29",
+          "expected_end_date": null,
+          "original_expected_end_date": null,
+          "study_mode": "full_time",
+          "status": "registered",
+          "enrolments": [
+            {
+              "module_code": "ONC501",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC502",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC503",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC504",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            }
+          ]
+        },
+        {
+          "ref": "ICR-MSC-2605",
+          "given": "Priya",
+          "family": "Nair",
+          "email": "priya.nair.demo@students.icr.ac.uk",
+          "nationality": null,
+          "date_of_birth": null,
+          "start_date": "2026-09-29",
+          "expected_end_date": null,
+          "original_expected_end_date": null,
+          "study_mode": "part_time",
+          "status": "registered",
+          "enrolments": [
+            {
+              "module_code": "ONC501",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC502",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC503",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC504",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            }
+          ]
+        },
+        {
+          "ref": "PGR-2025-33821F",
+          "given": "Thomas",
+          "family": "Berg",
+          "email": "taught.berg@oncology.icr.demo",
+          "nationality": "US",
+          "date_of_birth": "1999-12-20",
+          "start_date": "2025-09-01",
+          "expected_end_date": "2029-08-31",
+          "original_expected_end_date": "2029-08-31",
+          "study_mode": "full_time",
+          "status": "active",
+          "enrolments": [
+            {
+              "module_code": "ONC501",
+              "academic_year": "2025/26",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC502",
+              "academic_year": "2025/26",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC503",
+              "academic_year": "2025/26",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC504",
+              "academic_year": "2025/26",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            }
+          ]
+        },
+        {
+          "ref": "PGR-2025-73A43E",
+          "given": "Daniel",
+          "family": "Whitfield",
+          "email": "taught.whitfield@oncology.icr.demo",
+          "nationality": "NG",
+          "date_of_birth": "1989-05-01",
+          "start_date": "2025-09-01",
+          "expected_end_date": "2029-08-31",
+          "original_expected_end_date": "2029-08-31",
+          "study_mode": "full_time",
+          "status": "active",
+          "enrolments": [
+            {
+              "module_code": "ONC501",
+              "academic_year": "2025/26",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC502",
+              "academic_year": "2025/26",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC503",
+              "academic_year": "2025/26",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC504",
+              "academic_year": "2025/26",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            }
+          ]
+        },
+        {
+          "ref": "PGR-2025-7E30C7",
+          "given": "Lucia",
+          "family": "Ferrari",
+          "email": "taught.ferrari@oncology.icr.demo",
+          "nationality": "IT",
+          "date_of_birth": "2002-10-10",
+          "start_date": "2025-09-01",
+          "expected_end_date": "2029-08-31",
+          "original_expected_end_date": "2029-08-31",
+          "study_mode": "full_time",
+          "status": "active",
+          "enrolments": [
+            {
+              "module_code": "ONC501",
+              "academic_year": "2025/26",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC502",
+              "academic_year": "2025/26",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC503",
+              "academic_year": "2025/26",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC504",
+              "academic_year": "2025/26",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            }
+          ]
+        },
+        {
+          "ref": "PGR-2025-990319",
+          "given": "Priya",
+          "family": "Ramaswamy",
+          "email": "taught.ramaswamy@oncology.icr.demo",
+          "nationality": "NG",
+          "date_of_birth": "2004-05-24",
+          "start_date": "2025-09-01",
+          "expected_end_date": "2029-08-31",
+          "original_expected_end_date": "2029-08-31",
+          "study_mode": "full_time",
+          "status": "active",
+          "enrolments": [
+            {
+              "module_code": "ONC501",
+              "academic_year": "2025/26",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC502",
+              "academic_year": "2025/26",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC503",
+              "academic_year": "2025/26",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC504",
+              "academic_year": "2025/26",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            }
+          ]
+        },
+        {
+          "ref": "PGR-2025-A3EED4",
+          "given": "Amara",
+          "family": "Okonkwo",
+          "email": "taught.okonkwo@oncology.icr.demo",
+          "nationality": "CN",
+          "date_of_birth": "1999-05-04",
+          "start_date": "2025-09-01",
+          "expected_end_date": "2029-08-31",
+          "original_expected_end_date": "2029-08-31",
+          "study_mode": "full_time",
+          "status": "active",
+          "enrolments": [
+            {
+              "module_code": "ONC501",
+              "academic_year": "2025/26",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC502",
+              "academic_year": "2025/26",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC503",
+              "academic_year": "2025/26",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC504",
+              "academic_year": "2025/26",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            }
+          ]
+        },
+        {
+          "ref": "PGR-2025-BAD834",
+          "given": "Kofi",
+          "family": "Mensah",
+          "email": "taught.mensah@oncology.icr.demo",
+          "nationality": "IE",
+          "date_of_birth": "1991-11-11",
+          "start_date": "2025-09-01",
+          "expected_end_date": "2029-08-31",
+          "original_expected_end_date": "2029-08-31",
+          "study_mode": "full_time",
+          "status": "active",
+          "enrolments": [
+            {
+              "module_code": "ONC502",
+              "academic_year": "2025/26",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC503",
+              "academic_year": "2025/26",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC504",
+              "academic_year": "2025/26",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC501",
+              "academic_year": "2025/26",
+              "status": "enrolled",
+              "outcome": "failed",
+              "final_mark": "46.40",
+              "credits_awarded": 0,
+              "condoned": false
+            }
+          ]
+        },
+        {
+          "ref": "PGR-2025-E15924",
+          "given": "Sarah",
+          "family": "Lindqvist",
+          "email": "taught.lindqvist@oncology.icr.demo",
+          "nationality": "DE",
+          "date_of_birth": "2001-12-19",
+          "start_date": "2025-09-01",
+          "expected_end_date": "2029-08-31",
+          "original_expected_end_date": "2029-08-31",
+          "study_mode": "full_time",
+          "status": "active",
+          "enrolments": [
+            {
+              "module_code": "ONC502",
+              "academic_year": "2025/26",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC503",
+              "academic_year": "2025/26",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC504",
+              "academic_year": "2025/26",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC501",
+              "academic_year": "2025/26",
+              "status": "completed",
+              "outcome": "condoned",
+              "final_mark": "65.60",
+              "credits_awarded": 30,
+              "condoned": true
+            }
+          ]
+        },
+        {
+          "ref": "PGR-2026-ONC01",
+          "given": "Amelia",
+          "family": "Hartley",
+          "email": "amelia.hartley@icr.ac.uk",
+          "nationality": null,
+          "date_of_birth": null,
+          "start_date": "2026-09-28",
+          "expected_end_date": null,
+          "original_expected_end_date": null,
+          "study_mode": "full_time",
+          "status": "registered",
+          "enrolments": [
+            {
+              "module_code": "ONC501",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC502",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC503",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC504",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            }
+          ]
+        },
+        {
+          "ref": "PGR-2026-ONC02",
+          "given": "Rajesh",
+          "family": "Iyer",
+          "email": "rajesh.iyer@icr.ac.uk",
+          "nationality": null,
+          "date_of_birth": null,
+          "start_date": "2026-09-28",
+          "expected_end_date": null,
+          "original_expected_end_date": null,
+          "study_mode": "full_time",
+          "status": "registered",
+          "enrolments": [
+            {
+              "module_code": "ONC501",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC502",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC503",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC504",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            }
+          ]
+        },
+        {
+          "ref": "PGR-2026-ONC03",
+          "given": "Sofia",
+          "family": "Marchetti",
+          "email": "sofia.marchetti@icr.ac.uk",
+          "nationality": null,
+          "date_of_birth": null,
+          "start_date": "2026-09-28",
+          "expected_end_date": null,
+          "original_expected_end_date": null,
+          "study_mode": "part_time",
+          "status": "registered",
+          "enrolments": [
+            {
+              "module_code": "ONC501",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC502",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC503",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC504",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            }
+          ]
+        },
+        {
+          "ref": "PGR-2026-ONC04",
+          "given": "Daniel",
+          "family": "Osei",
+          "email": "daniel.osei@icr.ac.uk",
+          "nationality": null,
+          "date_of_birth": null,
+          "start_date": "2026-09-28",
+          "expected_end_date": null,
+          "original_expected_end_date": null,
+          "study_mode": "full_time",
+          "status": "registered",
+          "enrolments": [
+            {
+              "module_code": "ONC501",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC502",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC503",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC504",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            }
+          ]
+        },
+        {
+          "ref": "PGR-2026-ONC05",
+          "given": "Yuki",
+          "family": "Tanaka",
+          "email": "yuki.tanaka@icr.ac.uk",
+          "nationality": null,
+          "date_of_birth": null,
+          "start_date": "2026-09-28",
+          "expected_end_date": null,
+          "original_expected_end_date": null,
+          "study_mode": "full_time",
+          "status": "registered",
+          "enrolments": [
+            {
+              "module_code": "ONC501",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC502",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC503",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC504",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            }
+          ]
+        },
+        {
+          "ref": "PGR-2026-ONC06",
+          "given": "Priya",
+          "family": "Nair",
+          "email": "priya.nair@icr.ac.uk",
+          "nationality": null,
+          "date_of_birth": null,
+          "start_date": "2026-09-28",
+          "expected_end_date": null,
+          "original_expected_end_date": null,
+          "study_mode": "full_time",
+          "status": "registered",
+          "enrolments": [
+            {
+              "module_code": "ONC501",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC502",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC503",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC504",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            }
+          ]
+        },
+        {
+          "ref": "PGR-2026-ONC07",
+          "given": "Thomas",
+          "family": "Berg",
+          "email": "thomas.berg@icr.ac.uk",
+          "nationality": null,
+          "date_of_birth": null,
+          "start_date": "2026-09-28",
+          "expected_end_date": null,
+          "original_expected_end_date": null,
+          "study_mode": "part_time",
+          "status": "registered",
+          "enrolments": [
+            {
+              "module_code": "ONC501",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC502",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC503",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC504",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            }
+          ]
+        },
+        {
+          "ref": "PGR-2026-ONC08",
+          "given": "Aisha",
+          "family": "Bello",
+          "email": "aisha.bello@icr.ac.uk",
+          "nationality": null,
+          "date_of_birth": null,
+          "start_date": "2026-09-28",
+          "expected_end_date": null,
+          "original_expected_end_date": null,
+          "study_mode": "full_time",
+          "status": "registered",
+          "enrolments": [
+            {
+              "module_code": "ONC501",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC502",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC503",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            },
+            {
+              "module_code": "ONC504",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "code": "NE-001",
+      "name": "Msc Clinical Neurology",
+      "programme_type": "taught",
+      "taught_total_credits": null,
+      "duration_months": 17,
+      "grading_policy": {},
+      "modules": [
+        {
+          "code": "001",
+          "title": "Basic NeuroScience",
+          "credits": 90,
+          "level": 7,
+          "is_core": true,
+          "term": null,
+          "assessments": [
+            {
+              "title": "Check",
+              "assessment_type": "essay",
+              "weight_pct": "100.00",
+              "pass_mark": "50.00",
+              "resit_cap": "2.00",
+              "resit_allowed": true
+            }
+          ]
+        }
+      ],
+      "students": [
+        {
+          "ref": "ICR-NEU-2606",
+          "given": "Thomas",
+          "family": "Whitfield",
+          "email": "thomas.whitfield.demo@students.icr.ac.uk",
+          "nationality": null,
+          "date_of_birth": null,
+          "start_date": "2026-10-06",
+          "expected_end_date": "2028-03-06",
+          "original_expected_end_date": "2028-03-06",
+          "study_mode": "full_time",
+          "status": "registered",
+          "enrolments": [
+            {
+              "module_code": "001",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            }
+          ]
+        },
+        {
+          "ref": "ICR-NEU-2607",
+          "given": "Sofia",
+          "family": "Lindqvist",
+          "email": "sofia.lindqvist.demo@students.icr.ac.uk",
+          "nationality": null,
+          "date_of_birth": null,
+          "start_date": "2026-10-06",
+          "expected_end_date": "2028-03-06",
+          "original_expected_end_date": "2028-03-06",
+          "study_mode": "full_time",
+          "status": "registered",
+          "enrolments": [
+            {
+              "module_code": "001",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            }
+          ]
+        },
+        {
+          "ref": "ICR-NEU-2608",
+          "given": "Marcus",
+          "family": "Adeyemi",
+          "email": "marcus.adeyemi.demo@students.icr.ac.uk",
+          "nationality": null,
+          "date_of_birth": null,
+          "start_date": "2026-10-06",
+          "expected_end_date": "2030-01-18",
+          "original_expected_end_date": "2029-08-06",
+          "study_mode": "part_time",
+          "status": "prospective",
+          "enrolments": [
+            {
+              "module_code": "001",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            }
+          ]
+        },
+        {
+          "ref": "ICR-NEU-2609",
+          "given": "Hannah",
+          "family": "Blackwood",
+          "email": "hannah.blackwood.demo@students.icr.ac.uk",
+          "nationality": null,
+          "date_of_birth": null,
+          "start_date": "2026-10-06",
+          "expected_end_date": "2028-03-06",
+          "original_expected_end_date": "2028-03-06",
+          "study_mode": "full_time",
+          "status": "registered",
+          "enrolments": [
+            {
+              "module_code": "001",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            }
+          ]
+        },
+        {
+          "ref": "PGR-2026-429F05",
+          "given": "Riya",
+          "family": "Sharma",
+          "email": null,
+          "nationality": null,
+          "date_of_birth": null,
+          "start_date": "2026-09-17",
+          "expected_end_date": "2028-02-22",
+          "original_expected_end_date": null,
+          "study_mode": "full_time",
+          "status": "registered",
+          "enrolments": []
+        },
+        {
+          "ref": "PGR-2026-NEU01",
+          "given": "Elena",
+          "family": "Rossi",
+          "email": "elena.rossi@icr.ac.uk",
+          "nationality": null,
+          "date_of_birth": null,
+          "start_date": "2026-09-28",
+          "expected_end_date": "2028-02-28",
+          "original_expected_end_date": "2028-02-28",
+          "study_mode": "full_time",
+          "status": "registered",
+          "enrolments": [
+            {
+              "module_code": "001",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            }
+          ]
+        },
+        {
+          "ref": "PGR-2026-NEU02",
+          "given": "Marcus",
+          "family": "Whitfield",
+          "email": "marcus.whitfield@icr.ac.uk",
+          "nationality": null,
+          "date_of_birth": null,
+          "start_date": "2026-09-28",
+          "expected_end_date": "2028-02-28",
+          "original_expected_end_date": "2028-02-28",
+          "study_mode": "full_time",
+          "status": "registered",
+          "enrolments": [
+            {
+              "module_code": "001",
+              "academic_year": "2026/27",
+              "status": "enrolled",
+              "outcome": "pending",
+              "final_mark": null,
+              "credits_awarded": null,
+              "condoned": false
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
