@@ -23,6 +23,7 @@ import {
 } from '@/components/ui/select'
 import { useToast } from '@/components/ui/use-toast'
 import { useProgrammes } from '@/features/progression/api'
+import { useFundingSources } from '@/features/funding/api'
 import {
   useImportPreview, useImportCommit, type ImportAction, type ImportResult, type ImportDefaults,
 } from '@/features/students/api'
@@ -62,6 +63,7 @@ export function CohortImportDialog() {
   const commitMut = useImportCommit()
   const { toast } = useToast()
   const { data: programmes } = useProgrammes()
+  const { data: funders } = useFundingSources()
 
   const defaults = useCallback((): ImportDefaults => ({
     programme: defProgramme || undefined,
@@ -177,9 +179,18 @@ export function CohortImportDialog() {
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Funder</Label>
-                <Input value={defFunder} placeholder="e.g. CRUK"
-                  onChange={(e) => setDefFunder(e.target.value)}
-                  onBlur={() => { if (file) runPreview(file) }} />
+                <Select
+                  value={defFunder || NONE}
+                  onValueChange={(v) => { setDefFunder(v === NONE ? '' : v); if (file) runPreview(file) }}
+                >
+                  <SelectTrigger><SelectValue placeholder="None" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NONE}>None</SelectItem>
+                    {(funders ?? []).map((f) => (
+                      <SelectItem key={f.id} value={f.name}>{f.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
           </div>
