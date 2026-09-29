@@ -20,6 +20,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useToast } from '@/components/ui/use-toast'
 import {
   useProgrammesAdmin, useCreateProgramme, useUpdateProgramme,
@@ -208,33 +209,46 @@ function ProgrammeEditor({ programme, onPatch }: {
     } catch (e) { err(e) }
   }
 
+  const taught = programme.programmeType === 'taught'
   return (
-    <div className="space-y-5">
-      <div className="card-elevated p-4 space-y-4">
-        <div className="space-y-1.5">
-          <Label>Name</Label>
-          <Input defaultValue={programme.name}
-            onBlur={(e) => { if (e.target.value.trim() && e.target.value !== programme.name) onPatch(programme.id, { name: e.target.value.trim() }) }} />
-        </div>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <NumberField label="Expected duration" unit="months"
-            value={programme.durationMonths} fallback={36} min={1} max={120}
-            onCommit={(v) => onPatch(programme.id, { durationMonths: v })} />
-          <NumberField label="Supervision meeting interval" unit="days"
-            value={programme.supervisionMeetingIntervalDays} fallback={90} min={1} max={365}
-            onCommit={(v) => onPatch(programme.id, { supervisionMeetingIntervalDays: v })} />
-        </div>
-      </div>
+    <Tabs defaultValue="details" className="space-y-4">
+      <TabsList className="flex-wrap">
+        <TabsTrigger value="details">Details</TabsTrigger>
+        {taught && <TabsTrigger value="modules">Modules</TabsTrigger>}
+        {taught && <TabsTrigger value="grading">Grading &amp; resit</TabsTrigger>}
+        <TabsTrigger value="milestones">Milestone template</TabsTrigger>
+      </TabsList>
 
-      {programme.programmeType === 'taught' && (
-        <>
+      <TabsContent value="details" className="mt-0">
+        <div className="card-elevated p-4 space-y-4">
+          <div className="space-y-1.5">
+            <Label>Name</Label>
+            <Input defaultValue={programme.name}
+              onBlur={(e) => { if (e.target.value.trim() && e.target.value !== programme.name) onPatch(programme.id, { name: e.target.value.trim() }) }} />
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <NumberField label="Expected duration" unit="months"
+              value={programme.durationMonths} fallback={36} min={1} max={120}
+              onCommit={(v) => onPatch(programme.id, { durationMonths: v })} />
+            <NumberField label="Supervision meeting interval" unit="days"
+              value={programme.supervisionMeetingIntervalDays} fallback={90} min={1} max={365}
+              onCommit={(v) => onPatch(programme.id, { supervisionMeetingIntervalDays: v })} />
+          </div>
+        </div>
+      </TabsContent>
+
+      {taught && (
+        <TabsContent value="modules" className="mt-0">
           <ProgrammeModulesEditor programmeId={programme.id} />
+        </TabsContent>
+      )}
+      {taught && (
+        <TabsContent value="grading" className="mt-0">
           <GradingPolicyEditor programme={programme} onPatch={onPatch} />
-        </>
+        </TabsContent>
       )}
 
-      <div>
-        <h4 className="text-sm font-medium mb-2">Milestone template</h4>
+      <TabsContent value="milestones" className="mt-0">
         <div className="card-elevated overflow-hidden">
           <Table>
             <TableHeader>
@@ -286,8 +300,8 @@ function ProgrammeEditor({ programme, onPatch }: {
           Milestones are ordered by their day offset from the student&apos;s start date. Editing an
           offset re-dates non-overridden milestones the next time a student&apos;s schedule is regenerated.
         </p>
-      </div>
-    </div>
+      </TabsContent>
+    </Tabs>
   )
 }
 
