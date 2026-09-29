@@ -44,6 +44,15 @@ if exist ".next\routes-manifest.json" (
     if errorlevel 1 set "NEED_BUILD=1"
 )
 
+REM Rebuild when the SOURCE changed since the last build. next start serves the built .next, so a
+REM `git pull` alone leaves the public URL on the old build. Compare the current git commit to the
+REM stamp written after the last successful build, and rebuild if they differ.
+set "CUR_COMMIT="
+for /f "delims=" %%H in ('git rev-parse HEAD 2^>nul') do set "CUR_COMMIT=%%H"
+set "BUILT_COMMIT="
+if exist ".next\COMMIT_ID" set /p BUILT_COMMIT=<".next\COMMIT_ID"
+if defined CUR_COMMIT if not "%CUR_COMMIT%"=="%BUILT_COMMIT%" set "NEED_BUILD=1"
+
 REM A .next present without a BUILD_ID is a half-finished / corrupt build - wipe it before
 REM rebuilding. A healthy build keeps its .next cache, so normal deploys stay fast.
 if defined NEED_BUILD (
@@ -67,8 +76,11 @@ if defined NEED_BUILD (
         pause
         exit /b 1
     )
+    REM Stamp the build with the commit it was built from, so the next start rebuilds only when
+    REM the source has actually moved on.
+    if defined CUR_COMMIT ( >".next\COMMIT_ID" echo %CUR_COMMIT%)
 ) else (
-    echo Reusing existing build ^(backend origin already baked as %BACKEND_ORIGIN%^).
+    echo Reusing existing build ^(commit %BUILT_COMMIT%, backend origin %BACKEND_ORIGIN%^).
 )
 
 echo Starting PGR frontend ^(production^) on http://localhost:3000
