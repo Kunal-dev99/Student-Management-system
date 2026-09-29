@@ -11,7 +11,7 @@
  */
 
 import { useEffect, useState } from 'react'
-import { Pencil, Plus, RotateCcw, Trash2 } from 'lucide-react'
+import { ChevronRight, Pencil, Plus, RotateCcw, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -458,42 +458,72 @@ function ValueSetEditor({ vs }: { vs: ValueSet }) {
  * The tab.
  * ------------------------------------------------------------------ */
 
+type NavLeaf = { type: 'kind' | 'vs'; id: string; label: string }
+type NavGroup = { key: string; label: string; items: NavLeaf[] }
+
 export function LovTab() {
   const kinds = useLovKinds()
   const valueSets = useValueSets(true)
   const [sel, setSel] = useState<{ type: 'kind' | 'vs'; id: string }>({ type: 'kind', id: 'departments' })
+  // Accordion: one category open at a time keeps the switcher short.
+  const [openGroup, setOpenGroup] = useState<string>('ref')
 
   const activeKind = kinds.data?.find((k) => k.kind === sel.id)
   const activeVs = valueSets.data?.find((v) => v.name === sel.id)
 
-  const NavItem = ({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) => (
-    <button type="button" onClick={onClick}
-      className={cn('w-full truncate rounded-md px-3 py-1.5 text-left text-sm transition-colors',
-        active ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-surface-2 hover:text-foreground')}>
-      {label}
-    </button>
-  )
+  // Build the grouped nav: reference lists as one group, value sets grouped by their area.
+  const areas: string[] = []
+  for (const vs of valueSets.data ?? []) if (!areas.includes(vs.area)) areas.push(vs.area)
+  const groups: NavGroup[] = [
+    { key: 'ref', label: 'Reference lists',
+      items: (kinds.data ?? []).map((k) => ({ type: 'kind', id: k.kind, label: `${k.label}s` })) },
+    ...areas.map((area) => ({
+      key: `area:${area}`, label: area,
+      items: (valueSets.data ?? []).filter((v) => v.area === area)
+        .map((v) => ({ type: 'vs' as const, id: v.name, label: humanizeEnum(v.name) })),
+    })),
+  ]
+
+  const select = (leaf: NavLeaf, groupKey: string) => {
+    setSel({ type: leaf.type, id: leaf.id })
+    setOpenGroup(groupKey)
+  }
+  const loading = kinds.isLoading || valueSets.isLoading
 
   return (
-    <div className="grid gap-5 md:grid-cols-[210px_minmax(0,1fr)]">
-      {/* Single switcher: reference lists + value-set overrides, one click to any of them. */}
-      <nav className="space-y-4 self-start">
-        <div className="space-y-0.5">
-          <p className="px-1 pb-1 text-label">Reference lists</p>
-          {kinds.isLoading && <Skeleton className="h-40 w-full" />}
-          {kinds.data?.map((k) => (
-            <NavItem key={k.kind} active={sel.type === 'kind' && sel.id === k.kind}
-              label={`${k.label}s`} onClick={() => setSel({ type: 'kind', id: k.kind })} />
-          ))}
-        </div>
-        <div className="space-y-0.5">
-          <p className="px-1 pb-1 text-label">Value-set overrides</p>
-          {valueSets.isLoading && <Skeleton className="h-40 w-full" />}
-          {valueSets.data?.map((v) => (
-            <NavItem key={v.name} active={sel.type === 'vs' && sel.id === v.name}
-              label={humanizeEnum(v.name)} onClick={() => setSel({ type: 'vs', id: v.name })} />
-          ))}
-        </div>
+    <div className="grid gap-5 md:grid-cols-[220px_minmax(0,1fr)]">
+      <nav className="space-y-1 self-start">
+        {loading && <Skeleton className="h-64 w-full" />}
+        {!loading && groups.map((g) => {
+          const open = openGroup === g.key
+          const hasActive = g.items.some((it) => it.type === sel.type && it.id === sel.id)
+          return (
+            <div key={g.key}>
+              <button type="button"
+                onClick={() => setOpenGroup(open ? '' : g.key)}
+                className={cn('flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm font-medium transition-colors hover:bg-surface-2',
+                  hasActive && !open ? 'text-foreground' : 'text-muted-foreground')}>
+                <ChevronRight className={cn('h-4 w-4 shrink-0 transition-transform', open && 'rotate-90')} />
+                <span className="flex-1 truncate">{g.label}</span>
+                <Badge variant="secondary" className="text-muted-foreground">{g.items.length}</Badge>
+              </button>
+              {open && (
+                <div className="mt-0.5 space-y-0.5 pl-3.5">
+                  {g.items.map((it) => {
+                    const active = sel.type === it.type && sel.id === it.id
+                    return (
+                      <button key={`${it.type}:${it.id}`} type="button" onClick={() => select(it, g.key)}
+                        className={cn('w-full truncate rounded-md px-3 py-1.5 text-left text-sm transition-colors',
+                          active ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-surface-2 hover:text-foreground')}>
+                        {it.label}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )
+        })}
       </nav>
 
       <div className="min-w-0">
