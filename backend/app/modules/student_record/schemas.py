@@ -52,6 +52,12 @@ class StudentOut(_Camel):
 LEAVE_CATEGORIES = {"medical", "personal", "academic", "other"}
 
 
+class IntensityPreviewRequest(_Camel):
+    """Preview a proposed study-intensity change without writing anything (live in the dialog)."""
+    intensity_pct: int
+    effective_date: date
+
+
 class LifecycleEventRequest(_Camel):
     event_type: LifecycleEventType
     reason: str

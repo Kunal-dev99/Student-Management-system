@@ -26,6 +26,7 @@ from app.modules.student_record.repository import StudentRepository
 from app.modules.student_record.lifecycle import LifecycleService
 from app.modules.student_record.schemas import (
     EnrolRequest,
+    IntensityPreviewRequest,
     LifecycleDecision,
     LifecycleEventOut,
     LifecycleEventRequest,
@@ -304,6 +305,24 @@ async def student_intensity(
     if allowed is not None and student_id not in allowed:
         return {"studentId": str(student_id), "currentPct": None, "periods": []}
     return await LifecycleService(session).intensity_overview(student_id)
+
+
+@router.post("/{student_id}/intensity/impact-preview",
+             summary="Preview a study-intensity change (deterministic, no write)")
+async def intensity_impact_preview(
+    student_id: uuid.UUID,
+    body: IntensityPreviewRequest,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_permission("student.write")),
+) -> dict:
+    if not 1 <= body.intensity_pct <= 100:
+        raise ValidationAppError("Study intensity must be between 1 and 100%.")
+    svc = LifecycleService(session)
+    student = await svc._get_student(student_id)
+    prev = await svc._current_intensity(student)
+    return await svc.intensity_impact_preview(
+        student, prev_pct=prev, new_pct=body.intensity_pct, effective=body.effective_date,
+    )
 
 
 @router.post("/{student_id}/return", summary="Record a return from suspension")

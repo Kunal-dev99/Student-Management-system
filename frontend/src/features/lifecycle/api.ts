@@ -80,6 +80,14 @@ export const useIntensityImpact = (eventId: string, enabled: boolean) =>
     staleTime: 5 * 60 * 1000,
   })
 
+/** Live, deterministic preview of a PROPOSED intensity change — shown in the request dialog
+ * as the user types, so they don't set the % blind. No write. */
+export const useIntensityImpactPreview = (studentId: string) =>
+  useMutation({
+    mutationFn: (body: { intensityPct: number; effectiveDate: string }) =>
+      api.post<IntensityImpact>(`/students/${studentId}/intensity/impact-preview`, body),
+  })
+
 export interface IntensityPeriod { from: string; to: string; pct: number }
 export interface IntensityOverview {
   studentId: string

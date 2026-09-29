@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { CalendarRange, Plus } from 'lucide-react'
 import { PageSection } from '@/components/common/PageSection'
 import { Badge } from '@/components/ui/badge'
@@ -25,7 +25,7 @@ import { ProgrammeChangeImpactView } from './ProgrammeChangeImpactView'
 import { useProgrammesAdmin, type ProgrammeDetail } from '@/features/programmes/api'
 import {
   useApproveLifecycleEvent, useIntensityImpact, useLifecycleEvents, useRecordReturn,
-  useRejectLifecycleEvent, useRequestLifecycleEvent, useStudentIntensity,
+  useRejectLifecycleEvent, useRequestLifecycleEvent, useStudentIntensity, useIntensityImpactPreview,
   LEAVE_CATEGORIES,
   type LeaveCategory,
   type LifecycleEvent, type LifecycleEventStatus, type LifecycleEventType, type StudyMode,
@@ -127,6 +127,7 @@ function DecisionDialog({
 function RequestDialog({ studentId, student }: { studentId: string; student?: Student }) {
   const { toast } = useToast()
   const request = useRequestLifecycleEvent(studentId)
+  const impactPreview = useIntensityImpactPreview(studentId)
   const today = new Date().toISOString().slice(0, 10)
   const [open, setOpen] = useState(false)
   const [eventType, setEventType] = useState<LifecycleEventType>('suspension')
@@ -160,6 +161,22 @@ function RequestDialog({ studentId, student }: { studentId: string; student?: St
   }
 
   const intensityValid = Number(intensityPct) >= 1 && Number(intensityPct) <= 100
+
+  // Live, deterministic impact preview as the user enters an intensity change (debounced),
+  // so they see the effect on the end date before submitting — not just the approver.
+  useEffect(() => {
+    if (eventType !== 'intensity_change' || !intensityValid || !startDate) {
+      if (impactPreview.data || impactPreview.isError) impactPreview.reset()
+      return
+    }
+    const t = setTimeout(
+      () => impactPreview.mutate({ intensityPct: Number(intensityPct), effectiveDate: startDate }),
+      350,
+    )
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eventType, intensityPct, startDate, intensityValid])
+
   const complete =
     !!reason.trim() && !!startDate &&
     (eventType !== 'suspension' || !!endDate) &&
@@ -279,16 +296,48 @@ function RequestDialog({ studentId, student }: { studentId: string; student?: St
           )}
 
           {eventType === 'intensity_change' && (
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="lc-ieff">Effective date</Label>
-                <Input id="lc-ieff" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="lc-ieff">Effective date</Label>
+                  <Input id="lc-ieff" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="lc-pct">Study intensity (% FTE)</Label>
+                  <Input id="lc-pct" type="number" min={1} max={100} value={intensityPct}
+                    onChange={(e) => setIntensityPct(e.target.value)} placeholder="e.g. 50" />
+                </div>
               </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="lc-pct">Study intensity (% FTE)</Label>
-                <Input id="lc-pct" type="number" min={1} max={100} value={intensityPct}
-                  onChange={(e) => setIntensityPct(e.target.value)} placeholder="e.g. 50" />
+              <div className="flex gap-1.5">
+                {[25, 50, 75, 100].map((p) => (
+                  <Button key={p} type="button" size="sm"
+                    variant={Number(intensityPct) === p ? 'default' : 'outline'}
+                    onClick={() => setIntensityPct(String(p))}>{p}%</Button>
+                ))}
               </div>
+              {/* Live impact preview — deterministic, before submitting. */}
+              {intensityValid && startDate && (
+                <div className="rounded-md border border-border bg-muted/30 p-3 text-sm">
+                  {impactPreview.isPending && <p className="text-muted-foreground">Working out the impact…</p>}
+                  {impactPreview.data && (
+                    <div className="space-y-1">
+                      <p className="text-foreground">{impactPreview.data.summary}</p>
+                      {impactPreview.data.projectedEnd && (
+                        <p className="text-muted-foreground">
+                          Expected end{' '}
+                          <span className="num line-through">{impactPreview.data.currentEnd ?? '—'}</span>{' → '}
+                          <span className="num font-medium text-foreground">{impactPreview.data.projectedEnd}</span>
+                          {impactPreview.data.daysDelta !== 0 && (
+                            <span> ({impactPreview.data.daysDelta > 0 ? '+' : ''}{impactPreview.data.daysDelta} days,{' '}
+                              {impactPreview.data.milestonesAffected} milestone{impactPreview.data.milestonesAffected === 1 ? '' : 's'} shift)</span>
+                          )}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                  {impactPreview.isError && <p className="text-muted-foreground">Preview unavailable — the change can still be requested.</p>}
+                </div>
+              )}
             </div>
           )}
 
