@@ -182,3 +182,48 @@ async def test_assisted_ingest_from_url_rejects_bad_scheme(ctx):
     r = await c.post("/api/v1/report-advisories/ingest-from-url", headers=h,
                      json={"packCode": BASE_CODE, "academicYear": "2031/32", "url": "ftp://nope"})
     assert r.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_import_full_spec_from_csv_becomes_active_version(ctx):
+    """Uploading a full spec CSV creates a new active StatutorySpecVersion for that code+year, and
+    the resolver serves it — proven by the specs picker showing the new field count."""
+    c, h = ctx
+    csv = (
+        "field,description,allowed,source,required\n"
+        "OWNSTU,Own student id,,student.ref,true\n"
+        "SEXID,Sex identifier,10|11|12|13,,true\n"
+        "SURNAME,Family name,,person.familyName,true\n"
+    ).encode()
+    r = await c.post(
+        "/api/v1/report-advisories/import-spec", headers=h,
+        files={"file": ("hesa_spec.csv", csv, "text/csv")},
+        data={"packCode": BASE_CODE, "academicYear": "2099/00", "name": "HESA Student (imported)"},
+    )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["fieldCount"] == 3 and body["academicYear"] == "2099/00"
+
+    # The picker (resolver) now serves the imported pack for that year.
+    specs = (await c.get("/api/v1/report-profiles/specs", headers=h)).json()["specs"]
+    imported = next(s for s in specs if s["academicYear"] == "2099/00")
+    assert imported["fieldCount"] == 3
+
+    # A profile created from it is pre-mapped to the sources we supplied.
+    prof = (await c.post("/api/v1/report-profiles/from-spec", headers=h,
+                         json={"specKey": f"{BASE_CODE}:2099/00"})).json()
+    by_target = {f["targetField"]: f for f in prof["fields"]}
+    assert by_target["OWNSTU"]["sourceExpression"] == "student.ref"
+    assert by_target["SEXID"]["allowedValues"] == ["10", "11", "12", "13"]
+
+
+@pytest.mark.asyncio
+async def test_import_spec_rejects_file_with_no_field_column(ctx):
+    c, h = ctx
+    r = await c.post(
+        "/api/v1/report-advisories/import-spec", headers=h,
+        files={"file": ("bad.csv", b"description,notes\nfoo,bar\n", "text/csv")},
+        data={"packCode": BASE_CODE, "academicYear": "2098/99"},
+    )
+    assert r.status_code == 400
+    assert "field" in r.json()["error"]["message"].lower()

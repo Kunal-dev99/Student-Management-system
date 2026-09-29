@@ -217,6 +217,49 @@ class AdvisoryService:
         await self.session.refresh(version)
         return version
 
+    async def import_spec_version(
+        self, *, pack_code: str, academic_year: str, name: str | None,
+        fields: list[dict], rules: list[dict], user_id: uuid.UUID | None,
+    ) -> StatutorySpecVersion:
+        """Materialise a FULL spec pack from an imported file as a new active version, superseding
+        any active version for the same code+year. Unlike accept(), there is no advisory/diff — the
+        file IS the complete field set (a human chose to import it)."""
+        pack_code = (pack_code or "").strip()
+        academic_year = (academic_year or "").strip()
+        if not pack_code or not academic_year:
+            raise ValidationAppError("A return code and academic year are required.")
+        if not fields:
+            raise ValidationAppError("The file produced no fields to import.")
+
+        actives = (
+            await self.session.execute(
+                select(StatutorySpecVersion).where(
+                    StatutorySpecVersion.pack_code == pack_code,
+                    StatutorySpecVersion.academic_year == academic_year,
+                    StatutorySpecVersion.status == SpecVersionStatus.active,
+                )
+            )
+        ).scalars().all()
+        for prior in actives:
+            prior.status = SpecVersionStatus.superseded
+
+        new_version = await self._current_version(pack_code, academic_year) + 1
+        version = StatutorySpecVersion(
+            pack_code=pack_code,
+            academic_year=academic_year,
+            version=new_version,
+            name=(name or "").strip() or _pack_display_name(pack_code) or f"{pack_code} {academic_year}",
+            status=SpecVersionStatus.active,
+            fields=fields,
+            rules=rules,
+            source_advisory_id=None,
+            accepted_by=user_id,
+        )
+        self.session.add(version)
+        await self.session.commit()
+        await self.session.refresh(version)
+        return version
+
     async def reject(
         self, advisory_id: uuid.UUID, *, user_id: uuid.UUID | None, note: str | None = None
     ) -> StatutoryAdvisory:

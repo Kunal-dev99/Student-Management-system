@@ -146,12 +146,35 @@ async def list_transforms(_=Depends(require_permission("reporting.read"))) -> di
     "/record-schema",
     summary="Catalog of dotted source paths a field mapping may read from",
 )
-async def record_schema(_=Depends(require_permission("reporting.read"))) -> dict:
+async def record_schema(
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("reporting.read")),
+) -> dict:
     """The authoritative list of source expressions available on the flat student record. Used by
-    the mapping form to render a dropdown so admins never mistype a path."""
-    from app.modules.exports.record_schema import as_dict
+    the mapping form to render a dropdown so admins never mistype a path. Admin-defined custom
+    attributes are appended dynamically so a newly created attribute is immediately mappable."""
+    from sqlalchemy import select
 
-    return as_dict()
+    from app.modules.exports.record_schema import as_dict
+    from app.modules.student_record.models import StudentCustomField
+
+    body = as_dict()
+    custom = list((await session.execute(
+        select(StudentCustomField).order_by(StudentCustomField.label)
+    )).scalars().all())
+    if custom:
+        body["groups"].append({
+            "root": "custom",
+            "label": "Custom attributes",
+            "description": "Admin-defined attributes captured for the statutory return.",
+            "fields": [
+                {"path": f"custom.{f.key}", "label": f"Custom · {f.label}", "type": f.data_type,
+                 "hint": f.reason, "nullable": True}
+                for f in custom
+            ],
+        })
+        body["paths"].extend(f"custom.{f.key}" for f in custom)
+    return body
 
 
 @profiles_router.get("/specs", summary="Published spec packs a profile can be created from")
@@ -529,6 +552,17 @@ async def list_advisories(
     return {"advisories": [_advisory_out(a) for a in advisories]}
 
 
+@advisories_router.get("/sources", summary="Curated real HESA sources to ingest an advisory from")
+async def list_advisory_sources(
+    _=Depends(require_permission("reporting.read")),
+) -> dict:
+    """The genuine HESA coding-manual entry points. Most are bot-protected, so the UI leads with
+    'open + upload' rather than a server fetch."""
+    from app.modules.exports.hesa_sources import list_sources
+
+    return {"sources": list_sources()}
+
+
 @advisories_router.post("/ingest", status_code=201,
                         summary="Ingest a published advisory and diff it against the current pack")
 async def ingest_advisory(
@@ -606,6 +640,41 @@ async def ingest_upload(
         created_by=principal.user_id,
     )
     return _advisory_out(advisory)
+
+
+@advisories_router.post("/import-spec", status_code=201,
+                        summary="Import a FULL spec pack from a CSV/JSON file as a new active version")
+async def import_spec(
+    packCode: str = Form(...),
+    academicYear: str = Form(...),
+    name: str | None = Form(None),
+    file: UploadFile = File(...),
+    session: AsyncSession = Depends(get_session),
+    principal=Depends(require_permission("reports.signoff")),
+) -> dict:
+    """Sidesteps HESA's bot wall: upload HESA's data-model export (saved as CSV or JSON) and it
+    becomes the active spec version for that return + year. A person always chooses to import."""
+    from app.core.config import get_settings
+    from app.core.errors import ValidationAppError
+    from app.modules.exports.advisory_service import AdvisoryService
+    from app.modules.exports.schemas import SpecVersionOut
+    from app.modules.exports.spec_import import parse_spec_file
+
+    data = await file.read()
+    max_bytes = get_settings().max_upload_mb * 1024 * 1024
+    if len(data) > max_bytes:
+        raise ValidationAppError(f"File is larger than the {get_settings().max_upload_mb} MB limit")
+    fields, rules = parse_spec_file(
+        data, filename=file.filename or "", content_type=file.content_type or "",
+    )
+    version = await AdvisoryService(session).import_spec_version(
+        pack_code=packCode, academic_year=academicYear, name=name,
+        fields=fields, rules=rules, user_id=principal.user_id,
+    )
+    out = SpecVersionOut.model_validate(version).model_dump(by_alias=True)
+    out["fieldCount"] = len(version.fields or [])
+    out["ruleCount"] = len(version.rules or [])
+    return out
 
 
 @advisories_router.get("/{advisory_id}", summary="One advisory with its proposed changes")

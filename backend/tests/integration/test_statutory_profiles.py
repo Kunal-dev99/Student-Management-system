@@ -323,6 +323,115 @@ async def test_hesa_coding_frame_transforms_are_available(ctx):
         assert t in tr
 
 
+# --- integrity: a required field cannot be deleted --------------------------------------------
+
+@pytest.mark.asyncio
+async def test_required_field_cannot_be_deleted_but_optional_can(ctx):
+    c, h = ctx
+    p = await _profile(c, h)
+    req = (await _field(c, h, p["id"], "HUSID", "student.ref", required=True)).json()
+    opt = (await _field(c, h, p["id"], "NOTE", "person.email", required=False)).json()
+
+    # Deleting a spec-required field is refused — dropping it would produce an invalid return.
+    blocked = await c.delete(f"/api/v1/report-profiles/{p['id']}/fields/{req['id']}", headers=h)
+    assert blocked.status_code == 409, blocked.text
+    assert "required" in blocked.json()["error"]["message"].lower()
+
+    # An optional field can still be removed.
+    ok = await c.delete(f"/api/v1/report-profiles/{p['id']}/fields/{opt['id']}", headers=h)
+    assert ok.status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_present_but_unmapped_required_field_still_blocks_signoff(ctx):
+    """A required field that IS in the profile but has no source (an unmapped placeholder) is not
+    'missing' — it lives in the Fields tab — but it must still block sign-off and be reported as
+    unmappedRequired, so restoring a deleted field doesn't falsely flip the profile to 'ready'."""
+    c, h = ctx
+    p = await _profile(c, h)
+    # A real mapping + a present-but-unmapped required placeholder (empty source).
+    await _field(c, h, p["id"], "HUSID", "student.ref", required=True)
+    await _field(c, h, p["id"], "SEXID", "", required=True)
+
+    body = (await c.get(f"/api/v1/report-profiles/{p['id']}/compile", headers=h)).json()
+    # Present, so NOT in the absent-field "missing" list…
+    assert "SEXID" not in {m["field"] for m in body["missing"]}
+    # …but reported as unmapped-required, and it keeps sign-off blocked.
+    assert "SEXID" in body["unmappedRequired"]
+    assert body["mappedFieldCount"] == 1               # only HUSID actually has a source
+    assert body["signOffReady"] is False
+
+    signoff = await c.post(f"/api/v1/report-profiles/{p['id']}/sign-off", headers=h, json={})
+    assert signoff.status_code == 422
+    # The blocker count folds the absent 'missing' fields together with the present-but-unmapped
+    # required one (SEXID), so a restored-but-unmapped field is never silently signed off.
+    assert "unmapped" in signoff.json()["error"]["message"].lower()
+
+
+@pytest.mark.asyncio
+async def test_default_value_satisfies_a_required_field_for_signoff(ctx):
+    """A required field with no source but a DEFAULT ships that constant for every student, so it
+    must count as resolved — not block sign-off, not count as unmappedRequired."""
+    c, h = ctx
+    prof_id = (await _profile(c, h))["id"]
+    field = (await _field(c, h, prof_id, "SEXID", "", required=True)).json()
+    # Empty source → unmappedRequired until a default is given.
+    before = (await c.get(f"/api/v1/report-profiles/{prof_id}/compile", headers=h)).json()
+    assert "SEXID" in before["unmappedRequired"]
+    # Set a default → SEXID now ships "10" for everyone → no longer a blocker.
+    await c.patch(f"/api/v1/report-profiles/{prof_id}/fields/{field['id']}", headers=h,
+                  json={"defaultValue": "10"})
+    after = (await c.get(f"/api/v1/report-profiles/{prof_id}/compile", headers=h)).json()
+    assert "SEXID" not in after["unmappedRequired"]
+
+
+# --- custom student attributes (HESA gap capture) ---------------------------------------------
+
+@pytest.mark.asyncio
+async def test_custom_attribute_end_to_end_into_the_return(ctx):
+    c, h = ctx
+    # Create a custom attribute (reason is mandatory).
+    no_reason = await c.post("/api/v1/students/custom-fields", headers=h,
+                             json={"label": "Care leaver", "dataType": "code"})
+    assert no_reason.status_code == 400
+
+    created = await c.post("/api/v1/students/custom-fields", headers=h, json={
+        "label": "Care leaver flag", "dataType": "code",
+        "reason": "HESA CARELEAVER — not held in the core model yet.",
+    })
+    assert created.status_code == 201, created.text
+    field = created.json()
+    assert field["key"] == "care_leaver_flag"
+    assert field["sourcePath"] == "custom.care_leaver_flag"
+
+    # It appears in the mapping catalog so it is pickable.
+    schema = (await c.get("/api/v1/report-profiles/record-schema", headers=h)).json()
+    assert "custom.care_leaver_flag" in schema["paths"]
+
+    # Enter a value for one student (the grid lists every student, blank by default).
+    grid = (await c.get(f"/api/v1/students/custom-fields/{field['id']}/values", headers=h)).json()
+    assert {r["studentRef"] for r in grid["rows"]} == {"PGR-A", "PGR-B"}
+    assert all(r["value"] is None for r in grid["rows"])
+    pgr_a = next(r for r in grid["rows"] if r["studentRef"] == "PGR-A")
+    put = await c.put(f"/api/v1/students/custom-fields/{field['id']}/values", headers=h,
+                      json={"values": [{"studentId": pgr_a["studentId"], "value": "01"}]})
+    assert put.status_code == 200 and put.json()["filled"] == 1
+
+    # Map a statutory field to the custom path and generate — the entered value flows through.
+    p = await _profile(c, h)
+    await _field(c, h, p["id"], "HUSID", "student.ref", required=True)
+    await _field(c, h, p["id"], "CARELEAVER", "custom.care_leaver_flag")
+    result = (await c.post(f"/api/v1/report-profiles/{p['id']}/generate", headers=h, json={})).json()
+    job = result["job"]
+    csv_text = (await c.get(f"/api/v1/exports/{job['id']}/download", headers=h)).text
+    lines = csv_text.strip().splitlines()
+    assert lines[0] == "HUSID,CARELEAVER"
+    a_row = next(ln for ln in lines[1:] if ln.startswith("PGR-A"))
+    b_row = next(ln for ln in lines[1:] if ln.startswith("PGR-B"))
+    assert a_row.split(",")[1] == "01"     # entered value present
+    assert b_row.split(",")[1] == ""       # unset student is blank, not a crash
+
+
 @pytest.mark.asyncio
 async def test_coding_frames_produce_hesa_codes(ctx):
     """The hesa_mode transform must produce '01' / '02' from the student's study mode."""

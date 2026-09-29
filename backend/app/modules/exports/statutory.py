@@ -412,6 +412,26 @@ class StatutoryEngine:
         ))).scalars().all():
             funding.setdefault(fa.student_id, fa)
 
+        # Admin-defined custom attributes (HESA gap capture): expose each student's value under the
+        # `custom.<key>` path so a mapping can read it. Every key is present (None when unset) so the
+        # resolve() contract is deterministic regardless of which students have data entered.
+        from app.modules.student_record.models import StudentCustomField, StudentCustomValue
+        custom_fields = list(
+            (await self.session.execute(select(StudentCustomField))).scalars().all()
+        )
+        custom_keys = [f.key for f in custom_fields]
+        custom_by_student: dict = {}
+        if custom_fields:
+            key_by_id = {f.id: f.key for f in custom_fields}
+            for v in (await self.session.execute(select(StudentCustomValue))).scalars().all():
+                k = key_by_id.get(v.custom_field_id)
+                if k is not None:
+                    custom_by_student.setdefault(v.student_id, {})[k] = v.value
+
+        def _custom_for(student_id) -> dict:
+            held = custom_by_student.get(student_id, {})
+            return {k: held.get(k) for k in custom_keys}
+
         # ICR G4 — current study intensity (FTE %) per student: the latest approved intensity
         # change, else derived from study mode. Feeds the HESA STULOAD field.
         from app.modules.student_record.constants import (
@@ -510,6 +530,7 @@ class StatutoryEngine:
                     "research": common_research,
                     "funding": common_funding,
                     "award": common_award,
+                    "custom": _custom_for(student.id),
                 })
                 continue
 
@@ -543,6 +564,7 @@ class StatutoryEngine:
                     "research": common_research,
                     "funding": common_funding,
                     "award": common_award,
+                    "custom": _custom_for(student.id),
                 })
         return records
 
@@ -1048,7 +1070,21 @@ class StatutoryEngine:
 
         profile = await self.get_profile(profile_id)
         mappings = await self._mappings(profile_id)
-        mapped = {m.target_field for m in mappings}
+        # A field is "missing" only when it is absent from the profile — present fields (even with
+        # an empty source) are surfaced in the Fields tab. But a present-but-unmapped REQUIRED field
+        # still can't be signed off, so it is tracked separately and folded into readiness. Without
+        # this, adding an absent required field as an unmapped placeholder would clear `missing` and
+        # the UI would wrongly say "ready to sign off".
+        present = {m.target_field for m in mappings}
+        mapped = {m.target_field for m in mappings if (m.source_expression or "").strip()}
+        # A required field is satisfied for sign-off when it produces a value — from a source OR a
+        # default (the default fills an empty source, see generate()). So it only blocks when it has
+        # neither. This mirrors validation, so the readiness the UI shows matches what sign-off does.
+        def _resolved(m) -> bool:
+            return bool((m.source_expression or "").strip()) or bool((m.default_value or "").strip())
+        unmapped_required = sorted(
+            m.target_field for m in mappings if m.required and not _resolved(m)
+        )
         spec = await resolve_fields(self.session, profile.code, profile.academic_year)
         # Carry the spec's recommended source/transform/default through so the "Map" affordance
         # on the sign-off tab can offer a one-click map for fields the spec pack already knows how
@@ -1062,7 +1098,7 @@ class StatutoryEngine:
                 "specDefaultTransform": s.get("transform") or None,
                 "specDefaultValue": s.get("default") or None,
             }
-            for s in spec if s["field"] not in mapped
+            for s in spec if s["field"] not in present
         ]
         return {
             "profile": self.profile_out(profile),
@@ -1070,7 +1106,10 @@ class StatutoryEngine:
             "specFieldCount": len(spec),
             "mappedFieldCount": len(mapped),
             "missing": missing,
-            "signOffReady": (not missing) and bool(mappings),
+            # Present-but-unmapped required fields — not "missing" (they're in the Fields tab) but
+            # they still block sign-off. The UI shows a pointer to the Fields tab for these.
+            "unmappedRequired": unmapped_required,
+            "signOffReady": (not missing) and (not unmapped_required) and bool(mappings),
             # Suppressed rules are attested to at sign-off, so surface them wherever the sign-off
             # UI is rendered — not only inside a validation result.
             "suppressions": await self._collect_suppressions(profile),
@@ -1109,6 +1148,14 @@ class StatutoryEngine:
         )).scalar_one_or_none()
         if m is None:
             raise NotFoundError("Field mapping not found")
+        # A field the specification marks required must not be silently removed — dropping it
+        # produces a structurally-invalid return. If the reason is that we don't hold the data,
+        # add a custom student attribute and map to it instead of deleting the field.
+        if m.required:
+            raise ConflictError(
+                f"'{m.target_field}' is required by the specification and cannot be deleted. "
+                "Re-map it to a different source (or a custom student attribute) instead."
+            )
         await self.session.delete(m)
         await self.session.commit()
 
@@ -1124,13 +1171,14 @@ class StatutoryEngine:
             raise ConflictError("Profile is already signed off")
         report = await self.compile(profile_id)
         if not report["signOffReady"]:
-            missing = ", ".join(m["field"] for m in report["missing"][:8])
-            more = "" if len(report["missing"]) <= 8 else f" (+{len(report['missing'])-8} more)"
-            raise WorkflowError(
-                f"Cannot sign off: {len(report['missing'])} mandatory field(s) unmapped: {missing}{more}"
-                if report["missing"]
-                else "Cannot sign off: profile has no field mappings"
-            )
+            blockers = [m["field"] for m in report["missing"]] + report.get("unmappedRequired", [])
+            if blockers:
+                shown = ", ".join(blockers[:8])
+                more = "" if len(blockers) <= 8 else f" (+{len(blockers) - 8} more)"
+                raise WorkflowError(
+                    f"Cannot sign off: {len(blockers)} mandatory field(s) unmapped: {shown}{more}"
+                )
+            raise WorkflowError("Cannot sign off: profile has no field mappings")
         gen = await self.generate(profile_id)
         if not gen["validation"]["valid"]:
             raise WorkflowError(
