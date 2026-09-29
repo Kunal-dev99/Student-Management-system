@@ -3,10 +3,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type ListResponse } from '@/shared/api/client'
 
-export type RelationshipType = 'applicant' | 'student' | 'employee' | 'alumni' | 'researcher'
+export type RelationshipType =
+  | 'applicant' | 'student' | 'employee' | 'alumni' | 'researcher' | 'clinical_trainee'
 
 export const RELATIONSHIP_TYPES: RelationshipType[] = [
-  'applicant', 'student', 'employee', 'alumni', 'researcher',
+  'applicant', 'student', 'employee', 'alumni', 'researcher', 'clinical_trainee',
 ]
 
 export interface Relationship {

@@ -138,6 +138,39 @@ const toForm = ({ file, defaults }: ImportPayload) => {
   return fd
 }
 
+// --- Settings-configurable import template (which columns the cohort import expects) ---
+
+export type ImportTemplateField =
+  | 'studentRef' | 'firstName' | 'surname' | 'email'
+  | 'programme' | 'startDate' | 'studyMode' | 'status' | 'funder'
+
+export interface ImportTemplateColumn {
+  field: ImportTemplateField
+  label: string
+  enabled: boolean
+  required: boolean
+}
+
+export interface ImportTemplate {
+  columns: ImportTemplateColumn[]
+}
+
+export const useImportTemplate = () =>
+  useQuery({
+    queryKey: ['students', 'import-template'],
+    queryFn: () => api.get<ImportTemplate>('/students/import/template'),
+    staleTime: 5 * 60 * 1000,
+  })
+
+export const useSetImportTemplate = () => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (columns: ImportTemplateColumn[]) =>
+      api.put<ImportTemplate>('/students/import/template', { columns }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['students', 'import-template'] }),
+  })
+}
+
 /** Validate a cohort CSV without writing anything. */
 export const useImportPreview = () =>
   useMutation({ mutationFn: (p: ImportPayload) => uploadFile<ImportResult>('/students/import/preview', toForm(p)) })

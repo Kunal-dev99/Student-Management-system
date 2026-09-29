@@ -10,6 +10,7 @@ const VARIANT: Record<Relationship['relationshipType'], 'default' | 'success' | 
   employee: 'warning',
   alumni: 'secondary',
   researcher: 'default',
+  clinical_trainee: 'warning',
 }
 
 export function RelationshipBadge({ type, current }: { type: Relationship['relationshipType']; current?: boolean }) {

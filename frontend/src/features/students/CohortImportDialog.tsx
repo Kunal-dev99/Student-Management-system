@@ -25,7 +25,8 @@ import { useToast } from '@/components/ui/use-toast'
 import { useProgrammes } from '@/features/progression/api'
 import { useFundingSources } from '@/features/funding/api'
 import {
-  useImportPreview, useImportCommit, type ImportAction, type ImportResult, type ImportDefaults,
+  useImportPreview, useImportCommit, useImportTemplate,
+  type ImportAction, type ImportResult, type ImportDefaults, type ImportTemplateField,
 } from '@/features/students/api'
 import { CohortEntryGrid, emptyGridRow, rowIsBlank, type GridRow } from '@/features/students/CohortEntryGrid'
 
@@ -45,6 +46,19 @@ const ACTION_HELP: Record<ImportAction, string> = {
 const NONE = '__none'
 
 const CSV_HEADERS = ['Student Ref', 'First Name', 'Surname', 'Email', 'Course', 'Start Date', 'Attendance', 'Status', 'Funder']
+
+// Field → CSV header + a sample value, so the downloadable template mirrors the enabled columns.
+const FIELD_CSV: Record<ImportTemplateField, { header: string; sample: string }> = {
+  studentRef: { header: 'Student Ref', sample: 'ICR-2026-001' },
+  firstName: { header: 'First Name', sample: 'Ada' },
+  surname: { header: 'Surname', sample: 'Lovelace' },
+  email: { header: 'Email', sample: 'ada@example.ac.uk' },
+  programme: { header: 'Course', sample: 'MSC-ONC' },
+  startDate: { header: 'Start Date', sample: '29/09/2026' },
+  studyMode: { header: 'Attendance', sample: 'full time' },
+  status: { header: 'Status', sample: 'registered' },
+  funder: { header: 'Funder', sample: '' },
+}
 
 function toCsv(rows: string[][]): string {
   return rows.map((r) => r.map((c) => `"${(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\r\n')
@@ -77,6 +91,8 @@ export function CohortImportDialog() {
   const { toast } = useToast()
   const { data: programmes } = useProgrammes()
   const { data: funders } = useFundingSources()
+  const { data: template } = useImportTemplate()
+  const enabledCols = (template?.columns ?? []).filter((c) => c.enabled)
 
   const defaults = useCallback((): ImportDefaults => ({
     programme: defProgramme || undefined,
@@ -127,10 +143,16 @@ export function CohortImportDialog() {
     })
   }
 
-  const downloadTemplate = () => downloadCsv('cohort_template.csv', [
-    ['Student Ref', 'First Name', 'Surname', 'Email', 'Course', 'Start Date', 'Attendance', 'Status', 'Funder'],
-    ['ICR-2026-001', 'Ada', 'Lovelace', 'ada@example.ac.uk', 'MSC-ONC', '29/09/2026', 'full time', 'registered', ''],
-  ])
+  const downloadTemplate = () => {
+    // Mirror the configured template — only the enabled columns, in their display order.
+    const cols = enabledCols.length ? enabledCols : (template?.columns ?? [])
+    const fields = (cols.length ? cols : Object.keys(FIELD_CSV).map((f) => ({ field: f as ImportTemplateField, label: '', enabled: true, required: false })))
+      .map((c) => c.field)
+    downloadCsv('cohort_template.csv', [
+      fields.map((f) => FIELD_CSV[f].header),
+      fields.map((f) => FIELD_CSV[f].sample),
+    ])
+  }
 
   const downloadErrors = () => {
     if (!preview) return
@@ -169,7 +191,8 @@ export function CohortImportDialog() {
                 Then <span className="font-medium">Preview rows</span> to check, and enrol.
               </p>
               <CohortEntryGrid rows={rows} onChange={(r) => { setRows(r); setPreview(null) }}
-                programmes={programmes ?? []} funders={funders ?? []} />
+                programmes={programmes ?? []} funders={funders ?? []}
+                columns={template?.columns ?? []} />
               <Button variant="secondary" size="sm" onClick={previewGrid} disabled={previewMut.isPending}>
                 {previewMut.isPending ? 'Checking…' : 'Preview rows'}
               </Button>
@@ -179,9 +202,11 @@ export function CohortImportDialog() {
           {mode === 'csv' && (<>
           <div className="flex items-start justify-between gap-3">
             <p className="text-sm text-muted-foreground">
-              Upload a CSV of accepted students. Columns: <span className="font-mono text-xs">student ref, name,
-              email, programme code, start date, mode, status</span> (funder optional). You will see a preview
-              before anything is saved.
+              Upload a CSV of accepted students. Columns: <span className="font-mono text-xs">{
+                (enabledCols.length ? enabledCols : (template?.columns ?? [])).map((c) => c.label).join(', ') ||
+                'student ref, name, email, programme code, start date, mode, status'
+              }</span>. You will see a preview before anything is saved. Configure which columns you use under{' '}
+              <span className="font-medium">Settings › Cohort import</span>.
             </p>
             <Button variant="ghost" size="sm" className="shrink-0" onClick={downloadTemplate}>
               <FileDown className="mr-1.5 h-4 w-4" />Template

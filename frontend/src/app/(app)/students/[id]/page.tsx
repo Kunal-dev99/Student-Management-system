@@ -206,7 +206,14 @@ export default function StudentDetailPage() {
 
   return (
     <>
-      <PageHeader title={summary.data?.personName ?? 'Student'} />
+      <PageHeader
+        title={summary.data?.personName ?? s?.studentRef ?? 'Student'}
+        description={
+          summary.data
+            ? [summary.data.studentRef, summary.data.programmeName].filter(Boolean).join(' · ')
+            : undefined
+        }
+      />
       <div className="px-6 pb-6 space-y-4">
         <div className="flex items-center justify-between">
           <Link href="/students" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">

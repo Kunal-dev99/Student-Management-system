@@ -22,6 +22,7 @@ import {
 import { useToast } from '@/components/ui/use-toast'
 import { useProgrammes } from '@/features/progression/api'
 import { usePersons, type Person } from '@/features/persons/api'
+import { PersonaTags } from '@/features/persons/PersonaTags'
 import { useEnrolStudent, type StudentStatus } from '@/features/students/api'
 
 const EMPTY = {
@@ -135,10 +136,13 @@ export function EnrolStudentDialog() {
                     onChange={(e) => { setPersonQuery(e.target.value); setPicked(null) }} />
                 </div>
                 {picked ? (
-                  <div className="flex items-center justify-between rounded-md border border-border bg-muted/30 px-3 py-2 text-sm">
-                    <span><span className="font-medium">{picked.givenName} {picked.familyName}</span>
-                      {picked.email && <span className="text-muted-foreground"> · {picked.email}</span>}</span>
-                    <Button variant="ghost" size="sm" onClick={() => setPicked(null)}>Change</Button>
+                  <div className="flex items-start justify-between gap-2 rounded-md border border-border bg-muted/30 px-3 py-2 text-sm">
+                    <span className="space-y-1">
+                      <span className="block"><span className="font-medium">{picked.givenName} {picked.familyName}</span>
+                        {picked.email && <span className="text-muted-foreground"> · {picked.email}</span>}</span>
+                      <PersonaTags relationships={picked.relationships} emptyLabel="No recorded roles yet" />
+                    </span>
+                    <Button variant="ghost" size="sm" className="shrink-0" onClick={() => setPicked(null)}>Change</Button>
                   </div>
                 ) : personQuery.trim().length >= 2 && (
                   <div className="max-h-40 overflow-auto rounded-md border border-border">
@@ -148,10 +152,13 @@ export function EnrolStudentDialog() {
                     )}
                     {results.map((p) => (
                       <button key={p.id} type="button" onClick={() => setPicked(p)}
-                        className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-muted">
-                        <span><span className="font-medium">{p.givenName} {p.familyName}</span>
-                          {p.email && <span className="text-muted-foreground"> · {p.email}</span>}</span>
-                        <Check className="h-4 w-4 opacity-0" />
+                        className="flex w-full items-start justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-muted">
+                        <span className="space-y-1">
+                          <span className="block"><span className="font-medium">{p.givenName} {p.familyName}</span>
+                            {p.email && <span className="text-muted-foreground"> · {p.email}</span>}</span>
+                          <PersonaTags relationships={p.relationships} />
+                        </span>
+                        <Check className="h-4 w-4 shrink-0 opacity-0" />
                       </button>
                     ))}
                   </div>

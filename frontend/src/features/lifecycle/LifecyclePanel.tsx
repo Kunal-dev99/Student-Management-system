@@ -525,6 +525,14 @@ export function LifecyclePanel({ studentId, student }: { studentId: string; stud
   const shifted = !!original && !!current && original !== current
   const delta = shifted ? dayDelta(original, current) : 0
 
+  // Additive summary: pending (requested-but-unapproved) changes don't move the dates yet, so
+  // surface them explicitly with their projected effect — otherwise a requested mode change
+  // looks ignored next to an already-approved extension.
+  const pending = events.data?.filter((e) => e.status === 'requested') ?? []
+  const projectedDelta = pending.reduce((sum, e) => sum + (e.impact?.daysDelta ?? 0), 0)
+  const studyModeLabel = student?.studyMode === 'part_time' ? 'Part time'
+    : student?.studyMode === 'full_time' ? 'Full time' : null
+
   const statusVariant = status && PAUSED.includes(status)
     ? 'warning'
     : status && HEALTHY.includes(status) ? 'success' : 'secondary'
@@ -548,8 +556,9 @@ export function LifecyclePanel({ studentId, student }: { studentId: string; stud
       }
     >
       {/* Header strip — the original-vs-now contrast is the point of this feature. */}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 mb-4">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 mb-2">
         {status ? <Badge variant={statusVariant}>{status.replace(/_/g, ' ')}</Badge> : <Skeleton className="h-5 w-20" />}
+        {studyModeLabel && <Badge variant="secondary">{studyModeLabel}</Badge>}
         {shifted ? (
           <div className="flex flex-wrap items-baseline gap-2 text-sm">
             <span className="text-muted-foreground">Originally</span>
@@ -566,6 +575,20 @@ export function LifecyclePanel({ studentId, student }: { studentId: string; stud
           </span>
         )}
       </div>
+
+      {/* Pending changes — requested but not yet approved. Called out so they never look ignored:
+          the dates above stay put until an approver signs off, and this says what will move. */}
+      {pending.length > 0 && (
+        <div className="mb-4 flex flex-wrap items-center gap-2 rounded-md border border-[hsl(var(--warning)/0.3)] bg-[hsl(var(--warning)/0.08)] px-3 py-2 text-sm">
+          <Badge variant="warning">{pending.length} awaiting approval</Badge>
+          <span className="text-muted-foreground">
+            {pending.map((e) => EVENT_LABELS[e.eventType]).join(', ')} — the dates above move only once approved
+            {projectedDelta !== 0 && (
+              <> (projected <span className="font-medium text-foreground num">{projectedDelta > 0 ? '+' : ''}{projectedDelta} days</span>)</>
+            )}.
+          </span>
+        </div>
+      )}
 
       <IntensityStrip studentId={studentId} />
 
