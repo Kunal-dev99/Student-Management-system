@@ -21,8 +21,9 @@ if not exist "frontend\node_modules" (
 )
 
 echo.
-echo Freeing ports 8000 (backend) and 3000 (frontend), plus stray 8001/8010, if held...
-for %%P in (8000 8001 8010 3000) do (
+echo Freeing ports 8000 (backend) and 3000 (frontend) if anything is holding them...
+REM 8001 is the old backend port - clear it too so a stale window cannot serve the app.
+for %%P in (8000 8001 3000) do (
     for /f "tokens=5" %%A in ('netstat -ano ^| findstr ":%%P " ^| findstr LISTENING') do (
         echo   port %%P busy - killing PID %%A
         taskkill /F /PID %%A >nul 2>&1
