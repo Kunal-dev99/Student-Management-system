@@ -27,6 +27,7 @@ import { useFundingSources } from '@/features/funding/api'
 import {
   useImportPreview, useImportCommit, type ImportAction, type ImportResult, type ImportDefaults,
 } from '@/features/students/api'
+import { CohortEntryGrid, emptyGridRow, rowIsBlank, type GridRow } from '@/features/students/CohortEntryGrid'
 
 const ACTION_TONE: Record<ImportAction, BadgeProps['variant']> = {
   create: 'success', attach: 'info', skip: 'secondary', error: 'destructive',
@@ -43,17 +44,29 @@ const ACTION_HELP: Record<ImportAction, string> = {
 
 const NONE = '__none'
 
+const CSV_HEADERS = ['Student Ref', 'First Name', 'Surname', 'Email', 'Course', 'Start Date', 'Attendance', 'Status', 'Funder']
+
+function toCsv(rows: string[][]): string {
+  return rows.map((r) => r.map((c) => `"${(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\r\n')
+}
 function downloadCsv(name: string, rows: string[][]) {
-  const csv = rows.map((r) => r.map((c) => `"${(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\r\n')
-  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
+  const url = URL.createObjectURL(new Blob([toCsv(rows)], { type: 'text/csv;charset=utf-8' }))
   const a = document.createElement('a')
   a.href = url; a.download = name; a.click()
   URL.revokeObjectURL(url)
 }
+/** Turn the in-app grid rows into the same CSV file the importer validates. */
+function gridToFile(rows: GridRow[]): File {
+  const body = rows.filter((r) => !rowIsBlank(r)).map((r) =>
+    [r.studentRef, r.firstName, r.surname, r.email, r.programme, r.startDate, r.studyMode, r.status, r.funder])
+  return new File([toCsv([CSV_HEADERS, ...body])], 'cohort.csv', { type: 'text/csv' })
+}
 
 export function CohortImportDialog() {
   const [open, setOpen] = useState(false)
+  const [mode, setMode] = useState<'csv' | 'grid'>('csv')
   const [file, setFile] = useState<File | null>(null)
+  const [rows, setRows] = useState<GridRow[]>([emptyGridRow()])
   const [preview, setPreview] = useState<ImportResult | null>(null)
   const [defProgramme, setDefProgramme] = useState('')
   const [defStart, setDefStart] = useState('')
@@ -72,8 +85,15 @@ export function CohortImportDialog() {
   }), [defProgramme, defStart, defFunder])
 
   const reset = () => {
-    setFile(null); setPreview(null); setDefProgramme(''); setDefStart(''); setDefFunder('')
+    setMode('csv'); setFile(null); setRows([emptyGridRow()]); setPreview(null)
+    setDefProgramme(''); setDefStart(''); setDefFunder('')
     if (fileInput.current) fileInput.current.value = ''
+  }
+
+  const previewGrid = () => {
+    const rowsFilled = rows.filter((r) => !rowIsBlank(r))
+    if (rowsFilled.length === 0) { setPreview(null); return }
+    runPreview(gridToFile(rows))
   }
 
   const runPreview = useCallback((f: File) => {
@@ -94,8 +114,9 @@ export function CohortImportDialog() {
   }
 
   const onCommit = () => {
-    if (!file) return
-    commitMut.mutate({ file, defaults: defaults() }, {
+    const f = mode === 'csv' ? file : gridToFile(rows)
+    if (!f) return
+    commitMut.mutate({ file: f, defaults: defaults() }, {
       onSuccess: (res) => {
         toast({ title: 'Cohort imported', description: `${res.toCreate} enrolled, ${res.skipped} skipped, ${res.errors} error(s).` })
         reset(); setOpen(false)
@@ -125,12 +146,37 @@ export function CohortImportDialog() {
       <DialogTrigger asChild>
         <Button variant="outline"><Upload className="mr-2 h-4 w-4" />Import cohort</Button>
       </DialogTrigger>
-      <DialogContent className="flex max-h-[88vh] max-w-3xl flex-col overflow-hidden">
+      <DialogContent className={`flex max-h-[88vh] flex-col overflow-hidden ${mode === 'grid' ? 'max-w-5xl' : 'max-w-3xl'}`}>
         <DialogHeader className="flex-none">
           <DialogTitle>Import a cohort</DialogTitle>
         </DialogHeader>
 
         <div className="-mr-2 flex-1 space-y-3 overflow-y-auto pr-2">
+          {/* Choose how to provide the cohort: upload a CSV, or type it in the app. */}
+          <div className="inline-flex rounded-md border border-border p-0.5 text-sm">
+            <button type="button"
+              className={`rounded px-3 py-1 ${mode === 'csv' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'}`}
+              onClick={() => { setMode('csv'); setPreview(null) }}>Upload CSV</button>
+            <button type="button"
+              className={`rounded px-3 py-1 ${mode === 'grid' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'}`}
+              onClick={() => { setMode('grid'); setPreview(null) }}>Enter in app</button>
+          </div>
+
+          {mode === 'grid' && (
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                Add students row by row — the dropdowns keep programme, funder, mode and status valid.
+                Then <span className="font-medium">Preview rows</span> to check, and enrol.
+              </p>
+              <CohortEntryGrid rows={rows} onChange={(r) => { setRows(r); setPreview(null) }}
+                programmes={programmes ?? []} funders={funders ?? []} />
+              <Button variant="secondary" size="sm" onClick={previewGrid} disabled={previewMut.isPending}>
+                {previewMut.isPending ? 'Checking…' : 'Preview rows'}
+              </Button>
+            </div>
+          )}
+
+          {mode === 'csv' && (<>
           <div className="flex items-start justify-between gap-3">
             <p className="text-sm text-muted-foreground">
               Upload a CSV of accepted students. Columns: <span className="font-mono text-xs">student ref, name,
@@ -194,6 +240,7 @@ export function CohortImportDialog() {
               </div>
             </div>
           </div>
+          </>)}
 
           {previewMut.isPending && <p className="text-sm text-muted-foreground">Validating…</p>}
 
