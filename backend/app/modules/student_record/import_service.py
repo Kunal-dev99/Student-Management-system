@@ -54,7 +54,10 @@ _MODE = {
     "part_time": StudyMode.part_time, "part time": StudyMode.part_time, "pt": StudyMode.part_time,
     "part": StudyMode.part_time, "parttime": StudyMode.part_time,
 }
-_STATUS = {"registered": StudentStatus.registered, "prospective": StudentStatus.prospective}
+# Accept the full status vocabulary (not just registered/prospective), by value plus a
+# couple of friendly spellings.
+_STATUS: dict[str, StudentStatus] = {s.value: s for s in StudentStatus}
+_STATUS.update({"on leave": StudentStatus.on_leave})
 
 
 def _parse_date(raw: str) -> date | None:
@@ -105,6 +108,14 @@ class RowResult:
         }
 
 
+@dataclass
+class ImportDefaults:
+    """Whole-cohort fallbacks applied to blank cells (chosen once in the import dialog)."""
+    programme_code: str | None = None
+    start_date: str | None = None
+    funder: str | None = None
+
+
 class CohortImportService:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -136,7 +147,7 @@ class CohortImportService:
         return list(reader), header_map
 
     # --- validation (shared by preview and commit) ---
-    async def _validate(self, data: bytes) -> list[RowResult]:
+    async def _validate(self, data: bytes, defaults: "ImportDefaults | None" = None) -> list[RowResult]:
         rows, hmap = self._rows(data)
         programmes = await self.repo.list_programmes()
         by_code = {p.code.strip().lower(): p for p in programmes if p.code}
@@ -163,6 +174,12 @@ class CohortImportService:
             r.student_ref = cell("student_ref") or None
             r.programme_code = cell("programme_code") or None
             r.funder = cell("funder") or None
+            # per-import defaults fill blank cells (whole-cohort programme / start / funder)
+            if defaults:
+                if not r.programme_code and defaults.programme_code:
+                    r.programme_code = defaults.programme_code
+                if not r.funder and defaults.funder:
+                    r.funder = defaults.funder
 
             # study mode / status
             mode_raw = cell("study_mode").lower()
@@ -175,8 +192,11 @@ class CohortImportService:
             r.status = _STATUS.get(status_raw, StudentStatus.registered)
 
             # start date
+            start_raw = cell("start_date")
+            if not start_raw and defaults and defaults.start_date:
+                start_raw = defaults.start_date
             try:
-                r._start_date = _parse_date(cell("start_date"))
+                r._start_date = _parse_date(start_raw)
             except ValueError as exc:
                 r.action = "error"; r.messages.append(str(exc))
 
@@ -221,12 +241,12 @@ class CohortImportService:
             results.append(r)
         return results
 
-    async def preview(self, data: bytes) -> dict:
-        results = await self._validate(data)
+    async def preview(self, data: bytes, defaults: "ImportDefaults | None" = None) -> dict:
+        results = await self._validate(data, defaults)
         return _summary(results, committed=False)
 
-    async def commit(self, data: bytes) -> dict:
-        results = await self._validate(data)
+    async def commit(self, data: bytes, defaults: "ImportDefaults | None" = None) -> dict:
+        results = await self._validate(data, defaults)
         svc = StudentService(self.repo)
         for r in results:
             if r.action not in ("create", "attach"):

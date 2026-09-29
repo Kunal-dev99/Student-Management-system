@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, File, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.authorization import student_scope
@@ -21,7 +21,7 @@ from app.modules.student_record.constants import (
     LifecycleEventType,
     StudentStatus,
 )
-from app.modules.student_record.import_service import CohortImportService
+from app.modules.student_record.import_service import CohortImportService, ImportDefaults
 from app.modules.student_record.repository import StudentRepository
 from app.modules.student_record.lifecycle import LifecycleService
 from app.modules.student_record.schemas import (
@@ -159,22 +159,40 @@ async def _read_csv(file: UploadFile) -> bytes:
     return data
 
 
+def _defaults(programme: str | None, start_date: str | None, funder: str | None) -> ImportDefaults:
+    return ImportDefaults(
+        programme_code=(programme or "").strip() or None,
+        start_date=(start_date or "").strip() or None,
+        funder=(funder or "").strip() or None,
+    )
+
+
 @router.post("/import/preview", summary="Validate a cohort CSV without writing anything")
 async def import_preview(
     file: UploadFile = File(...),
+    default_programme: str | None = Form(None),
+    default_start_date: str | None = Form(None),
+    default_funder: str | None = Form(None),
     session: AsyncSession = Depends(get_session),
     _=Depends(require_permission("student.write")),
 ) -> dict:
-    return await CohortImportService(session).preview(await _read_csv(file))
+    return await CohortImportService(session).preview(
+        await _read_csv(file), _defaults(default_programme, default_start_date, default_funder)
+    )
 
 
 @router.post("/import/commit", status_code=201, summary="Enrol a cohort from CSV (idempotent on ref)")
 async def import_commit(
     file: UploadFile = File(...),
+    default_programme: str | None = Form(None),
+    default_start_date: str | None = Form(None),
+    default_funder: str | None = Form(None),
     session: AsyncSession = Depends(get_session),
     _=Depends(require_permission("student.write")),
 ) -> dict:
-    return await CohortImportService(session).commit(await _read_csv(file))
+    return await CohortImportService(session).commit(
+        await _read_csv(file), _defaults(default_programme, default_start_date, default_funder)
+    )
 
 
 @router.get("/{student_id}", response_model=StudentOut, summary="Get a student (row-scoped)")

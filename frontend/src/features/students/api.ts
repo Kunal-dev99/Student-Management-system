@@ -118,21 +118,35 @@ export interface ImportResult {
   rows: ImportRow[]
 }
 
-const toForm = (file: File) => {
+/** Whole-cohort fallbacks for blank cells, chosen in the import dialog. */
+export interface ImportDefaults {
+  programme?: string
+  startDate?: string
+  funder?: string
+}
+export interface ImportPayload {
+  file: File
+  defaults?: ImportDefaults
+}
+
+const toForm = ({ file, defaults }: ImportPayload) => {
   const fd = new FormData()
   fd.append('file', file)
+  if (defaults?.programme) fd.append('default_programme', defaults.programme)
+  if (defaults?.startDate) fd.append('default_start_date', defaults.startDate)
+  if (defaults?.funder) fd.append('default_funder', defaults.funder)
   return fd
 }
 
 /** Validate a cohort CSV without writing anything. */
 export const useImportPreview = () =>
-  useMutation({ mutationFn: (file: File) => uploadFile<ImportResult>('/students/import/preview', toForm(file)) })
+  useMutation({ mutationFn: (p: ImportPayload) => uploadFile<ImportResult>('/students/import/preview', toForm(p)) })
 
 /** Enrol the cohort (idempotent on student ref). */
 export const useImportCommit = () => {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (file: File) => uploadFile<ImportResult>('/students/import/commit', toForm(file)),
+    mutationFn: (p: ImportPayload) => uploadFile<ImportResult>('/students/import/commit', toForm(p)),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['students'] }),
   })
 }
