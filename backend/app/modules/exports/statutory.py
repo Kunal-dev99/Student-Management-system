@@ -652,19 +652,28 @@ class StatutoryEngine:
         # Full audit record for every suppression (profile + pack), for the sign-off card.
         suppressions = await self._collect_suppressions(profile)
 
+        # Cap the raw issue list returned to the UI — on a real cohort with several unmapped
+        # mandatory fields this is tens of thousands of rows. Counts, valid and ruleAnalysis are
+        # computed from the FULL list above, so nothing is lost; the UI shows the first slice and
+        # (via issuesTruncated/issueCount) offers to download the rest.
+        MAX_ISSUES = 500
+        errors = sum(1 for i in issues if i["severity"] == "error")
+        warnings = sum(1 for i in issues if i["severity"] == "warning")
         return {
             "profile": self.profile_out(profile),
             "header": header,
             "rows": rows,
             "rowCount": len(rows),
             "validation": {
-                "errors": sum(1 for i in issues if i["severity"] == "error"),
-                "warnings": sum(1 for i in issues if i["severity"] == "warning"),
-                "issues": issues,
+                "errors": errors,
+                "warnings": warnings,
+                "issueCount": len(issues),
+                "issuesTruncated": len(issues) > MAX_ISSUES,
+                "issues": issues[:MAX_ISSUES],
                 # Sign-off blocks on any error — an unmapped required field, a bad coding value, or
                 # a failed error-severity rule (e.g. ENDDATE < COMDATE). Warning-severity rules are
                 # advisory and do not block.
-                "valid": not any(i["severity"] == "error" for i in issues),
+                "valid": errors == 0,
                 "ruleAnalysis": list(rule_analysis.values()),
                 "suppressions": suppressions,
             },
