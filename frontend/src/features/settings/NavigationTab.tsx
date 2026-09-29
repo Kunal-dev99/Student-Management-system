@@ -9,6 +9,7 @@
  */
 import { Compass, Lock } from 'lucide-react'
 import { PageSection } from '@/components/common/PageSection'
+import { ErrorState } from '@/components/common/ErrorState'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -73,7 +74,7 @@ export function NavigationTab() {
       {isLoading ? (
         <Skeleton className="h-40 w-full" />
       ) : isError ? (
-        <p className="text-sm text-[hsl(var(--destructive))]">{(error as ApiError)?.message}</p>
+        <ErrorState error={error} />
       ) : (
         <div className="space-y-5">
           {data?.groups.map((g) => (

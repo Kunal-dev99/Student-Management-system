@@ -24,6 +24,7 @@ import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger,
 } from '@/components/ui/dialog'
 import { useToast } from '@/components/ui/use-toast'
+import { useConfirm } from '@/components/common/ConfirmDialog'
 import { ApiError } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthContext'
 import {
@@ -163,6 +164,7 @@ function EditRolesDialog({ user, roles }: { user: AdminUser; roles: AdminRole[] 
 
 function UserRow({ user, roles }: { user: AdminUser; roles: AdminRole[] }) {
   const { toast } = useToast()
+  const confirm = useConfirm()
   const { principal } = useAuth()
   const update = useUpdateUser()
   const sendReset = useSendPasswordReset()
@@ -193,11 +195,13 @@ function UserRow({ user, roles }: { user: AdminUser; roles: AdminRole[] }) {
   }
 
   const remove = async () => {
-    if (!window.confirm(
-      `Delete the invited user ${user.email}?\n\n` +
-      `This is allowed because they have never signed in — no history to preserve. ` +
-      `Once they set a password, deactivate is the only option.`,
-    )) return
+    if (!(await confirm({
+      title: `Delete the invited user ${user.email}?`,
+      description:
+        'This is allowed because they have never signed in — no history to preserve. ' +
+        'Once they set a password, deactivate is the only option.',
+      confirmLabel: 'Delete user',
+    }))) return
     try {
       await del.mutateAsync(user.id)
       toast({ title: `Invited user ${user.email} deleted` })

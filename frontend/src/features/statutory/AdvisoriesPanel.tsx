@@ -11,6 +11,7 @@
 import { useState, type ReactNode } from 'react'
 import { CheckCircle2, FileUp, ListTree, ShieldCheck, XCircle } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
+import { ErrorState } from '@/components/common/ErrorState'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -339,7 +340,7 @@ export function AdvisoriesPanel({ canConfigure, canSignOff }: {
       {advisories.isLoading ? (
         <Skeleton className="h-20 w-full" />
       ) : advisories.isError ? (
-        <p className="text-sm text-[hsl(var(--destructive))]">{(advisories.error as ApiError)?.message}</p>
+        <ErrorState error={advisories.error} />
       ) : rows.length === 0 ? (
         <p className="text-helper inline-flex items-center gap-2">
           <CheckCircle2 className="h-4 w-4" /> No advisories ingested yet.

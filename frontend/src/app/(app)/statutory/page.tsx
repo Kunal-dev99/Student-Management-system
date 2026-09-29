@@ -29,6 +29,8 @@ import {
 } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useToast } from '@/components/ui/use-toast'
+import { useConfirm } from '@/components/common/ConfirmDialog'
+import { ErrorState } from '@/components/common/ErrorState'
 import { ApiError } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthContext'
 import { downloadExport } from '@/features/exports/api'
@@ -725,6 +727,7 @@ function EditFieldDialog({
 
 function DeleteFieldButton({ profileId, field }: { profileId: string; field: FieldMapping }) {
   const { toast } = useToast()
+  const confirm = useConfirm()
   const del = useDeleteField(profileId)
   return (
     <Button
@@ -732,7 +735,11 @@ function DeleteFieldButton({ profileId, field }: { profileId: string; field: Fie
       title={`Remove ${field.targetField}`}
       disabled={del.isPending}
       onClick={async () => {
-        if (!window.confirm(`Remove the mapping for ${field.targetField}? This does not touch the master record.`)) return
+        if (!(await confirm({
+          title: `Remove the mapping for ${field.targetField}?`,
+          description: 'This does not touch the master record.',
+          confirmLabel: 'Remove mapping',
+        }))) return
         try {
           await del.mutateAsync(field.id)
           toast({ title: `Removed ${field.targetField}` })
@@ -1663,6 +1670,7 @@ function SuppressionsPanel({
   signed: boolean
 }) {
   const { toast } = useToast()
+  const confirm = useConfirm()
   const remove = useRemoveSuppression(profileId)
 
   // UX fix (2026-09-17): the panel used to be amber-ringed with a prominent Undo button per
@@ -1723,9 +1731,12 @@ function SuppressionsPanel({
                       className="text-[11px] text-muted-foreground hover:text-foreground hover:underline"
                       disabled={remove.isPending}
                       onClick={async () => {
-                        if (!window.confirm(
-                          `Re-enable the ${s.ruleKey} rule for ${s.scope === 'pack' ? 'every profile on this spec pack' : 'this profile'}? The suppression will be removed.`,
-                        )) return
+                        if (!(await confirm({
+                          title: `Re-enable the ${s.ruleKey} rule?`,
+                          description: `This applies to ${s.scope === 'pack' ? 'every profile on this spec pack' : 'this profile'}. The suppression will be removed.`,
+                          confirmLabel: 'Re-enable rule',
+                          destructive: false,
+                        }))) return
                         try {
                           await remove.mutateAsync({ ruleKey: s.ruleKey, scope: s.scope })
                           toast({ title: `Suppression removed (${s.scope}) — re-validate to see the rule fire again.` })
@@ -1901,7 +1912,7 @@ function SignOffCard({ profileId, canSignOff }: { profileId: string; canSignOff:
   const [notes, setNotes] = useState('')
 
   if (compile.isLoading) return <Skeleton className="h-24 w-full" />
-  if (compile.isError) return <p className="text-sm text-[hsl(var(--destructive))]">{(compile.error as ApiError)?.message}</p>
+  if (compile.isError) return <ErrorState error={compile.error} />
   if (!compile.data) return null
   const r = compile.data
   const signed = r.profile.signedOff
@@ -2242,7 +2253,7 @@ export default function StatutoryPage() {
           {profiles.isLoading ? (
             <Skeleton className="h-24 w-full" />
           ) : profiles.isError ? (
-            <p className="text-sm text-[hsl(var(--destructive))]">{(profiles.error as ApiError)?.message}</p>
+            <ErrorState error={profiles.error} />
           ) : profiles.data && profiles.data.length > 0 ? (
             <Table>
               <TableHeader>
@@ -2373,7 +2384,7 @@ export default function StatutoryPage() {
             <div className="pt-4">
               {tab === 'fields' && (
                 detail.isLoading ? <Skeleton className="h-24 w-full" /> :
-                detail.isError ? <p className="text-sm text-[hsl(var(--destructive))]">{(detail.error as ApiError)?.message}</p> :
+                detail.isError ? <ErrorState error={detail.error} /> :
                 detail.data && detail.data.fields.length > 0 ? (
                   <Table>
                     <TableHeader>

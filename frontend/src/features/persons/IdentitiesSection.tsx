@@ -11,6 +11,7 @@
 import { useState } from 'react'
 import { Layers, Plus } from 'lucide-react'
 import { PageSection } from '@/components/common/PageSection'
+import { ErrorState } from '@/components/common/ErrorState'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -127,7 +128,7 @@ export function IdentitiesSection({ personId }: { personId: string }) {
       {rels.isLoading ? (
         <Skeleton className="h-20 w-full" />
       ) : rels.isError ? (
-        <p className="text-sm text-[hsl(var(--destructive))]">{(rels.error as ApiError)?.message}</p>
+        <ErrorState error={rels.error} />
       ) : rows.length === 0 ? (
         <p className="text-helper">No identities recorded for this person yet.</p>
       ) : (

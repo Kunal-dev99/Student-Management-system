@@ -10,6 +10,7 @@
 import { useState } from 'react'
 import { PhoneCall, Plus, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
+import { ErrorState } from '@/components/common/ErrorState'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
@@ -48,7 +49,7 @@ export function ContactsSection({ personId }: { personId: string }) {
   const [dnc, setDnc] = useState(false)
 
   if (list.isLoading) return <Skeleton className="h-16 w-full" />
-  if (list.isError) return <p className="text-sm text-[hsl(var(--destructive))]">{(list.error as ApiError)?.message}</p>
+  if (list.isError) return <ErrorState error={list.error} />
 
   const rows = list.data ?? []
 

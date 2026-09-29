@@ -23,7 +23,7 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import ConflictError, NotFoundError, WorkflowError
+from app.core.errors import ConflictError, NotFoundError, ValidationAppError, WorkflowError
 from app.modules.exports.models import ReportFieldMapping, ReportProfile
 
 # --- transforms available to a mapping. Pure, total functions: no I/O, no failure. ---

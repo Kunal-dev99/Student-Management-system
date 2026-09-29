@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { PageHeader } from '@/components/common/PageHeader'
+import { ErrorState } from '@/components/common/ErrorState'
 import { SearchInput } from '@/components/common/SearchInput'
 import { FilterChips } from '@/components/common/FilterChips'
 import { Pagination } from '@/components/common/Pagination'
@@ -92,7 +93,7 @@ export default function StudentsPage() {
             </TableHeader>
             <TableBody>
               {isLoading && <TableRow><TableCell colSpan={5}><Skeleton className="h-5 w-full" /></TableCell></TableRow>}
-              {isError && <TableRow><TableCell colSpan={5} className="text-[hsl(var(--destructive))]">{(error as Error)?.message}</TableCell></TableRow>}
+              {isError && <TableRow><TableCell colSpan={5}><ErrorState error={error} /></TableCell></TableRow>}
               {data?.data.map((s) => (
                 <TableRow key={s.id}>
                   <TableCell className="font-medium">

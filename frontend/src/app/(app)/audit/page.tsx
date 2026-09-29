@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { ScrollText, ShieldAlert } from 'lucide-react'
 import { PageHeader } from '@/components/common/PageHeader'
+import { ErrorState } from '@/components/common/ErrorState'
 import { PageSection } from '@/components/common/PageSection'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -80,7 +81,7 @@ export default function AuditPage() {
             </TableHeader>
             <TableBody>
               {isLoading && <TableRow><TableCell colSpan={6}><Skeleton className="h-5 w-full" /></TableCell></TableRow>}
-              {isError && <TableRow><TableCell colSpan={6} className="text-[hsl(var(--destructive))]">{(error as Error)?.message}</TableCell></TableRow>}
+              {isError && <TableRow><TableCell colSpan={6}><ErrorState error={error} /></TableCell></TableRow>}
               {data?.map((row) => (
                 <TableRow key={row.id}>
                   <TableCell className="num text-xs text-muted-foreground whitespace-nowrap">{row.createdAt?.replace('T', ' ').slice(0, 19)}</TableCell>

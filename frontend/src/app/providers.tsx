@@ -4,6 +4,7 @@ import { useState, type ReactNode } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AuthProvider } from '@/shared/auth/AuthContext'
 import { LanguageProvider } from '@/shared/i18n/LanguageProvider'
+import { ConfirmProvider } from '@/components/common/ConfirmDialog'
 
 /**
  * App-wide client providers. TanStack Query is the server-state cache (arch §14.3);
@@ -21,7 +22,9 @@ export function Providers({ children }: { children: ReactNode }) {
   return (
     <QueryClientProvider client={client}>
       <AuthProvider>
-        <LanguageProvider>{children}</LanguageProvider>
+        <LanguageProvider>
+          <ConfirmProvider>{children}</ConfirmProvider>
+        </LanguageProvider>
       </AuthProvider>
     </QueryClientProvider>
   )
