@@ -15,6 +15,8 @@ import { useCan } from '@/shared/auth/Can'
 import { useAwards } from '@/features/research/api'
 import { FeeWaiversSection } from './FeeWaiversSection'
 import { PaymentsSection } from './PaymentsSection'
+import { EffectiveDateField } from '@/features/history/EffectiveDate'
+import { todayIso } from '@/features/history/api'
 import {
   useChangeFunding, useCreateFunding, useEndFunding, useFunding, useFundingSources,
   useFundingVocab, usePaymentSummary, type FundingStatus, type FundingType,
@@ -108,6 +110,11 @@ export function FundingPanel({ studentId }: { studentId: string }) {
   const [changeFunderRef, setChangeFunderRef] = useState('')
   const [changeContribution, setChangeContribution] = useState('')
   const [changeAwardId, setChangeAwardId] = useState('')
+  // Effective dating (Phase 5): when a change / end / new arrangement takes effect.
+  const [changeDate, setChangeDate] = useState('')
+  const [endingId, setEndingId] = useState<string | null>(null)
+  const [endDate, setEndDate] = useState('')
+  const [startDate, setStartDate] = useState('')
 
   // Which arrangement's payment schedule is expanded.
   const [payingArrangementId, setPayingArrangementId] = useState<string | null>(null)
@@ -166,9 +173,10 @@ export function FundingPanel({ studentId }: { studentId: string }) {
                           setChangeFunderRef(a.funderReference ?? '')
                           setChangeContribution(a.contributionPct != null ? String(a.contributionPct) : '')
                           setChangeAwardId(a.researchAwardId ?? '')
+                          setChangeDate(todayIso()); setEndingId(null)
                         }}>Change</Button>
-                      <Button size="sm" variant="ghost" disabled={end.isPending}
-                        onClick={async () => { try { await end.mutateAsync(a.id); toast({ title: 'Funding ended' }) } catch (e) { err(e) } }}>End</Button>
+                      <Button size="sm" variant="ghost"
+                        onClick={() => { setEndingId(endingId === a.id ? null : a.id); setEndDate(todayIso()); setChangingId(null) }}>End</Button>
                     </>
                   )}
                 </div>
@@ -184,6 +192,22 @@ export function FundingPanel({ studentId }: { studentId: string }) {
                   a.paymentFrequency ? `${a.paymentFrequency.replace(/_/g, ' ')} payments` : null,
                 ].filter(Boolean).join(' · ') || 'No finance detail recorded'}
               </p>
+
+              {endingId === a.id && (
+                <div className="flex flex-wrap items-end gap-2 mt-2 bg-surface-2 rounded-md p-2">
+                  <EffectiveDateField studentId={studentId} label="No longer funded from" allowFuture={false}
+                    id={`end-${a.id}`} value={endDate} onChange={setEndDate} />
+                  <Button size="sm" disabled={end.isPending || !endDate}
+                    onClick={async () => {
+                      try {
+                        await end.mutateAsync({ id: a.id, effectiveDate: endDate || undefined })
+                        toast({ title: 'Funding ended', description: `Last funded day: the day before ${endDate}.` })
+                        setEndingId(null)
+                      } catch (e) { err(e) }
+                    }}>End funding</Button>
+                  <Button size="sm" variant="ghost" onClick={() => setEndingId(null)}>Cancel</Button>
+                </div>
+              )}
 
               {changingId === a.id && (
                 <div className="flex flex-wrap items-end gap-2 mt-2 bg-surface-2 rounded-md p-2">
@@ -220,12 +244,15 @@ export function FundingPanel({ studentId }: { studentId: string }) {
                       ))}
                     </SelectContent>
                   </Select>
+                  <EffectiveDateField studentId={studentId} label="Takes effect from" allowFuture={false}
+                    id={`chg-${a.id}`} value={changeDate} onChange={setChangeDate} />
                   <Button size="sm" disabled={change.isPending}
                     onClick={async () => {
                       try {
                         await change.mutateAsync({
                           id: a.id,
                           body: {
+                            effectiveDate: changeDate || undefined,
                             fundingType: changeType,
                             stipendAmount: changeAmount || undefined,
                             currency: changeAmount ? 'GBP' : undefined,
@@ -289,10 +316,13 @@ export function FundingPanel({ studentId }: { studentId: string }) {
             ))}
           </SelectContent>
         </Select>
+        <EffectiveDateField studentId={studentId} label="Starts" allowFuture={false}
+          id="funding-start" value={startDate} onChange={setStartDate} />
         <Button size="sm" disabled={create.isPending}
           onClick={async () => {
             try {
               await create.mutateAsync({
+                validFrom: startDate || undefined,
                 fundingType: type,
                 fundingSourceId: sourceId || undefined,
                 stipendAmount: amount || undefined,
@@ -305,7 +335,7 @@ export function FundingPanel({ studentId }: { studentId: string }) {
               })
               toast({ title: 'Funding arrangement added' })
               setAmount(''); setSourceId(''); setCostCentre(''); setProjectCode('')
-              setFunderReference(''); setContributionPct(''); setAwardId('')
+              setFunderReference(''); setContributionPct(''); setAwardId(''); setStartDate('')
             } catch (e) { err(e) }
           }}>Add arrangement</Button>
       </div>}

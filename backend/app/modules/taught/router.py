@@ -42,6 +42,7 @@ from app.modules.taught.schemas import (
 )
 from app.modules.taught.module_history import ModuleStatusHistoryService
 from app.modules.taught.service import TaughtService
+from app.modules.student_record.periods import assert_backdate_allowed
 
 programme_router = APIRouter(prefix="/programmes", tags=["taught"])
 module_router = APIRouter(prefix="/taught-modules", tags=["taught"])
@@ -222,6 +223,7 @@ async def set_status(
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(require_permission("taught.change")),
 ) -> EnrolmentOut:
+    assert_backdate_allowed(body.effective_date, principal, what="This module status change")
     return EnrolmentOut.model_validate(await _svc(session).set_enrolment_status(
         enrolment_id, body.status, effective_date=body.effective_date, reason=body.reason,
         user_id=principal.user_id,
@@ -236,6 +238,7 @@ async def withdraw_from_module(
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(require_permission("taught.change")),
 ) -> EnrolmentOut:
+    assert_backdate_allowed(body.effective_date, principal, what="This module withdrawal")
     return EnrolmentOut.model_validate(await _svc(session).withdraw(
         enrolment_id, effective_date=body.effective_date, reason=body.reason, user_id=principal.user_id,
     ))
@@ -287,6 +290,7 @@ async def interrupt_modules(
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(require_permission("taught.change")),
 ) -> list[EnrolmentOut]:
+    assert_backdate_allowed(body.effective_date, principal, what="Interrupting these modules")
     rows = await _svc(session).interrupt_modules(
         student_id, effective_date=body.effective_date, enrolment_ids=body.enrolment_ids,
         reason=body.reason, user_id=principal.user_id, source_event_id=body.source_event_id,

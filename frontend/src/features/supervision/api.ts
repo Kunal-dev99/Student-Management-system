@@ -40,29 +40,43 @@ export const useCaseload = (personId: string | null | undefined) =>
     enabled: !!personId,
   })
 
+function invalidateSupervision(qc: ReturnType<typeof useQueryClient>, studentId: string) {
+  qc.invalidateQueries({ queryKey: ['supervisors', studentId] })
+  qc.invalidateQueries({ queryKey: ['student', studentId, 'summary'] })
+  qc.invalidateQueries({ queryKey: ['student', studentId, 'history'] })
+  qc.invalidateQueries({ queryKey: ['student', studentId, 'as-of'] })
+  qc.invalidateQueries({ queryKey: ['caseload'] })
+  qc.invalidateQueries({ queryKey: ['students'] })
+}
+
 export function useAssignSupervisor(studentId: string) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (body: { supervisorPersonId: string; role: SupervisorRole }) =>
+    /** ``validFrom`` — first day of supervision; default today, back-dating allowed. */
+    mutationFn: (body: { supervisorPersonId: string; role: SupervisorRole; validFrom?: string }) =>
       api.post<Supervisor>(`/students/${studentId}/supervisors`, body),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['supervisors', studentId] })
-      qc.invalidateQueries({ queryKey: ['student', studentId, 'summary'] })
-      qc.invalidateQueries({ queryKey: ['caseload'] })
-      qc.invalidateQueries({ queryKey: ['students'] })
-    },
+    onSuccess: () => invalidateSupervision(qc, studentId),
   })
 }
 
 export function useEndSupervisor(studentId: string) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (relId: string) => api.post<Supervisor>(`/supervisors/${relId}/end`),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['supervisors', studentId] })
-      qc.invalidateQueries({ queryKey: ['student', studentId, 'summary'] })
-      qc.invalidateQueries({ queryKey: ['caseload'] })
-      qc.invalidateQueries({ queryKey: ['students'] })
+    /** A bare id ends today; ``effectiveDate`` is the first day no longer supervising. */
+    mutationFn: (arg: string | { id: string; effectiveDate?: string; reason?: string }) => {
+      const { id, ...body } = typeof arg === 'string' ? { id: arg } : arg
+      return api.post<Supervisor>(`/supervisors/${id}/end`, Object.keys(body).length ? body : undefined)
     },
+    onSuccess: () => invalidateSupervision(qc, studentId),
+  })
+}
+
+/** Change supervisor: end this relationship and start the new one on the same day, same role. */
+export function useReplaceSupervisor(studentId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, ...body }: { id: string; newSupervisorPersonId: string; reason: string; effectiveDate?: string }) =>
+      api.post<Supervisor>(`/supervisors/${id}/replace`, body),
+    onSuccess: () => invalidateSupervision(qc, studentId),
   })
 }

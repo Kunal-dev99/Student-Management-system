@@ -29,6 +29,7 @@ from app.modules.funding.schemas import (
     WaiverOut,
 )
 from app.modules.funding.service import FundingService
+from app.modules.student_record.periods import assert_backdate_allowed
 from app.modules.student_record.router import scoped_ids
 
 student_router = APIRouter(prefix="/students", tags=["funding"])
@@ -91,8 +92,9 @@ async def create_funding(
     student_id: uuid.UUID,
     body: ArrangementCreate,
     session: AsyncSession = Depends(get_session),
-    _=Depends(require_permission("funding.change")),
+    principal: Principal = Depends(require_permission("funding.change")),
 ) -> ArrangementOut:
+    assert_backdate_allowed(body.valid_from, principal, what="This funding")
     a = await _svc(session).create_arrangement(student_id, body)
     names = await FundingRepository(session).source_names()
     return ArrangementOut.model_validate(await _svc(session)._arrangement_dict(a, names))
@@ -103,8 +105,9 @@ async def change_funding(
     arrangement_id: uuid.UUID,
     body: ChangeRequest,
     session: AsyncSession = Depends(get_session),
-    _=Depends(require_permission("funding.change")),
+    principal: Principal = Depends(require_permission("funding.change")),
 ) -> ArrangementOut:
+    assert_backdate_allowed(body.effective_date, principal, what="This funding change")
     a = await _svc(session).change(arrangement_id, body)
     names = await FundingRepository(session).source_names()
     return ArrangementOut.model_validate(await _svc(session)._arrangement_dict(a, names))
@@ -115,8 +118,9 @@ async def end_funding(
     arrangement_id: uuid.UUID,
     body: EndFundingRequest | None = None,
     session: AsyncSession = Depends(get_session),
-    _=Depends(require_permission("funding.change")),
+    principal: Principal = Depends(require_permission("funding.change")),
 ) -> ArrangementOut:
+    assert_backdate_allowed(body.effective_date if body else None, principal, what="Ending this funding")
     a = await _svc(session).end(arrangement_id, on=body.effective_date if body else None)
     names = await FundingRepository(session).source_names()
     return ArrangementOut.model_validate(await _svc(session)._arrangement_dict(a, names))

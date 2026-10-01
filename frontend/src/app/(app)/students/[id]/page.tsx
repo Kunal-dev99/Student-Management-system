@@ -26,6 +26,7 @@ import { TaughtRecordPanel } from '@/features/taught/TaughtRecordPanel'
 import { SupervisorRequestsCard } from '@/features/supervision/SupervisorRequestsCard'
 import { RelationshipGraph } from '@/features/research/RelationshipGraph'
 import { DocumentsPanel } from '@/components/documents/DocumentsPanel'
+import { DatedHistoryPanel } from '@/features/history/DatedHistoryPanel'
 import { useAudit } from '@/features/audit/api'
 import { useAuth } from '@/shared/auth/AuthContext'
 import { JourneyTracker } from '@/features/students/JourneyTracker'
@@ -128,7 +129,7 @@ function HistorySection({ studentId }: { studentId: string }) {
 // Which page tab a click on a journey-stage segment should switch to. Kept as a data map so
 // the mapping is discoverable in one place (and adding a stage tomorrow is a one-line change).
 // Stages not listed here leave the tab as-is — the journey tracker still expands its own detail.
-type StudentTab = 'journey' | 'record' | 'supervision' | 'progression' | 'programme' | 'funding' | 'archive'
+type StudentTab = 'journey' | 'record' | 'supervision' | 'progression' | 'programme' | 'funding' | 'dated' | 'archive'
 
 const STAGE_TO_TAB: Record<string, StudentTab> = {
   applicant: 'journey',
@@ -149,6 +150,7 @@ const TAB_DEFS: { key: StudentTab; label: string }[] = [
   { key: 'progression',  label: 'Progression' },
   { key: 'programme',    label: 'Programme' },
   { key: 'funding',      label: 'Funding' },
+  { key: 'dated',        label: 'Dated history' },
   { key: 'archive',      label: 'Documents & History' },
 ]
 
@@ -339,6 +341,11 @@ export default function StudentDetailPage() {
               description="This student's funder, award, funding, project and supervisors, drawn as one picture."
             />
           )}
+        </TabPanel>
+
+        {/* --- Dated history tab (effective dating, Phase 5) ------------------------------- */}
+        <TabPanel tab="dated" active={tab}>
+          {P.datedHistory && <DatedHistoryPanel studentId={id} />}
         </TabPanel>
 
         {/* --- Documents & History tab ----------------------------------------------------- */}

@@ -42,6 +42,10 @@ export interface FundingInput {
   contributionPct?: number
   /** Phase 6.3 — ties the money to the research award it is drawn from. */
   researchAwardId?: string
+  /** Effective dating — first day of a new arrangement (create); default today. */
+  validFrom?: string
+  /** Effective dating — the day a change takes over (change); default today, back-dating allowed. */
+  effectiveDate?: string
 }
 
 export const useFundingSources = (opts?: { enabled?: boolean }) =>
@@ -77,6 +81,8 @@ function invalidate(qc: ReturnType<typeof useQueryClient>, studentId: string) {
   qc.invalidateQueries({ queryKey: ['student', studentId, 'summary'] })
   // The chain and its findings are derived from the arrangements — always re-derive.
   qc.invalidateQueries({ queryKey: ['funding-lineage', studentId] })
+  qc.invalidateQueries({ queryKey: ['student', studentId, 'history'] })
+  qc.invalidateQueries({ queryKey: ['student', studentId, 'as-of'] })
 }
 
 export function useCreateFunding(studentId: string) {
@@ -96,7 +102,12 @@ export function useChangeFunding(studentId: string) {
 export function useEndFunding(studentId: string) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (id: string) => api.post<Arrangement>(`/funding/${id}/end`),
+    /** A bare id ends today; ``{ id, effectiveDate }`` ends from that (past) date — the first
+     *  day no longer funded. */
+    mutationFn: (arg: string | { id: string; effectiveDate?: string }) => {
+      const { id, effectiveDate } = typeof arg === 'string' ? { id: arg, effectiveDate: undefined } : arg
+      return api.post<Arrangement>(`/funding/${id}/end`, effectiveDate ? { effectiveDate } : undefined)
+    },
     onSuccess: () => invalidate(qc, studentId),
   })
 }

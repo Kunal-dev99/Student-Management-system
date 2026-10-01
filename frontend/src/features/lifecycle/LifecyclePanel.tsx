@@ -8,6 +8,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
+import { EffectiveDateCheck, RetrospectiveWarnings } from '@/features/history/EffectiveDate'
+import type { RetrospectiveWarning } from '@/features/history/api'
 import { Textarea } from '@/components/ui/textarea'
 import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger,
@@ -83,7 +85,7 @@ function eventDates(e: LifecycleEvent): string {
 
 /** Small note dialog shared by Approve and Reject — the note is optional in both cases. */
 function DecisionDialog({
-  label, variant, title, pending, onConfirm, impactNote, intensityEventId,
+  label, variant, title, pending, onConfirm, impactNote, intensityEventId, retrospective,
 }: {
   label: string
   variant: 'default' | 'outline'
@@ -92,6 +94,7 @@ function DecisionDialog({
   onConfirm: (note: string | undefined) => Promise<boolean>
   impactNote?: string
   intensityEventId?: string
+  retrospective?: RetrospectiveWarning[]
 }) {
   const [open, setOpen] = useState(false)
   const [note, setNote] = useState('')
@@ -106,6 +109,12 @@ function DecisionDialog({
       <DialogContent className="flex max-h-[88vh] flex-col overflow-hidden">
         <DialogHeader className="flex-none"><DialogTitle>{title}</DialogTitle></DialogHeader>
         <div className="-mr-2 flex-1 space-y-4 overflow-y-auto pr-2">
+        {retrospective && retrospective.length > 0 && (
+          <div className="rounded-md border border-[hsl(var(--warning)/0.3)] bg-[hsl(var(--warning)/0.08)] p-3">
+            <p className="text-sm font-medium mb-1">Affects a signed-off return</p>
+            <RetrospectiveWarnings warnings={retrospective} />
+          </div>
+        )}
         {(impactNote || intensityEventId) && (
           <div className="rounded-md border border-[hsl(var(--warning)/0.3)] bg-[hsl(var(--warning)/0.08)] p-3 text-sm">
             {narrated
@@ -416,6 +425,11 @@ function RequestDialog({ studentId, student }: { studentId: string; student?: St
               placeholder="Why this change is needed — recorded permanently." />
           </div>
 
+          {eventType !== 'extension' && (
+            <EffectiveDateCheck studentId={studentId} from={startDate}
+              to={eventType === 'suspension' ? endDate : null} />
+          )}
+
           <p className="text-helper">
             Requesting changes nothing. The student&apos;s status, expected end date and milestone
             due dates move only when an approver signs this off.
@@ -723,6 +737,12 @@ export function LifecyclePanel({ studentId, student }: { studentId: string; stud
                   <TableCell className="num whitespace-nowrap text-sm">{eventDates(e)}</TableCell>
                   <TableCell className="text-sm" title={e.reason ?? undefined}>
                     {e.reason && e.reason.length > 60 ? `${e.reason.slice(0, 60)}…` : e.reason || '—'}
+                    {e.status === 'requested' && e.retrospective && e.retrospective.length > 0 && (
+                      <span className="block text-xs text-[hsl(var(--warning))]"
+                        title={e.retrospective.map((w) => w.message).join('\n')}>
+                        Reaches the signed-off {e.retrospective.map((w) => w.academicYear).join(', ')} return
+                      </span>
+                    )}
                   </TableCell>
                   <TableCell><Badge variant={STATUS_VARIANT[e.status]}>{e.status}</Badge></TableCell>
                   <TableCell className="num">
@@ -748,6 +768,7 @@ export function LifecyclePanel({ studentId, student }: { studentId: string; stud
                           pending={approve.isPending}
                           impactNote={e.impact?.summary}
                           intensityEventId={e.eventType === 'intensity_change' ? e.id : undefined}
+                          retrospective={e.retrospective}
                           onConfirm={async (note) => {
                             try {
                               const res = await approve.mutateAsync({ eventId: e.id, note })

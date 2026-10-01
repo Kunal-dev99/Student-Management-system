@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import uuid
 
+from datetime import date
+
 from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -48,7 +50,10 @@ from app.modules.student_record.schemas import (
 )
 from app.modules.student_record.models import Student, StudentStatusHistory
 from app.modules.student_record.service import StudentService
+from app.modules.student_record.periods import assert_backdate_allowed
+from app.modules.student_record.retrospective import signed_off_returns, warnings_for
 from app.modules.student_record.status_history import StatusHistoryService
+from app.modules.student_record.timeline import StudentTimeline
 
 router = APIRouter(prefix="/students", tags=["student"])
 programmes_router = APIRouter(prefix="/programmes", tags=["student"])
@@ -397,9 +402,18 @@ async def list_lifecycle_events(
     svc = LifecycleService(session)
     events = await svc.events_for_student(student_id)
     student = None
+    returns = None
     out: list[LifecycleEventOut] = []
     for e in events:
         row = svc.out(e)
+        # Effective dating, Phase 5 — would approving this reach a signed-off return?
+        if e.status is LifecycleEventStatus.requested and e.event_type is not LifecycleEventType.extension:
+            if student is None:
+                student = await svc._get_student(student_id)
+            if returns is None:
+                returns = await signed_off_returns(session)
+            end = e.end_date if e.event_type is LifecycleEventType.suspension else None
+            row["retrospective"] = await warnings_for(session, student, e.start_date, end, returns=returns)
         # ICR G6 — attach a deterministic impact preview to a PENDING date-moving request, so the
         # table and the approver see what it will do before deciding (not just intensity changes:
         # a mode change or extension that showed no effect until approval read as a broken app).
@@ -519,6 +533,58 @@ async def correct_status_history(
     return {"row": hist.out(fixed), "studentStatus": student.status.value}
 
 
+# --- Effective dating, Phase 5 — history tab, as-of view, retrospective check ---
+
+@router.get("/{student_id}/history", summary="Every dated fact for a student, with who recorded it and when")
+async def student_history(
+    student_id: uuid.UUID,
+    include_superseded: bool = Query(False, alias="includeSuperseded"),
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_permission("student.read")),
+) -> dict:
+    allowed = await scoped_ids(principal, session)
+    if allowed is not None and student_id not in allowed:
+        raise NotFoundError("Student not found")
+    return await StudentTimeline(session).history(student_id, include_superseded=include_superseded)
+
+
+@router.get("/{student_id}/as-of", summary="The student's record as it stood on a date")
+async def student_as_of(
+    student_id: uuid.UUID,
+    on: date = Query(..., alias="date"),
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_permission("student.read")),
+) -> dict:
+    allowed = await scoped_ids(principal, session)
+    if allowed is not None and student_id not in allowed:
+        raise NotFoundError("Student not found")
+    return await StudentTimeline(session).as_of(student_id, on)
+
+
+@router.get("/{student_id}/retrospective-check",
+            summary="Would a change from this date reach a signed-off return? (no write)")
+async def retrospective_check(
+    student_id: uuid.UUID,
+    start: date = Query(..., alias="from"),
+    end: date | None = Query(None, alias="to"),
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_permission("student.read")),
+) -> dict:
+    from app.modules.student_record.periods import BACKDATE_PERMISSION, open_year_start
+
+    student = await session.get(Student, student_id)
+    if student is None:
+        raise NotFoundError("Student not found")
+    year_start = open_year_start()
+    return {
+        "from": start.isoformat(), "to": end.isoformat() if end else None,
+        "openYearStart": year_start.isoformat(),
+        "beforeOpenYear": start < year_start,
+        "canBackdate": principal.has_permission(BACKDATE_PERMISSION),
+        "warnings": await warnings_for(session, student, start, end),
+    }
+
+
 @lifecycle_router.get("/{event_id}/impact",
                       summary="AI-narrated impact of a pending intensity change (deterministic fallback)")
 async def lifecycle_event_impact(
@@ -536,7 +602,11 @@ async def approve_lifecycle_event(
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(require_permission("student.lifecycle.approve")),
 ) -> dict:
-    return await LifecycleService(session).approve_event(
+    svc = LifecycleService(session)
+    event = await svc._get_event(event_id)
+    assert_backdate_allowed(event.start_date, principal,
+                            what=f"This {event.event_type.value.replace('_', ' ')}")
+    return await svc.approve_event(
         event_id, approver_user_id=principal.user_id, note=body.note if body else None
     )
 

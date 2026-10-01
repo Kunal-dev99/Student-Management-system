@@ -20,6 +20,7 @@ export const STUDENT_PANELS = {
   taughtOrThesis: true,     // taught (G1) vs research thesis/classification
   documents: true,
   history: true,
+  datedHistory: true,       // effective-dated timeline + as-of view (effective dating, Phase 5)
   person: true,
 
   // --- Parked (AI/intelligence extras + secondary views) ---

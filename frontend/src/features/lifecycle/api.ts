@@ -9,6 +9,7 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/shared/api/client'
+import type { RetrospectiveWarning } from '@/features/history/api'
 import type { ModuleProposal } from '@/features/taught/api'
 
 export type LifecycleEventType =
@@ -46,6 +47,8 @@ export interface LifecycleEvent {
   decidedAt: string | null
   /** ICR G6 — deterministic "what will this do" preview, present on a requested intensity change. */
   impact: IntensityImpact | null
+  /** Effective dating, Phase 5 — signed-off returns approving this would reach (pending only). */
+  retrospective?: RetrospectiveWarning[]
 }
 
 export interface ImpactMilestone {

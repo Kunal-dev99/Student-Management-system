@@ -139,6 +139,8 @@ export const useProgrammeModules = (programmeId: string | null | undefined) =>
 function invalidate(qc: ReturnType<typeof useQueryClient>, studentId: string) {
   qc.invalidateQueries({ queryKey: ['taught', studentId] })
   qc.invalidateQueries({ queryKey: ['student', studentId, 'summary'] })
+  qc.invalidateQueries({ queryKey: ['student', studentId, 'history'] })
+  qc.invalidateQueries({ queryKey: ['student', studentId, 'as-of'] })
 }
 
 // --- shared / elective modules: offer other programmes' modules here ---

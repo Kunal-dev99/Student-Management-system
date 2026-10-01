@@ -25,6 +25,7 @@ from app.modules.supervision.schemas import (
     SupervisorOut,
 )
 from app.modules.supervision.service import SupervisionService
+from app.modules.student_record.periods import assert_backdate_allowed
 
 student_scoped = APIRouter(prefix="/students", tags=["supervision"])
 sup_router = APIRouter(prefix="/supervisors", tags=["supervision"])
@@ -52,8 +53,9 @@ async def assign_supervisor(
     student_id: uuid.UUID,
     body: AssignRequest,
     session: AsyncSession = Depends(get_session),
-    _=Depends(require_permission("student.write")),
+    principal: Principal = Depends(require_permission("student.write")),
 ) -> SupervisorOut:
+    assert_backdate_allowed(body.valid_from, principal, what="This supervision")
     rel = await _svc(session).assign(
         student_id, body.supervisor_person_id, body.role, weighting_pct=body.weighting_pct,
         valid_from=body.valid_from,
@@ -68,8 +70,9 @@ async def end_supervision(
     rel_id: uuid.UUID,
     body: EndRequest | None = None,
     session: AsyncSession = Depends(get_session),
-    _=Depends(require_permission("student.write")),
+    principal: Principal = Depends(require_permission("student.write")),
 ) -> SupervisorOut:
+    assert_backdate_allowed(body.effective_date if body else None, principal, what="Ending this supervision")
     rel = await _svc(session).end(
         rel_id, body.reason if body else None, on=body.effective_date if body else None,
     )
@@ -84,8 +87,9 @@ async def replace_supervisor(
     rel_id: uuid.UUID,
     body: ReplaceRequest,
     session: AsyncSession = Depends(get_session),
-    _=Depends(require_permission("student.write")),
+    principal: Principal = Depends(require_permission("student.write")),
 ) -> SupervisorOut:
+    assert_backdate_allowed(body.effective_date, principal, what="This change of supervisor")
     rel = await _svc(session).replace(
         rel_id, body.new_supervisor_person_id, reason=body.reason, on=body.effective_date,
         weighting_pct=body.weighting_pct,
