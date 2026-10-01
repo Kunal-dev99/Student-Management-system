@@ -259,7 +259,7 @@ async def supervision_compliance(
     students = (await session.execute(
         select(Student, Person)
         .join(Person, Person.id == Student.person_id)
-        .where(Student.status == StudentStatus.active)
+        .where(Student.status.in_([StudentStatus.active, StudentStatus.writing_up]))
     )).all()
     if not students:
         return []
@@ -526,7 +526,7 @@ async def funding_type_breakdown(*, session: AsyncSession, principal: Principal)
     rows = (await session.execute(
         select(FundingArrangement.funding_type, func.count(func.distinct(Student.id)))
         .join(Student, Student.id == FundingArrangement.student_id)
-        .where(Student.status == StudentStatus.active)
+        .where(Student.status.in_([StudentStatus.active, StudentStatus.writing_up]))
         .where(FundingArrangement.status == FundingStatus.active)
         .group_by(FundingArrangement.funding_type)
     )).all()

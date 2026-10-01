@@ -8,6 +8,9 @@ class StudentStatus(str, enum.Enum):
     prospective = "prospective"
     registered = "registered"
     active = "active"
+    # Research student who has finished the research period and is writing up the thesis.
+    # HESA tracks it (SessionStatus) for funding purposes; it is still a studying status.
+    writing_up = "writing_up"
     on_leave = "on_leave"
     suspended = "suspended"
     completed = "completed"
@@ -36,6 +39,11 @@ class LifecycleEventType(str, enum.Enum):
     # current programme, cancels undecided milestones, and generates the new programme's schedule
     # from the effective date. Cross-type transfers are allowed with warnings.
     programme_change = "programme_change"
+    # Effective-dated status changes (effective dating, Phase 1). Each carries its effective
+    # date on ``start_date``; approval writes the student's status history from that date.
+    writing_up = "writing_up"
+    withdrawal = "withdrawal"
+    termination = "termination"
 
 
 class LifecycleEventStatus(str, enum.Enum):
@@ -45,8 +53,21 @@ class LifecycleEventStatus(str, enum.Enum):
     cancelled = "cancelled"
 
 
+# Statuses in which a student is studying (counted, chased and reported as live).
+STUDYING_STATUSES = frozenset({StudentStatus.registered, StudentStatus.active, StudentStatus.writing_up})
+
 # Statuses a student must be in for a suspension to be requested.
-SUSPENDABLE_STATUSES = {StudentStatus.registered, StudentStatus.active}
+SUSPENDABLE_STATUSES = set(STUDYING_STATUSES)
+
+# A student in one of these has left; no further status change is possible through lifecycle.
+TERMINAL_STATUSES = frozenset({StudentStatus.completed, StudentStatus.withdrawn, StudentStatus.terminated})
+
+# Lifecycle event types whose approval sets the student's status from the effective date.
+STATUS_EVENT_TARGETS = {
+    LifecycleEventType.writing_up: StudentStatus.writing_up,
+    LifecycleEventType.withdrawal: StudentStatus.withdrawn,
+    LifecycleEventType.termination: StudentStatus.terminated,
+}
 
 # While in these statuses a student is paused: no funding-expiry chasing, no milestone
 # generation, no overdue escalation (arch §9.3 — do not chase a student who is not studying).

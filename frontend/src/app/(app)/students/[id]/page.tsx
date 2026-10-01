@@ -11,7 +11,7 @@ import { PageSection } from '@/components/common/PageSection'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { useStudent, useStudentSummary } from '@/features/students/api'
+import { STUDENT_STATUS_TONE, useStudent, useStudentSummary } from '@/features/students/api'
 import { useLifecycleEvents } from '@/features/lifecycle/api'
 import { useProgrammesAdmin } from '@/features/programmes/api'
 import { LifecyclePanel } from '@/features/lifecycle/LifecyclePanel'
@@ -268,8 +268,8 @@ export default function StudentDetailPage() {
                 <div>
                   <p className="text-label">Status</p>
                   <p className="mt-0.5">
-                    <Badge variant={s && ['suspended', 'on_leave'].includes(s.status) ? 'warning' : 'success'}>
-                      {s?.status}
+                    <Badge variant={s ? STUDENT_STATUS_TONE[s.status] ?? 'secondary' : 'secondary'}>
+                      {s?.status.replace(/_/g, ' ')}
                     </Badge>
                   </p>
                 </div>

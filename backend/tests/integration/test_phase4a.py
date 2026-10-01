@@ -161,8 +161,9 @@ async def test_audit_trail_records_mutations(ctx):
     c, sm, ids = ctx
     tok = await _token(c)
     h = {"Authorization": f"Bearer {tok}"}
-    # a mutating request
-    await c.patch(f"/api/v1/students/{ids['student_id']}", json={"status": "active"}, headers=h)
+    # a mutating request (status is effective-dated now, so edit an undated field)
+    r = await c.patch(f"/api/v1/students/{ids['student_id']}", json={"expectedEndDate": "2030-01-01"}, headers=h)
+    assert r.status_code == 200, r.text
     audit = await c.get(f"/api/v1/audit?entityType=student&entityId={ids['student_id']}", headers=h)
     assert audit.status_code == 200
     rows = audit.json()

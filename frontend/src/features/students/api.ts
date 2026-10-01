@@ -4,8 +4,21 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, uploadFile, type ListResponse } from '@/shared/api/client'
 
 export type StudentStatus =
-  | 'prospective' | 'registered' | 'active' | 'on_leave' | 'suspended'
+  | 'prospective' | 'registered' | 'active' | 'writing_up' | 'on_leave' | 'suspended'
   | 'completed' | 'withdrawn' | 'terminated'
+
+/** Badge tone per status — shared by the students list and the student record. */
+export const STUDENT_STATUS_TONE: Record<StudentStatus, 'secondary' | 'info' | 'success' | 'warning' | 'destructive'> = {
+  prospective: 'secondary',
+  registered: 'info',
+  active: 'success',
+  writing_up: 'success',
+  on_leave: 'warning',
+  suspended: 'warning',
+  completed: 'success',
+  withdrawn: 'destructive',
+  terminated: 'destructive',
+}
 
 export interface Student {
   id: string

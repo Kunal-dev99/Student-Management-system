@@ -306,11 +306,11 @@ class FundingLineageService:
         report target at institutional scale. Here every table is read **once** and `_check` (which
         is pure) runs in memory, so cost is a handful of queries regardless of cohort size.
         """
-        from app.modules.student_record.constants import StudentStatus
+        from app.modules.student_record.constants import STUDYING_STATUSES
 
         stmt = (
             select(Student, Person).join(Person, Person.id == Student.person_id)
-            .where(Student.status.in_([StudentStatus.registered, StudentStatus.active]))
+            .where(Student.status.in_(list(STUDYING_STATUSES)))
         )
         if allowed_ids is not None:
             stmt = stmt.where(Student.id.in_(allowed_ids))

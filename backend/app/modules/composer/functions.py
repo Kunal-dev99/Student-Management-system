@@ -561,7 +561,7 @@ async def funding_cliff_scan(
         await session.execute(
             select(Student, Person)
             .join(Person, Person.id == Student.person_id)
-            .where(Student.status == StudentStatus.active)
+            .where(Student.status.in_([StudentStatus.active, StudentStatus.writing_up]))
         )
     ).all()
     if not rows:

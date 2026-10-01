@@ -99,8 +99,12 @@ class CompletionService:
         # 2) Close funding.
         await FundingService(FundingRepository(self.session)).end_active_for_student(student_id)
 
-        # 3) Student -> completed.
-        student.status = StudentStatus.completed
+        # 3) Student -> completed, from the graduation date (effective-dated status history).
+        from app.modules.student_record.status_history import StatusHistoryService
+        await StatusHistoryService(self.session).change(
+            student, StudentStatus.completed, effective_from=completion.graduation_date,
+            reason="Graduated",
+        )
 
         # 4) Person: end student identity, open alumni (same person — closes the loop, arch §8.11).
         await PersonService(PersonRepository(self.session)).transition_identity(

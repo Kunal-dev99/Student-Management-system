@@ -11,11 +11,12 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import (
-    JSON, Date, DateTime, Enum, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint,
+    JSON, Date, DateTime, Enum, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TenantMixin, TimestampMixin, UUIDMixin
+from app.db.history import HistoryMixin
 from app.modules.student_record.constants import (
     LifecycleEventStatus,
     LifecycleEventType,
@@ -156,6 +157,25 @@ class StudentLifecycleEvent(UUIDMixin, TenantMixin, TimestampMixin, Base):
     approved_by_user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     decision_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class StudentStatusHistory(UUIDMixin, TenantMixin, HistoryMixin, Base):
+    """A student's status over time (effective dating, Phase 1; feeds HESA SessionStatus).
+
+    Live rows (``superseded_by IS NULL``) for one student are contiguous and never overlap;
+    ``student.status`` caches the value covering today. Written only by ``StatusHistoryService``.
+    """
+    __tablename__ = "student_status_history"
+    __table_args__ = (Index("ix_student_status_history_student_from", "student_id", "valid_from"),)
+
+    student_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("student.id", ondelete="CASCADE"), index=True
+    )
+    status: Mapped[StudentStatus] = mapped_column(Enum(StudentStatus, name="student_status"))
+    # The approved lifecycle event that caused this period, when there was one.
+    source_event_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("student_lifecycle_event.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
 
 class ResearchProject(UUIDMixin, TenantMixin, TimestampMixin, Base):
