@@ -381,9 +381,16 @@ export function useDeleteField(profileId: string | null) {
 export function useSignOffProfile(profileId: string | null) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (notes: string | undefined) =>
-      api.post<ReportProfile>(`/report-profiles/${profileId}/sign-off`, { notes }),
-    onSuccess: () => invalidateProfileEverything(qc, profileId),
+    /** ``asAt`` — the date the return's values are taken as at (default: the year end). The
+     *  return is frozen as signed off (effective dating, Phase 7). */
+    mutationFn: (arg: string | undefined | { notes?: string; asAt?: string }) => {
+      const body = typeof arg === 'object' && arg !== null ? arg : { notes: arg }
+      return api.post<ReportProfile>(`/report-profiles/${profileId}/sign-off`, body)
+    },
+    onSuccess: () => {
+      invalidateProfileEverything(qc, profileId)
+      qc.invalidateQueries({ queryKey: ['report-profile', profileId, 'versions'] })
+    },
   })
 }
 

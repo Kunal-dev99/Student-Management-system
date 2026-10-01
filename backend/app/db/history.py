@@ -6,9 +6,10 @@ Every fact that changes over time is stored as periods rather than overwritten i
     valid_to     first day it is no longer true (exclusive); NULL = still true
 
 Periods are half-open, so adjacent rows share a boundary date with no gap and no overlap. A row
-is never edited except to close it (set ``valid_to``). A row that was *wrong* is not deleted: it is
-superseded by a corrected copy (``superseded_by``), so the record of what we believed and when
-(``recorded_at``) survives. "Live" rows are the ones with ``superseded_by IS NULL``.
+is never edited in place. A row that was *wrong* is superseded by a corrected copy, and a row that
+*ends* is superseded by a closed copy (``closure`` = true, Phase 7) — so the record of what we
+believed and when (``recorded_at``) survives exactly, and a return can be rebuilt as it was known at
+any moment. "Live" rows are the ones with ``superseded_by IS NULL``.
 
 The current value is still cached on the owning row (e.g. ``student.status``) so screens read it
 without a join; only the history service writes either.
@@ -18,7 +19,7 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime, timezone
 
-from sqlalchemy import Date, DateTime, ForeignKey, String, Text
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, declared_attr, mapped_column
 
 # Why a row exists. "initial" = first status at enrolment; "change" = reality changed on a date;
@@ -36,6 +37,9 @@ class HistoryMixin:
     origin: Mapped[str] = mapped_column(String(20), default="change")
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    # Phase 7 — a copy written only to close the period it supersedes (same value and start). The
+    # change itself is the row that follows; reports of "what changed" skip closures.
+    closure: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
     @declared_attr
     def recorded_by_user_id(cls) -> Mapped[uuid.UUID | None]:

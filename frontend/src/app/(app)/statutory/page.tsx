@@ -38,6 +38,7 @@ import { useAuth } from '@/shared/auth/AuthContext'
 import { downloadExport } from '@/features/exports/api'
 import { AdvisoriesPanel } from '@/features/statutory/AdvisoriesPanel'
 import { RetrospectiveChangesPanel } from '@/features/statutory/RetrospectiveChangesPanel'
+import { ReturnVersionsPanel } from '@/features/statutory/ReturnVersionsPanel'
 import {
   useAddField, useCloneProfile, useCompileProfile, useCreateFromSpec, useCreateProfile,
   useGenerateProfile, useProfile, useProfiles, useSignOffProfile, useSpecs, useTransforms,
@@ -1954,6 +1955,8 @@ function SignOffCard({ profileId, canSignOff }: { profileId: string; canSignOff:
   const unsign = useUnsignProfile(profileId)
   const [notesOpen, setNotesOpen] = useState(false)
   const [notes, setNotes] = useState('')
+  // Effective dating, Phase 7 — the snapshot date the signed-off return is taken as at.
+  const [asAt, setAsAt] = useState('')
 
   if (compile.isLoading) return <Skeleton className="h-24 w-full" />
   if (compile.isError) return <ErrorState error={compile.error} />
@@ -1990,6 +1993,7 @@ function SignOffCard({ profileId, canSignOff }: { profileId: string; canSignOff:
 
       {/* Effective dating, Phase 5 — what moved inside this return's year since sign-off. */}
       {signed && <RetrospectiveChangesPanel profileId={profileId} />}
+      <ReturnVersionsPanel profileId={profileId} code={r.profile.code} />
 
       {r.suppressions && r.suppressions.length > 0 && (
         <SuppressionsPanel profileId={profileId} suppressions={r.suppressions} canManage={canSignOff} signed={signed} />
@@ -2036,7 +2040,7 @@ function SignOffCard({ profileId, canSignOff }: { profileId: string; canSignOff:
           )}
           {canSignOff && (
             <div className="flex items-center gap-2">
-              <Dialog open={notesOpen} onOpenChange={(o) => { setNotesOpen(o); if (!o) setNotes('') }}>
+              <Dialog open={notesOpen} onOpenChange={(o) => { setNotesOpen(o); if (!o) { setNotes(''); setAsAt('') } }}>
                 <DialogTrigger asChild>
                   <Button size="sm" disabled={!r.signOffReady}>
                     <ShieldCheck className="h-4 w-4 mr-1" /> Sign off
@@ -2051,6 +2055,16 @@ function SignOffCard({ profileId, canSignOff }: { profileId: string; canSignOff:
                       immutable until you unsign it.
                     </p>
                     <div className="space-y-1.5">
+                      <Label htmlFor="s-asat">Snapshot as at (optional)</Label>
+                      <Input id="s-asat" type="date" className="w-44" value={asAt}
+                        onChange={(e) => setAsAt(e.target.value)} />
+                      <p className="text-helper">
+                        Values are taken as they stood on this date (blank = the end of the reporting
+                        year). The return is frozen as signed off: anything entered afterwards, even
+                        back-dated, won&apos;t change it.
+                      </p>
+                    </div>
+                    <div className="space-y-1.5">
                       <Label htmlFor="s-notes">Notes (optional)</Label>
                       <Textarea id="s-notes" className="min-h-[64px]" value={notes}
                         onChange={(e) => setNotes(e.target.value)}
@@ -2062,9 +2076,9 @@ function SignOffCard({ profileId, canSignOff }: { profileId: string; canSignOff:
                       disabled={signOff.isPending}
                       onClick={async () => {
                         try {
-                          await signOff.mutateAsync(notes.trim() || undefined)
-                          toast({ title: 'Profile signed off' })
-                          setNotesOpen(false); setNotes('')
+                          await signOff.mutateAsync({ notes: notes.trim() || undefined, asAt: asAt || undefined })
+                          toast({ title: 'Profile signed off', description: 'The return is frozen as signed off.' })
+                          setNotesOpen(false); setNotes(''); setAsAt('')
                         } catch (e) { toast({ title: 'Could not sign off', description: (e as ApiError).message, variant: 'destructive' }) }
                       }}>
                       {signOff.isPending ? 'Signing…' : 'Sign off'}

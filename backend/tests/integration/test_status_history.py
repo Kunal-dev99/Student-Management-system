@@ -267,7 +267,9 @@ async def test_correction_moves_boundary_and_keeps_audit(ctx, clock):
         ("active", "2026-07-01", None),
     ]
     everything = await _history(c, h, sid, superseded=True)
-    assert len([r for r in everything if r["supersededBy"]]) == 2   # the wrong rows are kept
+    closures = {r["id"] for r in everything if r["closure"]}
+    corrected = [r for r in everything if r["supersededBy"] and r["supersededBy"] not in closures]
+    assert len(corrected) == 2   # the wrong rows are kept (periods that merely ended are closures)
 
     # A correction needs a reason.
     live = await _history(c, h, sid)
@@ -305,8 +307,10 @@ async def test_same_day_change_replaces_the_period(ctx, clock):
         live = await hist.live_rows(st.id)
         assert [(r.status, r.valid_from, r.valid_to) for r in live] == [
             (StudentStatus.active, START, d), (StudentStatus.on_leave, d, None)]
-        superseded = [r for r in await hist.all_rows(st.id) if r.superseded_by]
-        assert [r.status for r in superseded] == [StudentStatus.writing_up]
+        every = await hist.all_rows(st.id)
+        closures = {r.id for r in every if r.closure}
+        replaced = [r for r in every if r.superseded_by and r.superseded_by not in closures]
+        assert [r.status for r in replaced] == [StudentStatus.writing_up]
 
 
 async def test_backdated_change_stops_at_the_next_recorded_change(ctx, clock):

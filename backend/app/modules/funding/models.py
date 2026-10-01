@@ -54,6 +54,8 @@ class FundingArrangement(UUIDMixin, TenantMixin, TimestampMixin, Base):
     currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
     valid_from: Mapped[date] = mapped_column(Date)
     valid_to: Mapped[date | None] = mapped_column(Date, nullable=True)  # null = current
+    # Phase 7 — when valid_to was set, so a return can be rebuilt as it was known at a moment.
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[FundingStatus] = mapped_column(
         Enum(FundingStatus, name="funding_status"), default=FundingStatus.planned
     )

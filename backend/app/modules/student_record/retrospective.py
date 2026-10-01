@@ -174,7 +174,7 @@ async def changes_since_signoff(session: AsyncSession, profile_id: uuid.UUID) ->
     ):
         rows = (await session.execute(
             select(model).where(_overlap_clause(model, r), model.recorded_at > r.signed_off_at,
-                                model.origin != "backfill")
+                                model.origin != "backfill", model.closure.is_(False))
         )).scalars().all()
         for row in rows:
             add(row.student_id, fact, fmt(row), row, row.recorded_at, row.recorded_by_user_id)
@@ -184,7 +184,8 @@ async def changes_since_signoff(session: AsyncSession, profile_id: uuid.UUID) ->
         select(h, ModuleEnrolment.student_id, TaughtModule.code)
         .join(ModuleEnrolment, ModuleEnrolment.id == h.module_enrolment_id)
         .join(TaughtModule, TaughtModule.id == ModuleEnrolment.module_id)
-        .where(_overlap_clause(h, r), h.recorded_at > r.signed_off_at, h.origin != "backfill")
+        .where(_overlap_clause(h, r), h.recorded_at > r.signed_off_at, h.origin != "backfill",
+               h.closure.is_(False))
     )).all()
     for row, sid, code in rows:
         add(sid, "module", f"{code}: {_val(row.status)}", row, row.recorded_at, row.recorded_by_user_id)
@@ -194,7 +195,8 @@ async def changes_since_signoff(session: AsyncSession, profile_id: uuid.UUID) ->
         select(c, StudentCustomValue.student_id, StudentCustomField.label)
         .join(StudentCustomValue, StudentCustomValue.id == c.custom_value_id)
         .join(StudentCustomField, StudentCustomField.id == StudentCustomValue.custom_field_id)
-        .where(_overlap_clause(c, r), c.recorded_at > r.signed_off_at, c.origin != "backfill")
+        .where(_overlap_clause(c, r), c.recorded_at > r.signed_off_at, c.origin != "backfill",
+               c.closure.is_(False))
     )).all()
     for row, sid, label in rows:
         add(sid, "custom", f"{label}: {row.value}", row, row.recorded_at, row.recorded_by_user_id)
