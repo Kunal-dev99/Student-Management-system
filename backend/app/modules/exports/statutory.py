@@ -432,12 +432,19 @@ class StatutoryEngine:
             held = custom_by_student.get(student_id, {})
             return {k: held.get(k) for k in custom_keys}
 
-        # ICR G4 — current study intensity (FTE %) per student: the latest approved intensity
-        # change, else derived from study mode. Feeds the HESA STULOAD field.
+        # ICR G4 — legacy intensity for students who predate intensity history: the latest
+        # approved intensity change, else derived from study mode.
+        from datetime import timedelta
+
         from app.modules.student_record.constants import (
-            DEFAULT_PART_TIME_INTENSITY_PCT, FULL_TIME_INTENSITY_PCT,
+            DEFAULT_PART_TIME_INTENSITY_PCT, FULL_TIME_INTENSITY_PCT, STUDYING_STATUSES,
             LifecycleEventStatus, LifecycleEventType, StudyMode,
         )
+        from app.modules.student_record.fact_history import (
+            IntensityHistoryService, ProgrammeHistoryService, StatusHistoryService,
+            mode_for_intensity,
+        )
+        from app.modules.student_record.fact_history import today as history_today
         from app.modules.student_record.models import StudentLifecycleEvent
 
         latest_intensity: dict = {}
@@ -455,35 +462,112 @@ class StatutoryEngine:
         from app.modules.settings.service import setting_value
         inst_code = await setting_value(self.session, "statutory.husid_institution_code")
 
-        # Per-period slicing (mid-term programme transfer). Only kicks in when an academic year is
-        # supplied AND the student has an approved programme_change inside the window. Every other
-        # student still emits exactly one record — the historical behaviour is preserved.
+        # Effective dating (Phase 2): status, programme and intensity are read from their history,
+        # one query per fact for the whole cohort, for the reporting window [ws, we). Without an
+        # academic year the window is just today, so values are as they stand now.
         from app.modules.student_record.lifecycle import LifecycleService
 
         window = self._year_window(academic_year)
+        now = history_today()
+        ws, we = (window[0], window[1] + timedelta(days=1)) if window else (now, now + timedelta(days=1))
+        year_days = (we - ws).days
+        ids = [st.id for st, _ in rows]
+        hist_status = await StatusHistoryService(self.session).periods(ids, ws, we)
+        hist_prog = await ProgrammeHistoryService(self.session).periods(ids, ws, we)
+        hist_int = await IntensityHistoryService(self.session).periods(ids, ws, we)
         lifecycle = LifecycleService(self.session) if window else None
+        one_day = timedelta(days=1)
+
+        def _on(periods: list[dict], day: date):
+            return next((p["value"] for p in periods
+                         if p["from"] <= day and (p["to"] is None or p["to"] > day)), None)
+
+        def _load(int_periods: list[dict], st_periods: list[dict], lo: date, hi: date):
+            """HESA STULOAD: the FTE the student completed in ``[lo, hi)`` — intensity % times the
+            days they were actually studying (suspended / dormant / left days count zero), over the
+            days in the reporting year. Full time all year = 100; full time for half of it = 50."""
+            if not window or not int_periods or hi <= lo:
+                return None
+            total = 0.0
+            for ip in int_periods:
+                a, b = max(ip["from"], lo), min(ip["to"] or hi, hi)
+                if b <= a:
+                    continue
+                if not st_periods:
+                    total += ip["value"] * (b - a).days
+                    continue
+                for sp in st_periods:
+                    if sp["value"] not in STUDYING_STATUSES:
+                        continue
+                    c, d = max(a, sp["from"]), min(b, sp["to"] or b)
+                    if d > c:
+                        total += ip["value"] * (d - c).days
+            return round(total / year_days, 1)
 
         def _period_ref(base_ref: str, prog_code: str | None, period_start: date) -> str:
             # Row identity: a no-change record keeps the raw student_ref; a per-period record
             # extends it with the programme code + period start so downstream de-dup by ref works.
             return f"{base_ref}::{prog_code or 'NONE'}::{period_start.isoformat()}"
 
+        def _ev(v):
+            return v.value if hasattr(v, "value") else v
+
         records = []
         for student, person in rows:
             fa = funding.get(student.id)
             proj = projects.get(student.id)
             award = awards.get(proj.research_award_id) if proj and proj.research_award_id else None
+            sp = hist_status.get(student.id, [])
+            pp = hist_prog.get(student.id, [])
+            ip = hist_int.get(student.id, [])
 
-            slices: list[dict] = []
-            if window:
-                slices = await lifecycle.programme_periods_for(
+            # Programme periods inside the window: (start, display end, exclusive end, programme).
+            # History periods are half-open; HESA end dates are inclusive, so a period that ends
+            # because the next one starts shows the day before (no shared boundary date).
+            slices: list[tuple] = []
+            if window and pp:
+                for i, p in enumerate(pp):
+                    end_x = p["to"] or we
+                    shown = end_x - one_day
+                    if i == len(pp) - 1 and student.expected_end_date is not None:
+                        shown = min(shown, student.expected_end_date)
+                    slices.append((p["from"], shown, end_x, p["value"]))
+            elif window:
+                for sl in await lifecycle.programme_periods_for(
                     student, year_start=window[0], year_end=window[1],
-                )
+                ):
+                    slices.append((sl["period_start"], sl["period_end"], sl["period_end"], sl["programme_id"]))
             # Only fan out when the student was demonstrably on more than one programme inside
             # the window; a single period (or a student with no programme change at all) keeps the
             # historical single-record shape, so existing returns validate identically.
             fan_out = len(slices) > 1
 
+            def _student_fields(as_of: date, lo: date, hi: date) -> dict:
+                """Status / intensity / mode as they stood on ``as_of`` (history first, cache for
+                students who predate it), plus the completed load for ``[lo, hi)``."""
+                intensity = _on(ip, as_of) if ip else None
+                if intensity is None:
+                    intensity = ip[0]["value"] if ip else latest_intensity.get(
+                        student.id,
+                        FULL_TIME_INTENSITY_PCT if student.study_mode is StudyMode.full_time
+                        else DEFAULT_PART_TIME_INTENSITY_PCT,
+                    )
+                status = (_on(sp, as_of) if sp else None) or student.status
+                mode = mode_for_intensity(intensity) if ip else student.study_mode
+                return {"status": _ev(status), "mode": _ev(mode), "intensityPct": intensity,
+                        "fteLoad": _load(ip, sp, lo, hi)}
+
+            common_student = {
+                "originalExpectedEndDate": student.original_expected_end_date,
+                "entryRoute": routes.get(student.person_id),
+                # HUSID is per-student (not per period) — the person is one student across the
+                # return, no matter how many programmes they were on that year.
+                "husid": husid(
+                    inst_code,
+                    student.start_date.year if student.start_date else None,
+                    student.student_ref,
+                ),
+            }
             common_person = {
                 "givenName": person.given_name, "familyName": person.family_name,
                 "nationality": person.nationality, "email": person.email,
@@ -500,30 +584,19 @@ class StatutoryEngine:
             }
             common_award = {"ref": award.award_ref if award else None,
                             "title": award.title if award else None}
-            base_intensity = latest_intensity.get(
-                student.id,
-                FULL_TIME_INTENSITY_PCT if student.study_mode is StudyMode.full_time
-                else DEFAULT_PART_TIME_INTENSITY_PCT,
-            )
 
             if not fan_out:
-                # Backwards-compatible single record — no fan-out required.
-                prog = programmes.get(student.programme_id)
+                # One record for the student (no transfer inside the window).
+                prog_id = (slices[0][3] if slices else None) or student.programme_id
+                prog = programmes.get(prog_id)
+                as_of = min(we - one_day, now)
                 records.append({
                     "student": {
                         "ref": student.student_ref,
-                        "status": student.status.value if hasattr(student.status, "value") else student.status,
-                        "mode": student.study_mode.value if hasattr(student.study_mode, "value") else student.study_mode,
+                        **_student_fields(as_of, ws, we),
                         "startDate": student.start_date,
                         "expectedEndDate": student.expected_end_date,
-                        "originalExpectedEndDate": student.original_expected_end_date,
-                        "entryRoute": routes.get(student.person_id),
-                        "intensityPct": base_intensity,
-                        "husid": husid(
-                            inst_code,
-                            student.start_date.year if student.start_date else None,
-                            student.student_ref,
-                        ),
+                        **common_student,
                     },
                     "person": common_person,
                     "programme": {"name": prog.name if prog else None, "code": prog.code if prog else None},
@@ -537,27 +610,16 @@ class StatutoryEngine:
             # Per-period fan-out — one record per programme window inside the return year. COMDATE
             # and ENDDATE clip to the period so a student that ran on Programme A until 31 Jan and
             # Programme B from 1 Feb shows the right dates against each row.
-            for slot in slices:
-                prog = programmes.get(slot["programme_id"])
+            for start_d, shown_end, end_x, prog_id in slices:
+                prog = programmes.get(prog_id)
                 prog_code = prog.code if prog else None
-                sliced_ref = _period_ref(student.student_ref, prog_code, slot["period_start"])
                 records.append({
                     "student": {
-                        "ref": sliced_ref,
-                        "status": student.status.value if hasattr(student.status, "value") else student.status,
-                        "mode": student.study_mode.value if hasattr(student.study_mode, "value") else student.study_mode,
-                        "startDate": slot["period_start"],
-                        "expectedEndDate": slot["period_end"],
-                        "originalExpectedEndDate": student.original_expected_end_date,
-                        "entryRoute": routes.get(student.person_id),
-                        "intensityPct": base_intensity,
-                        # HUSID is per-student (not per period) — the person is one student across
-                        # the return, no matter how many programmes they were on that year.
-                        "husid": husid(
-                            inst_code,
-                            student.start_date.year if student.start_date else None,
-                            student.student_ref,
-                        ),
+                        "ref": _period_ref(student.student_ref, prog_code, start_d),
+                        **_student_fields(min(shown_end, now), start_d, end_x),
+                        "startDate": start_d,
+                        "expectedEndDate": shown_end,
+                        **common_student,
                     },
                     "person": common_person,
                     "programme": {"name": prog.name if prog else None, "code": prog_code},

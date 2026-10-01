@@ -56,8 +56,11 @@ RECORD_SCHEMA: list[RecordGroup] = [
             RecordField("student.entryRoute", "Student · entry route (recruitment)", "code",
                         hint="opportunity | proposal, from the accepted application if any."),
             RecordField("student.intensityPct", "Student · study intensity (FTE %)", "number",
-                        hint="Time-weighted current intensity for the academic year — feeds HESA STULOAD.",
+                        hint="Intensity in force at the end of the period (today if no academic year).",
                         nullable=False),
+            RecordField("student.fteLoad", "Student · FTE completed in the year (STULOAD)", "number",
+                        hint="Intensity × days actually studying (suspended days count zero) ÷ days in the "
+                             "reporting year. Full time all year = 100. Needs an academic year."),
             RecordField("student.husid", "Student · HUSID (generated)", "string",
                         hint="13-digit HESA UID computed from the institution code + entry year + sequence + Luhn.",
                         nullable=False),

@@ -178,6 +178,38 @@ class StudentStatusHistory(UUIDMixin, TenantMixin, HistoryMixin, Base):
     )
 
 
+class StudentProgrammeHistory(UUIDMixin, TenantMixin, HistoryMixin, Base):
+    """The programme a student was on over time (effective dating, Phase 2; feeds HESA
+    StudentCourseSession). ``student.programme_id`` caches the programme covering today."""
+    __tablename__ = "student_programme_history"
+    __table_args__ = (Index("ix_student_programme_history_student_from", "student_id", "valid_from"),)
+
+    student_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("student.id", ondelete="CASCADE"), index=True
+    )
+    programme_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("programme.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+    source_event_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("student_lifecycle_event.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+
+
+class StudentIntensityHistory(UUIDMixin, TenantMixin, HistoryMixin, Base):
+    """Study intensity (FTE %) over time (effective dating, Phase 2; feeds HESA STULOAD).
+    ``student.study_mode`` caches its summary for today (100% = full time)."""
+    __tablename__ = "student_intensity_history"
+    __table_args__ = (Index("ix_student_intensity_history_student_from", "student_id", "valid_from"),)
+
+    student_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("student.id", ondelete="CASCADE"), index=True
+    )
+    intensity_pct: Mapped[int] = mapped_column(Integer)
+    source_event_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("student_lifecycle_event.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+
+
 class ResearchProject(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """The student's research work — and the hinge of the funding lineage (Phase 6.3).
 

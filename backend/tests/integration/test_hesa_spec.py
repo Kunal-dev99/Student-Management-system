@@ -85,7 +85,7 @@ async def test_new_profile_from_spec_is_pre_mapped(ctx):
     fields = {f["targetField"]: f for f in detail["fields"]}
     assert len(fields) == 24
     # Known sources are filled in…
-    assert fields["STULOAD"]["sourceExpression"] == "student.intensityPct"
+    assert fields["STULOAD"]["sourceExpression"] == "student.fteLoad"
     assert fields["HUSID"]["sourceExpression"] == "student.husid"
     assert fields["SURNAME"]["sourceExpression"] == "person.familyName"
     # …and a field we can't source yet is left for Registry (required, empty source).
@@ -93,7 +93,7 @@ async def test_new_profile_from_spec_is_pre_mapped(ctx):
     assert fields["SEXID"]["required"] is True
     # ICR G5 — each mapping row surfaces where the value is captured on the record (keyed_at).
     assert fields["SURNAME"]["keyedAt"] == "Person › family name"
-    assert fields["STULOAD"]["keyedAt"] == "Lifecycle › study intensity (ICR G4)"
+    assert fields["STULOAD"]["keyedAt"] == "Lifecycle › study intensity history (FTE completed in the year)"
 
     # Every spec field is mapped, so the compile gate reports nothing missing.
     compiled = (await c.get(f"/api/v1/report-profiles/{detail['id']}/compile", headers=h)).json()

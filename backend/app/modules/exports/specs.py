@@ -82,7 +82,7 @@ HESA_STUDENT_2026: list[MandatoryField] = [
     {"field": "COURSETYP","description": "Course type",
      "allowed": ["A","B","C","D","E"], "source": "", "keyed_at": "Programme (not yet captured)"},
     {"field": "STULOAD",  "description": "Student instance load (FTE)",
-     "source": "student.intensityPct", "transform": "int", "keyed_at": "Lifecycle › study intensity (ICR G4)"},
+     "source": "student.fteLoad", "keyed_at": "Lifecycle › study intensity history (FTE completed in the year)"},
     {"field": "MODE",     "description": "Mode of study",
      "allowed": ["01","02","03","31"], "source": "student.mode", "transform": "hesa_mode",
      "keyed_at": "Student record › study mode"},

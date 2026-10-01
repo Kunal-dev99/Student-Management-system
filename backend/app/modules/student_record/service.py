@@ -10,7 +10,7 @@ from app.modules.person.service import PersonService
 from app.modules.student_record.constants import StudentStatus, StudyMode
 from app.modules.student_record.models import Programme, ResearchProject, Student
 from app.modules.student_record.repository import StudentRepository
-from app.modules.student_record.status_history import StatusHistoryService
+from app.modules.student_record.fact_history import initialise_all
 
 # Fields whose changes must be effective-dated, so a direct edit is refused.
 DATED_FIELDS = {"status", "study_mode", "programme_id"}
@@ -171,8 +171,8 @@ class StudentService:
                 start_date=student.start_date,
             )
         await self.repo.add(student)
-        # Every student's status history starts at enrolment (effective dating).
-        await StatusHistoryService(self.repo.session).initialise(student, valid_from=student.start_date)
+        # Every student's dated history (status, programme, intensity) starts at enrolment.
+        await initialise_all(self.repo.session, student, valid_from=student.start_date)
         return student
 
     async def enrol(
