@@ -104,7 +104,7 @@ async def test_overlapping_live_periods_are_rejected(engine):
             await tx.rollback()
 
 
-_PHASE2 = ("student_programme_history", "student_intensity_history")
+_PHASE2 = ("student_programme_history", "student_intensity_history", "module_enrolment_status_history")
 
 
 @pytest.mark.parametrize("table", _PHASE2)
@@ -142,3 +142,17 @@ async def test_phase2_history_matches_cached_values(engine):
             "<> s.study_mode::text"
         ))
         assert prog_mismatch == 0 and mode_mismatch == 0
+
+
+async def test_module_enrolments_are_dated_and_consistent(engine):
+    async with engine.connect() as conn:
+        if await conn.scalar(text("SELECT to_regclass('public.module_enrolment_status_history')")) is None:
+            pytest.skip("Database not migrated to ed3 yet")
+        undated = await conn.scalar(text("SELECT count(*) FROM module_enrolment WHERE start_date IS NULL"))
+        inverted = await conn.scalar(text(
+            "SELECT count(*) FROM module_enrolment WHERE end_date IS NOT NULL AND end_date < start_date"))
+        mismatched = await conn.scalar(text(
+            "SELECT count(*) FROM module_enrolment e JOIN module_enrolment_status_history h "
+            "ON h.module_enrolment_id = e.id AND h.superseded_by IS NULL AND h.valid_from <= current_date "
+            "AND (h.valid_to IS NULL OR h.valid_to > current_date) WHERE h.status <> e.status"))
+        assert (undated, inverted, mismatched) == (0, 0, 0)

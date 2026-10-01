@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, ConfigDict
 from pydantic.alias_generators import to_camel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,8 +27,11 @@ from app.modules.taught.schemas import (
     DissertationUpsert,
     ElectiveCandidateOut,
     EnrolmentCreate,
+    EnrolmentDatesRequest,
     EnrolmentOut,
     EnrolmentStatusRequest,
+    EnrolmentWithdrawRequest,
+    InterruptModulesRequest,
     LinkElectiveRequest,
     LinkProgrammeElectivesRequest,
     ModuleCreate,
@@ -37,6 +40,7 @@ from app.modules.taught.schemas import (
     ResultRecord,
     TaughtRecordOut,
 )
+from app.modules.taught.module_history import ModuleStatusHistoryService
 from app.modules.taught.service import TaughtService
 
 programme_router = APIRouter(prefix="/programmes", tags=["taught"])
@@ -216,9 +220,78 @@ async def set_status(
     enrolment_id: uuid.UUID,
     body: EnrolmentStatusRequest,
     session: AsyncSession = Depends(get_session),
-    _=Depends(require_permission("taught.change")),
+    principal: Principal = Depends(require_permission("taught.change")),
 ) -> EnrolmentOut:
-    return EnrolmentOut.model_validate(await _svc(session).set_enrolment_status(enrolment_id, body.status))
+    return EnrolmentOut.model_validate(await _svc(session).set_enrolment_status(
+        enrolment_id, body.status, effective_date=body.effective_date, reason=body.reason,
+        user_id=principal.user_id,
+    ))
+
+
+@enrolment_router.post("/{enrolment_id}/withdraw", response_model=EnrolmentOut,
+                       summary="Withdraw the student from a module from a date (ends the module then)")
+async def withdraw_from_module(
+    enrolment_id: uuid.UUID,
+    body: EnrolmentWithdrawRequest,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_permission("taught.change")),
+) -> EnrolmentOut:
+    return EnrolmentOut.model_validate(await _svc(session).withdraw(
+        enrolment_id, effective_date=body.effective_date, reason=body.reason, user_id=principal.user_id,
+    ))
+
+
+@enrolment_router.patch("/{enrolment_id}/dates", response_model=EnrolmentOut,
+                        summary="Set the student's own start / end dates on a module")
+async def set_module_dates(
+    enrolment_id: uuid.UUID,
+    body: EnrolmentDatesRequest,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_permission("taught.change")),
+) -> EnrolmentOut:
+    return EnrolmentOut.model_validate(await _svc(session).update_dates(
+        enrolment_id, start_date=body.start_date, end_date=body.end_date, reason=body.reason,
+        user_id=principal.user_id,
+    ))
+
+
+@enrolment_router.get("/{enrolment_id}/status-history", summary="A module enrolment's dated status history")
+async def module_status_history(
+    enrolment_id: uuid.UUID,
+    include_superseded: bool = Query(False, alias="includeSuperseded"),
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("taught.read")),
+) -> list[dict]:
+    hist = ModuleStatusHistoryService(session)
+    rows = await (hist.all_rows(enrolment_id) if include_superseded else hist.live_rows(enrolment_id))
+    return [hist.out(r) for r in rows]
+
+
+@student_router.get("/{student_id}/open-modules", summary="Modules the student is still studying")
+async def open_modules(
+    student_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_permission("taught.read")),
+) -> list[dict]:
+    allowed = await scoped_ids(principal, session)
+    if allowed is not None and student_id not in allowed:
+        return []
+    return await _svc(session).open_modules(student_id)
+
+
+@student_router.post("/{student_id}/module-enrolments/interrupt", response_model=list[EnrolmentOut],
+                     summary="Interrupt the chosen open modules (student suspended)")
+async def interrupt_modules(
+    student_id: uuid.UUID,
+    body: InterruptModulesRequest,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_permission("taught.change")),
+) -> list[EnrolmentOut]:
+    rows = await _svc(session).interrupt_modules(
+        student_id, effective_date=body.effective_date, enrolment_ids=body.enrolment_ids,
+        reason=body.reason, user_id=principal.user_id, source_event_id=body.source_event_id,
+    )
+    return [EnrolmentOut.model_validate(r) for r in rows]
 
 
 @enrolment_router.patch("/{enrolment_id}/condone", response_model=EnrolmentOut,

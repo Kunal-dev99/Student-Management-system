@@ -23,6 +23,7 @@ import type { Student } from '@/features/students/api'
 import { IntensityImpactView } from './IntensityImpactView'
 import { ProgrammeChangeImpactView } from './ProgrammeChangeImpactView'
 import { useProgrammesAdmin, type ProgrammeDetail } from '@/features/programmes/api'
+import { useInterruptModules, type ModuleProposal } from '@/features/taught/api'
 import {
   useApproveLifecycleEvent, useIntensityImpact, useLifecycleEvents, useRecordReturn,
   useRejectLifecycleEvent, useRequestLifecycleEvent, useStudentIntensity, useIntensityImpactPreview,
@@ -531,12 +532,73 @@ function IntensityStrip({ studentId }: { studentId: string }) {
   )
 }
 
+/** After a suspension is approved: offer to interrupt the student's open modules on its start date
+ * (HESA ends a module when the student suspends). Nothing changes until the registry confirms. */
+function ModuleProposalDialog({
+  studentId, proposal, onClose,
+}: { studentId: string; proposal: ModuleProposal | null; onClose: () => void }) {
+  const { toast } = useToast()
+  const interrupt = useInterruptModules(studentId)
+  const [unticked, setUnticked] = useState<Record<string, boolean>>({})
+  const [reason, setReason] = useState('')
+  if (!proposal) return null
+  const chosen = proposal.modules.filter((m) => !unticked[m.enrolmentId]).map((m) => m.enrolmentId)
+  const close = () => { setUnticked({}); setReason(''); onClose() }
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o) close() }}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>Interrupt open modules?</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            The student is suspended from {proposal.effectiveDate}. Interrupted modules end on that date
+            and are re-taken as new enrolments when they return.
+          </p>
+          <div className="space-y-1.5">
+            {proposal.modules.map((m) => (
+              <label key={m.enrolmentId} className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={!unticked[m.enrolmentId]}
+                  onChange={(ev) => setUnticked((s) => ({ ...s, [m.enrolmentId]: !ev.target.checked }))} />
+                <span className="font-medium">{m.moduleCode}</span>
+                <span className="text-muted-foreground">{m.moduleTitle} · {m.academicYear}</span>
+              </label>
+            ))}
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="mp-reason">Reason</Label>
+            <Input id="mp-reason" value={reason} placeholder={`Suspended from ${proposal.effectiveDate}`}
+              onChange={(ev) => setReason(ev.target.value)} />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={close}>Not now</Button>
+          <Button disabled={!chosen.length || interrupt.isPending} onClick={async () => {
+            try {
+              await interrupt.mutateAsync({
+                effectiveDate: proposal.effectiveDate, enrolmentIds: chosen,
+                reason: reason.trim() || `Suspended from ${proposal.effectiveDate}`,
+                sourceEventId: proposal.sourceEventId,
+              })
+              toast({ title: `${chosen.length} module${chosen.length === 1 ? '' : 's'} interrupted` })
+              close()
+            } catch (e) {
+              toast({ title: 'Could not interrupt modules', description: (e as ApiError).message, variant: 'destructive' })
+            }
+          }}>
+            {interrupt.isPending ? 'Saving…' : `Interrupt ${chosen.length} module${chosen.length === 1 ? '' : 's'}`}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 export function LifecyclePanel({ studentId, student }: { studentId: string; student?: Student }) {
   const { toast } = useToast()
   const { hasPermission } = useAuth()
   const events = useLifecycleEvents(studentId)
   const approve = useApproveLifecycleEvent(studentId)
   const reject = useRejectLifecycleEvent(studentId)
+  const [moduleProposal, setModuleProposal] = useState<ModuleProposal | null>(null)
   // For the history-row label on programme_change events — resolve ids to codes if the
   // programmes list is already cached (it is once the request dialog has been opened).
   const programmesQ = useProgrammesAdmin()
@@ -690,6 +752,7 @@ export function LifecyclePanel({ studentId, student }: { studentId: string; stud
                             try {
                               const res = await approve.mutateAsync({ eventId: e.id, note })
                               toast({ title: 'Approved', description: res.recalculation?.note })
+                              if (res.moduleProposal?.modules.length) setModuleProposal(res.moduleProposal)
                               return true
                             } catch (err2) { err(err2); return false }
                           }}
@@ -722,6 +785,8 @@ export function LifecyclePanel({ studentId, student }: { studentId: string; stud
           </p>
         )
       )}
+      <ModuleProposalDialog studentId={studentId} proposal={moduleProposal}
+        onClose={() => setModuleProposal(null)} />
     </PageSection>
   )
 }

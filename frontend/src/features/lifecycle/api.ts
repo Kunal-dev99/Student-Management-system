@@ -9,6 +9,7 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/shared/api/client'
+import type { ModuleProposal } from '@/features/taught/api'
 
 export type LifecycleEventType =
   | 'suspension' | 'extension' | 'mode_change' | 'intensity_change' | 'programme_change'
@@ -122,6 +123,8 @@ export interface Recalculation {
 export interface LifecycleDecisionResult {
   event: LifecycleEvent
   recalculation: Recalculation | null
+  /** Approving a suspension proposes the student's open modules to interrupt (registry confirms). */
+  moduleProposal?: ModuleProposal
 }
 
 export interface LifecycleEventRequest {

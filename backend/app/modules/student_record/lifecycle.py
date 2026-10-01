@@ -317,7 +317,22 @@ class LifecycleService:
         recalc = await self._recalculate(student)
         await self.session.commit()
         await self.session.refresh(event)
-        return {"event": self.out(event), "recalculation": recalc}
+        result = {"event": self.out(event), "recalculation": recalc}
+        if event.event_type is LifecycleEventType.suspension:
+            # Effective dating, Phase 3 — a suspension ends the student's open modules (HESA ends
+            # the module instance when the student suspends). Propose them; the registry confirms
+            # which to interrupt (POST /students/{id}/module-enrolments/interrupt).
+            from app.modules.taught.repository import TaughtRepository
+            from app.modules.taught.service import TaughtService
+
+            open_modules = await TaughtService(TaughtRepository(self.session)).open_modules(student.id)
+            if open_modules:
+                result["moduleProposal"] = {
+                    "effectiveDate": event.start_date.isoformat(),
+                    "sourceEventId": str(event.id),
+                    "modules": open_modules,
+                }
+        return result
 
     async def reject_event(
         self, event_id: uuid.UUID, *, approver_user_id: uuid.UUID | None, note: str | None = None

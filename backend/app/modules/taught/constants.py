@@ -23,6 +23,9 @@ class ModuleEnrolmentStatus(str, enum.Enum):
     completed = "completed"
     withdrawn = "withdrawn"
     failed = "failed"
+    # Effective dating, Phase 3 — ended because the student suspended (interrupted) their studies.
+    # The student re-takes the module later as a new enrolment; this one keeps its history.
+    interrupted = "interrupted"
 
 
 class ModuleOutcome(str, enum.Enum):

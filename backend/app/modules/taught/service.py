@@ -34,6 +34,12 @@ from app.modules.taught.models import (
     TaughtAward,
     TaughtModule,
 )
+from app.modules.taught.module_history import (
+    ENDING_STATUSES,
+    ModuleStatusHistoryService,
+    assert_dates_allowed,
+    default_dates,
+)
 from app.modules.taught.repository import TaughtRepository
 from app.modules.taught.schemas import (
     AssessmentCreate,
@@ -250,11 +256,20 @@ class TaughtService:
             raise NotFoundError("Module not found")
         if await self.repo.existing_enrolment(student_id, data.module_id, data.academic_year):
             raise ConflictError("Student is already enrolled on this module for that academic year")
+        student = await self.session.get(Student, student_id)
+        start, end = await default_dates(self.session, student, module, data.academic_year)
+        if getattr(data, "start_date", None) or getattr(data, "end_date", None):
+            # Explicit dates (e.g. a late joiner) must sit within the student's programme period.
+            start = data.start_date or start
+            end = data.end_date or end
+            await assert_dates_allowed(self.session, student, module, start, end)
         e = ModuleEnrolment(
             student_id=student_id, module_id=data.module_id, academic_year=data.academic_year,
-            status=ModuleEnrolmentStatus.enrolled,
+            status=ModuleEnrolmentStatus.enrolled, start_date=start, end_date=end,
         )
         self.repo.add(e)
+        await self.session.flush()
+        await ModuleStatusHistoryService(self.session).initialise(e)
         await self.session.commit()
         e = await self.repo.get_enrolment(e.id)
         return await self._enrolment_out(e)
@@ -291,10 +306,14 @@ class TaughtService:
                 continue
             if await self.repo.existing_enrolment(student.id, m.id, year):
                 continue
-            self.repo.add(ModuleEnrolment(
+            start, end = await default_dates(self.session, student, m, year)
+            e = ModuleEnrolment(
                 student_id=student.id, module_id=m.id, academic_year=year,
-                status=ModuleEnrolmentStatus.enrolled,
-            ))
+                status=ModuleEnrolmentStatus.enrolled, start_date=start, end_date=end,
+            )
+            self.repo.add(e)
+            await self.session.flush()
+            await ModuleStatusHistoryService(self.session).initialise(e)
             created += 1
         if created and commit:
             await self.session.commit()
@@ -337,15 +356,104 @@ class TaughtService:
         }
 
     async def set_enrolment_status(
-        self, enrolment_id: uuid.UUID, status: ModuleEnrolmentStatus
+        self, enrolment_id: uuid.UUID, status: ModuleEnrolmentStatus, *,
+        effective_date: date | None = None, reason: str | None = None,
+        user_id: uuid.UUID | None = None, source_event_id: uuid.UUID | None = None,
+        commit: bool = True,
     ) -> dict:
+        """Change a module's status from a date (default today), recorded in its status history.
+        A future date takes effect on the day. Withdrawing or interrupting ends the module then."""
+        from app.modules.student_record.fact_history import today as history_today
+
         e = await self.repo.get_enrolment(enrolment_id)
         if e is None:
             raise NotFoundError("Enrolment not found")
-        e.status = status
+        d = effective_date or history_today()
+        await ModuleStatusHistoryService(self.session).change(
+            e, status, effective_from=d, reason=reason, user_id=user_id, source_event_id=source_event_id,
+        )
+        if status in ENDING_STATUSES:
+            e.end_date = d
+        if not commit:
+            return {}
         await self.session.commit()
         e = await self.repo.get_enrolment(enrolment_id)
         return await self._enrolment_out(e)
+
+    async def withdraw(
+        self, enrolment_id: uuid.UUID, *, effective_date: date, reason: str,
+        user_id: uuid.UUID | None = None,
+    ) -> dict:
+        if not (reason or "").strip():
+            raise WorkflowError("A withdrawal needs a reason")
+        return await self.set_enrolment_status(
+            enrolment_id, ModuleEnrolmentStatus.withdrawn, effective_date=effective_date,
+            reason=reason, user_id=user_id,
+        )
+
+    async def update_dates(
+        self, enrolment_id: uuid.UUID, *, start_date: date | None, end_date: date | None,
+        reason: str, user_id: uuid.UUID | None = None,
+    ) -> dict:
+        """Set the student's own dates on a module (e.g. a late joiner). Checked against the
+        student's programme period; moving the start moves the start of the status history too."""
+        if not (reason or "").strip():
+            raise WorkflowError("Changing module dates needs a reason")
+        e = await self.repo.get_enrolment(enrolment_id)
+        if e is None:
+            raise NotFoundError("Enrolment not found")
+        module = await self.repo.get_module(e.module_id)
+        student = await self.session.get(Student, e.student_id)
+        new_start = start_date or e.start_date
+        new_end = end_date if end_date is not None else e.end_date
+        await assert_dates_allowed(self.session, student, module, new_start, new_end)
+        hist = ModuleStatusHistoryService(self.session)
+        rows = await hist.live_rows(e.id)
+        if new_start is not None and new_start != e.start_date:
+            e.start_date = new_start
+            if not rows:
+                await hist.initialise(e)
+            elif rows[0].valid_from != new_start:
+                await hist.correct(rows[0].id, valid_from=new_start, reason=reason, user_id=user_id)
+        e.end_date = new_end
+        await self.session.commit()
+        e = await self.repo.get_enrolment(enrolment_id)
+        return await self._enrolment_out(e)
+
+    async def open_modules(self, student_id: uuid.UUID) -> list[dict]:
+        """Modules the student is still studying — what a suspension would interrupt."""
+        out = []
+        for e in await self.repo.enrolments_for_student(student_id):
+            if e.status is ModuleEnrolmentStatus.enrolled:
+                module = await self.repo.get_module(e.module_id)
+                out.append({"enrolmentId": str(e.id), "moduleCode": module.code if module else None,
+                            "moduleTitle": module.title if module else None,
+                            "academicYear": e.academic_year,
+                            "startDate": e.start_date.isoformat() if e.start_date else None})
+        return out
+
+    async def interrupt_modules(
+        self, student_id: uuid.UUID, *, effective_date: date, enrolment_ids: list[uuid.UUID],
+        reason: str, user_id: uuid.UUID | None = None, source_event_id: uuid.UUID | None = None,
+    ) -> list[dict]:
+        """End the chosen open modules on ``effective_date`` because the student suspended. The
+        registry confirms which ones; each keeps its history and is re-taken as a new enrolment."""
+        if not (reason or "").strip():
+            raise WorkflowError("Interrupting modules needs a reason")
+        wanted = set(enrolment_ids)
+        changed = []
+        for e in await self.repo.enrolments_for_student(student_id):
+            if e.id in wanted and e.status is ModuleEnrolmentStatus.enrolled:
+                await self.set_enrolment_status(
+                    e.id, ModuleEnrolmentStatus.interrupted, effective_date=effective_date,
+                    reason=reason, user_id=user_id, source_event_id=source_event_id, commit=False,
+                )
+                changed.append(e.id)
+        missing = wanted - set(changed)
+        if missing:
+            raise WorkflowError(f"{len(missing)} module enrolment(s) aren't open modules of this student")
+        await self.session.commit()
+        return [await self._enrolment_out(await self.repo.get_enrolment(i)) for i in changed]
 
     async def record_result(
         self, enrolment_id: uuid.UUID, data: ResultRecord, *, user_id=None
@@ -486,6 +594,7 @@ class TaughtService:
             "module_title": module.title if module else None,
             "credits": module.credits if module else None,
             "academic_year": e.academic_year, "status": e.status,
+            "start_date": e.start_date, "end_date": e.end_date,
             "module_mark": mark,
             "outcome": e.outcome, "credits_awarded": e.credits_awarded, "condoned": e.condoned,
             "results": [

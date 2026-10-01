@@ -22,6 +22,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -31,6 +32,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TenantMixin, TimestampMixin, UUIDMixin
+from app.db.history import HistoryMixin
 from app.modules.taught.constants import (
     AssessmentType,
     ClassificationBand,
@@ -93,6 +95,12 @@ class ModuleEnrolment(UUIDMixin, TenantMixin, TimestampMixin, Base):
         ForeignKey("taught_module.id", ondelete="CASCADE"), index=True
     )
     academic_year: Mapped[str] = mapped_column(String(20))  # e.g. "2026/27"
+    # Effective dating, Phase 3 — the student's own dates on this module (HESA ModuleInstance
+    # MODINSTSTARTDATE / MODINSTENDDATE; both inclusive). They can differ from the cohort's (a late
+    # joiner); a withdrawal or interruption ends the module on that date. ``status`` is the cached
+    # value of the module's dated status history (ModuleEnrolmentStatusHistory).
+    start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     status: Mapped[ModuleEnrolmentStatus] = mapped_column(
         Enum(ModuleEnrolmentStatus, name="module_enrolment_status"),
         default=ModuleEnrolmentStatus.enrolled,
@@ -110,6 +118,26 @@ class ModuleEnrolment(UUIDMixin, TenantMixin, TimestampMixin, Base):
 
     results: Mapped[list["AssessmentResult"]] = relationship(
         back_populates="enrolment", lazy="selectin", cascade="all, delete-orphan"
+    )
+
+
+class ModuleEnrolmentStatusHistory(UUIDMixin, TenantMixin, HistoryMixin, Base):
+    """A module enrolment's status over time (effective dating, Phase 3). Live rows are contiguous
+    and never overlap; ``module_enrolment.status`` caches the value covering today."""
+    __tablename__ = "module_enrolment_status_history"
+    __table_args__ = (
+        Index("ix_module_enrolment_status_history_enrolment_from", "module_enrolment_id", "valid_from"),
+    )
+
+    module_enrolment_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("module_enrolment.id", ondelete="CASCADE"), index=True
+    )
+    status: Mapped[ModuleEnrolmentStatus] = mapped_column(
+        Enum(ModuleEnrolmentStatus, name="module_enrolment_status")
+    )
+    # The lifecycle event behind the change (e.g. the suspension that interrupted the module).
+    source_event_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("student_lifecycle_event.id", ondelete="SET NULL"), nullable=True, index=True
     )
 
 

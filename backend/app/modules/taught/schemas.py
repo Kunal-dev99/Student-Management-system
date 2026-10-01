@@ -107,10 +107,35 @@ class LinkProgrammeElectivesRequest(_Camel):
 class EnrolmentCreate(_Camel):
     module_id: uuid.UUID
     academic_year: str
+    # Optional: the student's own dates on the module (e.g. a late joiner). Defaults to the later of
+    # their start and 1 Aug, to 31 Jul of the academic year.
+    start_date: date | None = None
+    end_date: date | None = None
 
 
 class EnrolmentStatusRequest(_Camel):
     status: ModuleEnrolmentStatus
+    effective_date: date | None = None   # default today; a future date takes effect on the day
+    reason: str | None = None
+
+
+class EnrolmentWithdrawRequest(_Camel):
+    effective_date: date
+    reason: str
+
+
+class EnrolmentDatesRequest(_Camel):
+    start_date: date | None = None
+    end_date: date | None = None
+    reason: str
+
+
+class InterruptModulesRequest(_Camel):
+    """End the chosen open modules because the student suspended (registry-confirmed)."""
+    effective_date: date
+    enrolment_ids: list[uuid.UUID]
+    reason: str
+    source_event_id: uuid.UUID | None = None
 
 
 class ResultRecord(_Camel):
@@ -142,6 +167,8 @@ class EnrolmentOut(_Camel):
     credits: int | None = None
     academic_year: str
     status: ModuleEnrolmentStatus
+    start_date: date | None = None
+    end_date: date | None = None
     module_mark: Decimal | None = None  # credit-weighted assessment mark for this module
     outcome: ModuleOutcome = ModuleOutcome.pending
     credits_awarded: int | None = None
