@@ -27,7 +27,7 @@ SAMPLE_RECORD = {
     "student": {
         "ref": "S001", "status": "active", "mode": "full_time",
         "startDate": None, "expectedEndDate": None, "originalExpectedEndDate": None,
-        "entryRoute": None, "intensityPct": 100, "fteLoad": None, "husid": "0000000000009",
+        "entryRoute": None, "intensityPct": 100, "fteLoad": None, "feeStatus": None, "studyLocation": None, "husid": "0000000000009",
     },
     "person": {"givenName": "Ada", "familyName": "Okonkwo",
                "nationality": "GB", "email": "a@t.com", "dateOfBirth": None},

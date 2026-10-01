@@ -15,6 +15,7 @@ import { inclusiveEnd, useRetrospectiveChanges } from '@/features/history/api'
 
 const FACT_LABEL: Record<string, string> = {
   status: 'Status', programme: 'Programme', intensity: 'Intensity',
+  fee_status: 'Fee status', location: 'Location', custom: 'Custom attribute',
   module: 'Module', funding: 'Funding', supervision: 'Supervision',
 }
 

@@ -47,6 +47,9 @@ class StudentOut(_Camel):
     # vs. was enrolled directly (ICR G2). Drives the journey tracker's "Applicant" stage. Only
     # populated on the single-student detail endpoint.
     from_application: bool | None = None
+    # Effective dating, Phase 6 — today's value of the optional dated facts (None = not recorded).
+    fee_status: str | None = None
+    study_location: str | None = None
 
 
 LEAVE_CATEGORIES = {"medical", "personal", "academic", "other"}
@@ -90,6 +93,13 @@ class LifecycleDecision(_Camel):
 
 class ReturnRequest(_Camel):
     returned_on: date | None = None
+
+
+class FactChangeRequest(_Camel):
+    """Record a dated fact (fee status, study location) from a date (default today)."""
+    value: str
+    effective_date: date | None = None
+    reason: str | None = None
 
 
 class StatusCorrectionRequest(_Camel):

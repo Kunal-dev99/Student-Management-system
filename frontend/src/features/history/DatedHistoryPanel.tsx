@@ -23,18 +23,24 @@ const FACT_LABEL: Record<HistoryFact, string> = {
   status: 'Status',
   programme: 'Programme',
   intensity: 'Study intensity',
+  fee_status: 'Fee status',
+  location: 'Location',
   module: 'Module',
   funding: 'Funding',
   supervision: 'Supervision',
+  custom: 'Custom attribute',
 }
 
 const FACT_TONE: Record<HistoryFact, 'secondary' | 'info' | 'success' | 'warning' | 'outline'> = {
   status: 'info',
   programme: 'success',
   intensity: 'secondary',
+  fee_status: 'outline',
+  location: 'outline',
   module: 'outline',
   funding: 'warning',
   supervision: 'secondary',
+  custom: 'outline',
 }
 
 const ORIGIN_LABEL: Record<string, string> = {
@@ -67,7 +73,7 @@ function AsOfView({ studentId }: { studentId: string }) {
         {date && <Button size="sm" variant="ghost" onClick={() => setDate('')}>Clear</Button>}
       </div>
       {!date ? (
-        <p className="text-helper">Pick a date to see the student&apos;s status, programme, intensity, modules, funding and supervisors on that day.</p>
+        <p className="text-helper">Pick a date to see the student&apos;s status, programme, intensity, fee status, location, modules, funding and supervisors on that day.</p>
       ) : asOf.isLoading ? <Skeleton className="h-16 w-full" /> : a ? (
         a.beforeStart && !a.status ? (
           <p className="text-helper">The student hadn&apos;t started yet on {a.asOf}.</p>
@@ -94,6 +100,20 @@ function AsOfView({ studentId }: { studentId: string }) {
                   : '—'}
               </p>
             </div>
+            <div>
+              <p className="text-label">Fee status</p>
+              <p className="text-sm mt-0.5">{a.feeStatus ? pretty(a.feeStatus) : '—'}</p>
+            </div>
+            <div>
+              <p className="text-label">Location of study</p>
+              <p className="text-sm mt-0.5">{a.studyLocation ?? '—'}</p>
+            </div>
+            {a.custom.length > 0 && (
+              <div className="col-span-2">
+                <p className="text-label">Dated custom attributes</p>
+                <p className="text-sm mt-0.5">{a.custom.map((c) => `${c.label}: ${c.value}`).join('; ')}</p>
+              </div>
+            )}
             <div className="col-span-2">
               <p className="text-label">Modules</p>
               <p className="text-sm mt-0.5">

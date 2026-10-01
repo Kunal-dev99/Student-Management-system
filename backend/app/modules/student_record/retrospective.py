@@ -33,7 +33,12 @@ from app.modules.person.models import Person
 from app.modules.student_record.models import (
     Programme,
     Student,
+    StudentCustomField,
+    StudentCustomValue,
+    StudentCustomValueHistory,
+    StudentFeeStatusHistory,
     StudentIntensityHistory,
+    StudentLocationHistory,
     StudentProgrammeHistory,
     StudentStatusHistory,
 )
@@ -164,6 +169,8 @@ async def changes_since_signoff(session: AsyncSession, profile_id: uuid.UUID) ->
         (StudentStatusHistory, "status", lambda row: _val(row.status)),
         (StudentProgrammeHistory, "programme", lambda row: programme_names.get(row.programme_id)),
         (StudentIntensityHistory, "intensity", lambda row: f"{row.intensity_pct}%"),
+        (StudentFeeStatusHistory, "fee_status", lambda row: row.fee_status),
+        (StudentLocationHistory, "location", lambda row: row.study_location),
     ):
         rows = (await session.execute(
             select(model).where(_overlap_clause(model, r), model.recorded_at > r.signed_off_at,
@@ -181,6 +188,16 @@ async def changes_since_signoff(session: AsyncSession, profile_id: uuid.UUID) ->
     )).all()
     for row, sid, code in rows:
         add(sid, "module", f"{code}: {_val(row.status)}", row, row.recorded_at, row.recorded_by_user_id)
+
+    c = StudentCustomValueHistory
+    rows = (await session.execute(
+        select(c, StudentCustomValue.student_id, StudentCustomField.label)
+        .join(StudentCustomValue, StudentCustomValue.id == c.custom_value_id)
+        .join(StudentCustomField, StudentCustomField.id == StudentCustomValue.custom_field_id)
+        .where(_overlap_clause(c, r), c.recorded_at > r.signed_off_at, c.origin != "backfill")
+    )).all()
+    for row, sid, label in rows:
+        add(sid, "custom", f"{label}: {row.value}", row, row.recorded_at, row.recorded_by_user_id)
 
     rows = (await session.execute(
         select(FundingArrangement).where(_overlap_clause(FundingArrangement, r),

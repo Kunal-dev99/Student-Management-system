@@ -4,16 +4,21 @@ Captures an attribute a statutory return needs but the core model doesn't hold. 
 created once (with mandatory commentary), then a value is entered per student. Statutory mappings
 read these through the ``custom.<key>`` source path (wired in ``exports.statutory.build_records``
 and the record-schema catalog).
+
+Effective dating, Phase 6: an attribute can opt in to dated history (``track_history``). Its values
+are then recorded with the date they took effect, the return reads the value as at the period it
+reports, and switching history on is one-way so the audit trail can't be dropped.
 """
 from __future__ import annotations
 
 import re
 import uuid
+from datetime import date
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import ConflictError, NotFoundError, ValidationAppError
+from app.core.errors import ConflictError, NotFoundError, ValidationAppError, WorkflowError
 from app.modules.person.models import Person
 from app.modules.student_record.models import (
     Student,
@@ -50,6 +55,7 @@ class CustomFieldService:
 
     async def create_field(
         self, *, label: str, data_type: str, reason: str, user_id: uuid.UUID | None,
+        track_history: bool = False,
     ) -> StudentCustomField:
         label = (label or "").strip()
         reason = (reason or "").strip()
@@ -68,9 +74,33 @@ class CustomFieldService:
             raise ConflictError(f"A custom attribute with key '{key}' already exists.")
         field = StudentCustomField(
             key=key, label=label, data_type=data_type, reason=reason,
-            created_by_user_id=user_id,
+            created_by_user_id=user_id, track_history=bool(track_history),
         )
         self.session.add(field)
+        await self.session.commit()
+        await self.session.refresh(field)
+        return field
+
+    async def enable_history(self, field_id: uuid.UUID, *, user_id: uuid.UUID | None) -> StudentCustomField:
+        """Start keeping dated history. Values already entered open their history from the
+        student's start date, marked as rebuilt (origin ``backfill``). One-way: switching it off
+        would drop the dates a return may already have used."""
+        from app.modules.student_record.fact_history import CustomValueHistoryService
+
+        field = await self.get_field(field_id)
+        if field.track_history:
+            return field
+        field.track_history = True
+        hist = CustomValueHistoryService(self.session)
+        rows = (await self.session.execute(
+            select(StudentCustomValue, Student.start_date)
+            .join(Student, Student.id == StudentCustomValue.student_id)
+            .where(StudentCustomValue.custom_field_id == field_id)
+        )).all()
+        for cv, start in rows:
+            if cv.value not in (None, ""):
+                await hist.initialise(cv, valid_from=start or cv.created_at.date(), origin="backfill",
+                                      reason="Value entered before history was kept", user_id=user_id)
         await self.session.commit()
         await self.session.refresh(field)
         return field
@@ -106,10 +136,16 @@ class CustomFieldService:
 
     async def set_values(
         self, field_id: uuid.UUID, *, entries: list[dict], user_id: uuid.UUID | None,
+        effective_date: date | None = None,
     ) -> int:
         """Upsert values for the given students. A blank/None value clears the row. Returns the
-        number of students with a non-empty value after the write."""
-        await self.get_field(field_id)
+        number of students with a non-empty value after the write.
+
+        For an attribute that keeps history, each value is recorded from ``effective_date``
+        (default today) instead of overwriting, and clearing is refused."""
+        field = await self.get_field(field_id)
+        if field.track_history:
+            return await self._set_dated_values(field, entries, user_id, effective_date)
         current = {
             v.student_id: v
             for v in (await self.session.execute(
@@ -142,3 +178,53 @@ class CustomFieldService:
             filled.add(sid)
         await self.session.commit()
         return len(filled)
+
+    async def _set_dated_values(
+        self, field: StudentCustomField, entries: list[dict], user_id: uuid.UUID | None,
+        effective_date: date | None,
+    ) -> int:
+        from app.modules.student_record.fact_history import CustomValueHistoryService, today
+
+        on = effective_date or today()
+        hist = CustomValueHistoryService(self.session)
+        current = {
+            v.student_id: v
+            for v in (await self.session.execute(
+                select(StudentCustomValue).where(StudentCustomValue.custom_field_id == field.id)
+            )).scalars().all()
+        }
+        for e in entries or []:
+            try:
+                sid = uuid.UUID(str(e.get("studentId")))
+            except (ValueError, TypeError):
+                continue
+            val = e.get("value")
+            val = val.strip() if isinstance(val, str) else val
+            cv = current.get(sid)
+            if val in (None, ""):
+                if cv is not None and cv.value not in (None, ""):
+                    raise WorkflowError(
+                        f"'{field.label}' keeps dated history, so a value can't be cleared — "
+                        "record the new value from the date it changed"
+                    )
+                continue
+            student = await self.session.get(Student, sid)
+            if student is None:
+                continue
+            if student.start_date is not None and on < student.start_date:
+                raise WorkflowError(
+                    f"{student.student_ref}: the value can't take effect before the student's start "
+                    f"date ({student.start_date})"
+                )
+            if cv is None:
+                cv = StudentCustomValue(custom_field_id=field.id, student_id=sid, value=None,
+                                        updated_by_user_id=user_id)
+                if getattr(student, "tenant_id", None) is not None:
+                    cv.tenant_id = student.tenant_id
+                self.session.add(cv)
+                await self.session.flush()
+                current[sid] = cv
+            await hist.change(cv, str(val), effective_from=on, user_id=user_id)
+            cv.updated_by_user_id = user_id
+        await self.session.commit()
+        return sum(1 for v in current.values() if v.value not in (None, ""))

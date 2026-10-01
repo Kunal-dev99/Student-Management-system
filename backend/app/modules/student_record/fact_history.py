@@ -35,7 +35,11 @@ from app.modules.student_record.constants import (
 )
 from app.modules.student_record.models import (
     Student,
+    StudentCustomValue,
+    StudentCustomValueHistory,
+    StudentFeeStatusHistory,
     StudentIntensityHistory,
+    StudentLocationHistory,
     StudentProgrammeHistory,
     StudentStatusHistory,
 )
@@ -420,7 +424,120 @@ class IntensityHistoryService(FactHistoryService):
         student.study_mode = mode_for_intensity(value)
 
 
-FACT_SERVICES = (StatusHistoryService, ProgrammeHistoryService, IntensityHistoryService)
+class OptionalFactHistoryService(FactHistoryService):
+    """A fact that may not be recorded yet (Phase 6). No history until the first value is given;
+    the first value opens it from its own date (a gap before it just means "not recorded")."""
+
+    async def initialise(self, student, *, valid_from=None, value=None, origin="initial",
+                         reason=None, user_id=None):
+        if value is None and self.initial_value(student) is None:
+            return None
+        return await super().initialise(student, valid_from=valid_from, value=value, origin=origin,
+                                        reason=reason, user_id=user_id)
+
+    async def change(self, student, value, *, effective_from, effective_to=None, reason=None,
+                     user_id=None, source_event_id=None):
+        if not await self.live_rows(student.id) and self.initial_value(student) is None:
+            start = self._start(student)
+            if start is not None and effective_from < start:
+                raise WorkflowError(
+                    f"A {self.label} change cannot take effect before the {self.subject_label}'s "
+                    f"start date ({start})"
+                )
+            if effective_to is not None and effective_to <= effective_from:
+                raise WorkflowError(f"The end of a {self.label} period must be after its start")
+            row = self._new_row(student, value, effective_from, effective_to, origin="change",
+                                reason=reason, user_id=user_id, source_event_id=source_event_id)
+            await self.session.flush()
+            return await self._finish(student, row)
+        return await super().change(student, value, effective_from=effective_from,
+                                    effective_to=effective_to, reason=reason, user_id=user_id,
+                                    source_event_id=source_event_id)
+
+
+# Fee status values (as captured at admission, ``application.fee_status``).
+FEE_STATUSES = ("home", "overseas", "channel_islands", "unknown")
+
+
+class FeeStatusHistoryService(OptionalFactHistoryService):
+    """Fee status over time; ``student.fee_status`` caches today's (Phase 6)."""
+    model = StudentFeeStatusHistory
+    value_attr = "fee_status"
+    label = "fee status"
+    out_key = "feeStatus"
+
+    def initial_value(self, student: Student):
+        return student.fee_status
+
+    def cache_matches(self, student: Student, value) -> bool:
+        return student.fee_status == value
+
+    def apply_cache(self, student: Student, value) -> None:
+        student.fee_status = value
+
+    @staticmethod
+    def validate(value) -> str:
+        v = str(value or "").strip().lower()
+        if v not in FEE_STATUSES:
+            raise WorkflowError(f"Fee status must be one of: {', '.join(FEE_STATUSES)}")
+        return v
+
+
+class LocationHistoryService(OptionalFactHistoryService):
+    """Location of study over time; ``student.study_location`` caches today's (Phase 6)."""
+    model = StudentLocationHistory
+    value_attr = "study_location"
+    label = "study location"
+    out_key = "studyLocation"
+
+    def initial_value(self, student: Student):
+        return student.study_location
+
+    def cache_matches(self, student: Student, value) -> bool:
+        return student.study_location == value
+
+    def apply_cache(self, student: Student, value) -> None:
+        student.study_location = value
+
+    @staticmethod
+    def validate(value) -> str:
+        v = str(value or "").strip()
+        if not v or len(v) > 60:
+            raise WorkflowError("A study location is required (up to 60 characters)")
+        return v
+
+
+class CustomValueHistoryService(OptionalFactHistoryService):
+    """Dated values of a custom attribute with history switched on (Phase 6). The subject is the
+    student's value row; ``student_custom_value.value`` caches today's."""
+    model = StudentCustomValueHistory
+    value_attr = "value"
+    label = "attribute value"
+    out_key = "value"
+    subject_model = StudentCustomValue
+    subject_attr = "custom_value_id"
+    subject_out_key = "customValueId"
+    subject_label = "attribute value"
+
+    @staticmethod
+    def _start(subject) -> date | None:
+        return None   # bounded by the student's start date at the API, not here
+
+    def initial_value(self, cv: StudentCustomValue):
+        return cv.value
+
+    def cache_matches(self, cv: StudentCustomValue, value) -> bool:
+        return cv.value == value
+
+    def apply_cache(self, cv: StudentCustomValue, value) -> None:
+        cv.value = value
+
+
+# Facts every student carries; the optional ones stay empty until a value is recorded.
+FACT_SERVICES = (StatusHistoryService, ProgrammeHistoryService, IntensityHistoryService,
+                 FeeStatusHistoryService, LocationHistoryService)
+# Dated student facts set directly (not through a lifecycle event), by API name.
+DIRECT_FACTS = {"fee-status": FeeStatusHistoryService, "study-location": LocationHistoryService}
 
 
 async def initialise_all(session: AsyncSession, student: Student, *, valid_from: date | None = None,
@@ -431,4 +548,4 @@ async def initialise_all(session: AsyncSession, student: Student, *, valid_from:
 
 
 async def refresh_all_due(session: AsyncSession) -> int:
-    return sum([await svc(session).refresh_due() for svc in FACT_SERVICES])
+    return sum([await svc(session).refresh_due() for svc in (*FACT_SERVICES, CustomValueHistoryService)])

@@ -20,6 +20,8 @@ export interface CustomField {
   dataType: CustomFieldType
   reason: string
   sourcePath: string   // "custom.<key>" — paste straight into a mapping
+  /** Effective dating, Phase 6 — values are recorded with the date they took effect. One-way. */
+  trackHistory: boolean
   createdAt: string | null
 }
 
@@ -39,13 +41,22 @@ export const useCustomFields = () =>
 export const useCreateCustomField = () => {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (body: { label: string; dataType: CustomFieldType; reason: string }) =>
+    mutationFn: (body: { label: string; dataType: CustomFieldType; reason: string; trackHistory?: boolean }) =>
       api.post<CustomField>('/students/custom-fields', body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['custom-fields'] })
       // The mapping picker lists custom paths from the record-schema catalog — refresh it.
       qc.invalidateQueries({ queryKey: ['report-profile-record-schema'] })
     },
+  })
+}
+
+/** Start keeping dated history for an attribute (one-way). */
+export const useEnableCustomFieldHistory = () => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => api.post<CustomField>(`/students/custom-fields/${id}/track-history`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['custom-fields'] }),
   })
 }
 
@@ -72,8 +83,13 @@ export const useCustomFieldValues = (fieldId: string | null) =>
 export const useSetCustomFieldValues = (fieldId: string | null) => {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (values: { studentId: string; value: string | null }[]) =>
-      api.put<{ filled: number }>(`/students/custom-fields/${fieldId}/values`, { values }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['custom-fields', fieldId, 'values'] }),
+    /** ``effectiveDate`` applies to attributes that keep history (default today). */
+    mutationFn: ({ values, effectiveDate }: { values: { studentId: string; value: string | null }[]; effectiveDate?: string }) =>
+      api.put<{ filled: number }>(`/students/custom-fields/${fieldId}/values`,
+        effectiveDate ? { values, effectiveDate } : { values }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['custom-fields', fieldId, 'values'] })
+      qc.invalidateQueries({ queryKey: ['student'] })
+    },
   })
 }
