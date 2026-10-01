@@ -26,6 +26,8 @@ from app.modules.funding.models import (
 )
 from app.modules.funding.repository import FundingRepository
 from app.modules.funding.schemas import ArrangementCreate, ChangeRequest
+from app.modules.student_record import fact_history
+from app.modules.student_record.periods import assert_not_before_start, effective_date
 from app.modules.student_record.repository import StudentRepository
 
 
@@ -95,7 +97,7 @@ class FundingService:
             funding_source_id=data.funding_source_id,
             stipend_amount=data.stipend_amount,
             currency=data.currency,
-            valid_from=data.valid_from or date.today(),
+            valid_from=data.valid_from or fact_history.today(),
             valid_to=None,
             status=FundingStatus.active,
             cost_centre=data.cost_centre,
@@ -119,8 +121,11 @@ class FundingService:
         current = await self._get(arrangement_id)
         if current.valid_to is not None:
             raise WorkflowError("This arrangement has already ended; nothing to change")
-        # Close current, open new — one transaction (arch §8.9).
-        current.valid_to = date.today()
+        d = effective_date(getattr(data, "effective_date", None), what="A funding change")
+        assert_not_before_start(current.valid_from, d, what="This funding change")
+        # Close current, open new on the same day — one transaction (arch §8.9). Half-open
+        # periods: the old one's valid_to is the first day the new one is in force.
+        current.valid_to = d
         current.status = FundingStatus.changed
         new = FundingArrangement(
             student_id=current.student_id,
@@ -137,6 +142,7 @@ class FundingService:
             contribution_pct=data.contribution_pct,
             research_award_id=data.research_award_id,
         )
+        new.valid_from = d
         self.repo.add(new)
         await self.session.flush()  # populate new.id before referencing it in the event
 
@@ -155,18 +161,21 @@ class FundingService:
         """End every active arrangement for a student. Flushes only — caller owns the
         transaction (used by graduation, arch §8.11). Returns how many were ended."""
         count = 0
+        today = fact_history.today()
         for a in await self.repo.arrangements_for_student(student_id):
             if a.valid_to is None:
-                a.valid_to = date.today()
+                a.valid_to = max(today, a.valid_from)
                 a.status = FundingStatus.ended
                 count += 1
         await self.session.flush()
         return count
 
-    async def end(self, arrangement_id: uuid.UUID) -> FundingArrangement:
+    async def end(self, arrangement_id: uuid.UUID, *, on: date | None = None) -> FundingArrangement:
         a = await self._get(arrangement_id)
         if a.valid_to is None:
-            a.valid_to = date.today()
+            d = effective_date(on, what="Ending funding")
+            assert_not_before_start(a.valid_from, d, what="Ending this funding")
+            a.valid_to = d
             a.status = FundingStatus.ended
             # Cancel any instalments not yet paid — funding has stopped (arch §8.9).
             for p in await self.repo.payments_for_arrangement(a.id):

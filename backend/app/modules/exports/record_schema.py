@@ -99,7 +99,8 @@ RECORD_SCHEMA: list[RecordGroup] = [
     RecordGroup(
         root="funding",
         label="Funding arrangement",
-        description="The student's active funding arrangement, if any.",
+        description="The funding arrangement in force at the end of the record's period (the larger "
+                    "contribution if several overlap), else the latest one during the period.",
         fields=[
             RecordField("funding.type", "Funding · type", "code",
                         hint="research_council | self | scholarship | etc."),
@@ -107,6 +108,16 @@ RECORD_SCHEMA: list[RecordGroup] = [
             RecordField("funding.amount", "Funding · stipend amount", "number"),
             RecordField("funding.currency", "Funding · currency (GBP…)", "string"),
             RecordField("funding.costCentre", "Funding · cost centre", "string"),
+        ],
+    ),
+    RecordGroup(
+        root="supervision",
+        label="Supervision",
+        description="Supervision in force at the end of the record's period.",
+        fields=[
+            RecordField("supervision.primaryName", "Supervision · primary supervisor", "string"),
+            RecordField("supervision.supervisorCount", "Supervision · number of supervisors", "number",
+                        nullable=False),
         ],
     ),
     RecordGroup(
@@ -118,6 +129,23 @@ RECORD_SCHEMA: list[RecordGroup] = [
             RecordField("award.title", "Award · title", "string"),
         ],
     ),
+]
+
+
+# Child lists on each record (effective dating, Phase 4) — the dated detail behind the flat fields,
+# for entity exports (HESA Data Futures: SessionStatus, ModuleInstance, …). Not offered as flat
+# mapping columns: a list doesn't fit one CSV cell. Dates are inclusive; validTo None = still in
+# force at the end of the record's period.
+CHILD_LISTS: list[dict] = [
+    {"name": "statusHistory", "label": "Status changes in the period", "hesa": "SessionStatus",
+     "fields": ["status", "validFrom", "validTo"]},
+    {"name": "modules", "label": "Modules in the period", "hesa": "ModuleInstance",
+     "fields": ["code", "title", "credits", "academicYear", "startDate", "endDate", "status",
+                "outcome", "mark"]},
+    {"name": "fundingPeriods", "label": "Funding arrangements in the period", "hesa": None,
+     "fields": ["type", "source", "contributionPct", "amount", "validFrom", "validTo"]},
+    {"name": "supervisors", "label": "Supervisors in the period", "hesa": None,
+     "fields": ["name", "role", "weightingPct", "validFrom", "validTo"]},
 ]
 
 
@@ -139,6 +167,7 @@ def as_dict() -> dict:
         ],
         # Flat list of every path for quick membership checks on the client.
         "paths": [f.path for g in RECORD_SCHEMA for f in g.fields],
+        "children": CHILD_LISTS,
     }
 
 

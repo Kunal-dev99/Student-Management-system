@@ -7,6 +7,7 @@ from datetime import date, datetime, timedelta, timezone
 from app.core.errors import ConflictError, NotFoundError, WorkflowError
 from app.modules.person.repository import PersonRepository
 from app.modules.person.service import PersonService
+from app.modules.student_record.periods import assert_not_before_start, effective_date, overlaps
 from app.modules.student_record.repository import StudentRepository
 from app.modules.supervision.constants import (
     MeetingFormat,
@@ -47,6 +48,7 @@ class SupervisionService:
     async def assign(
         self, student_id: uuid.UUID, supervisor_person_id: uuid.UUID, role: SupervisorRole,
         *, weighting_pct: int | None = None, max_supervisees: int | None = None,
+        valid_from: date | None = None, commit: bool = True,
     ) -> SupervisorRelationship:
         # Phase 8 — the capacity limit is an institution setting; the shipped constant is only
         # the default. Passing max_supervisees explicitly (tests) still wins.
@@ -60,10 +62,19 @@ class SupervisionService:
             raise NotFoundError("Student not found")
         await self._person_service().get_person(supervisor_person_id)
 
-        # No duplicate active relationship for the same supervisor on the same student.
+        start = effective_date(valid_from, what="A supervisor assignment")
+        # The same supervisor can't have two overlapping periods on one student (a current one,
+        # or — when back-dating — an earlier one that was still running on the new start date).
         for r in await self.repo.list_for_student(student_id):
-            if r.supervisor_person_id == supervisor_person_id and r.valid_to is None:
+            if r.supervisor_person_id != supervisor_person_id:
+                continue
+            if r.valid_to is None:
                 raise ConflictError("This supervisor is already active for the student")
+            if overlaps(r.valid_from, r.valid_to, start, None):
+                raise ConflictError(
+                    f"This supervisor already supervised the student until {r.valid_to}; "
+                    "the new period can't start before then"
+                )
 
         # Phase 4B.5 — capacity guard: a supervisor may not exceed their supervisee limit.
         current = await self.repo.count_active_for_supervisor(supervisor_person_id)
@@ -76,25 +87,62 @@ class SupervisionService:
 
         rel = SupervisorRelationship(
             student_id=student_id, supervisor_person_id=supervisor_person_id,
-            role=role, status=SupervisionStatus.active, valid_from=date.today(), valid_to=None,
+            role=role, status=SupervisionStatus.active, valid_from=start, valid_to=None,
             weighting_pct=weighting_pct,
         )
         self.repo.add(rel)
+        if not commit:
+            await self.session.flush()
+            return rel
         await self.session.commit()
         await self.session.refresh(rel)
         return rel
 
-    async def end(self, rel_id: uuid.UUID, reason: str | None = None) -> SupervisorRelationship:
+    async def end(
+        self, rel_id: uuid.UUID, reason: str | None = None, *, on: date | None = None,
+        commit: bool = True,
+    ) -> SupervisorRelationship:
         rel = await self.repo.get(rel_id)
         if rel is None:
             raise NotFoundError("Supervisor relationship not found")
         if rel.valid_to is None:
-            rel.valid_to = date.today()
+            d = effective_date(on, what="Ending supervision")
+            assert_not_before_start(rel.valid_from, d, what="Ending this supervision")
+            rel.valid_to = d
             rel.status = SupervisionStatus.ended
             rel.end_reason = reason
+            if not commit:
+                await self.session.flush()
+                return rel
             await self.session.commit()
             await self.session.refresh(rel)
         return rel
+
+    async def replace(
+        self, rel_id: uuid.UUID, new_supervisor_person_id: uuid.UUID, *, reason: str,
+        on: date | None = None, weighting_pct: int | None = None,
+    ) -> SupervisorRelationship:
+        """Change supervisor: end the current relationship and start the new one on the same day,
+        in the same role, in one transaction — so the supervision history has no gap or overlap."""
+        if not (reason or "").strip():
+            raise WorkflowError("Changing supervisor needs a reason")
+        old = await self.repo.get(rel_id)
+        if old is None:
+            raise NotFoundError("Supervisor relationship not found")
+        if old.valid_to is not None:
+            raise WorkflowError("This supervision has already ended; assign a new supervisor instead")
+        if old.supervisor_person_id == new_supervisor_person_id:
+            raise WorkflowError("That is already the student's supervisor")
+        d = effective_date(on, what="A supervisor change")
+        await self.end(rel_id, reason, on=d, commit=False)
+        new = await self.assign(
+            old.student_id, new_supervisor_person_id, old.role,
+            weighting_pct=weighting_pct if weighting_pct is not None else old.weighting_pct,
+            valid_from=d, commit=False,
+        )
+        await self.session.commit()
+        await self.session.refresh(new)
+        return new
 
     async def capacity_for(self, person_id: uuid.UUID, max_supervisees: int | None = None) -> dict:
         if max_supervisees is None:
