@@ -6,7 +6,8 @@
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/shared/api/client'
 
-export type HistoryFact = 'status' | 'programme' | 'intensity' | 'module' | 'funding' | 'supervision'
+export type HistoryFact =
+  | 'status' | 'programme' | 'intensity' | 'fee_status' | 'location' | 'module' | 'funding' | 'supervision' | 'custom'
 
 export interface SignedReturn {
   profileId: string
@@ -55,6 +56,10 @@ export interface StudentAsOf {
   programmeName: string | null
   intensityPct: number | null
   studyMode: string | null
+  feeStatus: string | null
+  studyLocation: string | null
+  /** Custom attributes that keep dated history, as on that date. */
+  custom: { key: string; label: string; value: string }[]
   modules: { moduleEnrolmentId: string; code: string; title: string; academicYear: string; status: string }[]
   funding: { id: string; type: string; source: string | null; contributionPct: number | null; validFrom: string; validTo: string | null }[]
   supervisors: { id: string; role: string; name: string; validFrom: string; validTo: string | null }[]

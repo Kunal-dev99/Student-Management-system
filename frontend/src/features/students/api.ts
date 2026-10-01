@@ -38,6 +38,9 @@ export interface Student {
   /** ICR G2 — true if reached via the recruitment funnel (has an application), false if enrolled
    * directly. Only present on the single-student detail endpoint; drives the Applicant stage. */
   fromApplication?: boolean | null
+  /** Effective dating, Phase 6 — today's value of the dated facts (null = not recorded). */
+  feeStatus?: string | null
+  studyLocation?: string | null
 }
 
 export type ProgrammeType = 'research' | 'taught'

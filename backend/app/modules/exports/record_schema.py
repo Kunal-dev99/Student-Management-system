@@ -61,6 +61,11 @@ RECORD_SCHEMA: list[RecordGroup] = [
             RecordField("student.fteLoad", "Student · FTE completed in the year (STULOAD)", "number",
                         hint="Intensity × days actually studying (suspended days count zero) ÷ days in the "
                              "reporting year. Full time all year = 100. Needs an academic year."),
+            RecordField("student.feeStatus", "Student · fee status (dated)", "code",
+                        hint="home / overseas / channel_islands / unknown, as at the end of the period. "
+                             "Map to the HESA code with a value transform."),
+            RecordField("student.studyLocation", "Student · location of study (dated)", "code",
+                        hint="The location code in force at the end of the period."),
             RecordField("student.husid", "Student · HUSID (generated)", "string",
                         hint="13-digit HESA UID computed from the institution code + entry year + sequence + Luhn.",
                         nullable=False),

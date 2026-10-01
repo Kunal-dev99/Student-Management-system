@@ -27,6 +27,7 @@ import { SupervisorRequestsCard } from '@/features/supervision/SupervisorRequest
 import { RelationshipGraph } from '@/features/research/RelationshipGraph'
 import { DocumentsPanel } from '@/components/documents/DocumentsPanel'
 import { DatedHistoryPanel } from '@/features/history/DatedHistoryPanel'
+import { DatedFactsSection } from '@/features/history/DatedFactsSection'
 import { useAudit } from '@/features/audit/api'
 import { useAuth } from '@/shared/auth/AuthContext'
 import { JourneyTracker } from '@/features/students/JourneyTracker'
@@ -282,6 +283,9 @@ export default function StudentDetailPage() {
               </div>
             )}
           </PageSection>
+          {P.datedHistory && (
+            <DatedFactsSection studentId={id} feeStatus={s?.feeStatus} studyLocation={s?.studyLocation} />
+          )}
           {P.person && (
             <PageSection icon={User} title="Person" accent="accent">
               {summary.isLoading ? <Skeleton className="h-8 w-48" /> : (

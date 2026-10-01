@@ -437,16 +437,43 @@ class StatutoryEngine:
         )
         custom_keys = [f.key for f in custom_fields]
         custom_by_student: dict = {}
+        # Effective dating, Phase 6 — attributes that keep history are read as at the record's
+        # date; the rest are a single current value.
+        tracked_ids = {f.id for f in custom_fields if f.track_history}
+        tracked_values: dict = {}   # custom_value_id -> (student_id, key)
         if custom_fields:
             key_by_id = {f.id: f.key for f in custom_fields}
             for v in (await self.session.execute(select(StudentCustomValue))).scalars().all():
                 k = key_by_id.get(v.custom_field_id)
-                if k is not None:
+                if k is None:
+                    continue
+                if v.custom_field_id in tracked_ids:
+                    tracked_values[v.id] = (v.student_id, k)
+                else:
                     custom_by_student.setdefault(v.student_id, {})[k] = v.value
+        custom_periods: dict = {}   # student_id -> key -> periods
+        if tracked_values:
+            from datetime import timedelta
 
-        def _custom_for(student_id) -> dict:
+            from app.modules.student_record.fact_history import CustomValueHistoryService
+            from app.modules.student_record.fact_history import today as history_today
+            win = self._year_window(academic_year)
+            lo = win[0] if win else history_today()
+            hi = (win[1] if win else history_today()) + timedelta(days=1)
+            for vid, periods in (await CustomValueHistoryService(self.session).periods(
+                    list(tracked_values), lo, hi)).items():
+                sid, k = tracked_values[vid]
+                custom_periods.setdefault(sid, {})[k] = periods
+
+        def _custom_for(student_id, as_of: date | None = None) -> dict:
             held = custom_by_student.get(student_id, {})
-            return {k: held.get(k) for k in custom_keys}
+            dated = custom_periods.get(student_id, {})
+            out = {k: held.get(k) for k in custom_keys}
+            for k, periods in dated.items():
+                day = as_of or history_today()
+                out[k] = next((p["value"] for p in periods
+                               if p["from"] <= day and (p["to"] is None or p["to"] > day)), None)
+            return out
 
         # ICR G4 — legacy intensity for students who predate intensity history: the latest
         # approved intensity change, else derived from study mode.
@@ -491,6 +518,9 @@ class StatutoryEngine:
         hist_status = await StatusHistoryService(self.session).periods(ids, ws, we)
         hist_prog = await ProgrammeHistoryService(self.session).periods(ids, ws, we)
         hist_int = await IntensityHistoryService(self.session).periods(ids, ws, we)
+        from app.modules.student_record.fact_history import FeeStatusHistoryService, LocationHistoryService
+        hist_fee = await FeeStatusHistoryService(self.session).periods(ids, ws, we)
+        hist_loc = await LocationHistoryService(self.session).periods(ids, ws, we)
         from app.modules.taught.models import ModuleEnrolment, TaughtModule
         from app.modules.taught.module_history import ModuleStatusHistoryService, year_window
 
@@ -545,6 +575,8 @@ class StatutoryEngine:
             sp = hist_status.get(student.id, [])
             pp = hist_prog.get(student.id, [])
             ip = hist_int.get(student.id, [])
+            fp = hist_fee.get(student.id, [])
+            lp = hist_loc.get(student.id, [])
 
             # Programme periods inside the window: (start, display end, exclusive end, programme).
             # History periods are half-open; HESA end dates are inclusive, so a period that ends
@@ -580,7 +612,9 @@ class StatutoryEngine:
                 status = (_on(sp, as_of) if sp else None) or student.status
                 mode = mode_for_intensity(intensity) if ip else student.study_mode
                 return {"status": _ev(status), "mode": _ev(mode), "intensityPct": intensity,
-                        "fteLoad": _load(ip, sp, lo, hi)}
+                        "fteLoad": _load(ip, sp, lo, hi),
+                        # Phase 6 — optional dated facts; None = not recorded on that date.
+                        "feeStatus": _on(fp, as_of), "studyLocation": _on(lp, as_of)}
 
             common_student = {
                 "originalExpectedEndDate": student.original_expected_end_date,
@@ -696,7 +730,7 @@ class StatutoryEngine:
                     "programme": {"name": prog.name if prog else None, "code": prog.code if prog else None},
                     "research": common_research,
                     "award": common_award,
-                    "custom": _custom_for(student.id),
+                    "custom": _custom_for(student.id, as_of),
                     **_period_fields(ws, we, as_of),
                 })
                 continue
@@ -719,7 +753,7 @@ class StatutoryEngine:
                     "programme": {"name": prog.name if prog else None, "code": prog_code},
                     "research": common_research,
                     "award": common_award,
-                    "custom": _custom_for(student.id),
+                    "custom": _custom_for(student.id, min(shown_end, now)),
                     **_period_fields(start_d, end_x, min(shown_end, now)),
                 })
         return records

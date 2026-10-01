@@ -11,7 +11,7 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import (
-    JSON, Date, DateTime, Enum, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint,
+    JSON, Boolean, Date, DateTime, Enum, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -98,6 +98,11 @@ class Student(UUIDMixin, TenantMixin, TimestampMixin, Base):
     # ``registration_effect`` metadata block. NULL means the platform derives the string on read
     # (backwards-compatible default; the ICR service falls back to derivation).
     registration_status: Mapped[str | None] = mapped_column(String(80), nullable=True)
+
+    # Effective dating, Phase 6 — optional dated facts (NULL = not recorded yet). Each caches the
+    # value covering today from its history table; only the history services write them.
+    fee_status: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    study_location: Mapped[str | None] = mapped_column(String(60), nullable=True)
 
     project: Mapped["ResearchProject | None"] = relationship(
         back_populates="student", lazy="selectin", uselist=False, cascade="all, delete-orphan"
@@ -210,6 +215,35 @@ class StudentIntensityHistory(UUIDMixin, TenantMixin, HistoryMixin, Base):
     )
 
 
+class StudentFeeStatusHistory(UUIDMixin, TenantMixin, HistoryMixin, Base):
+    """Fee status over time (effective dating, Phase 6). ``student.fee_status`` caches today's."""
+    __tablename__ = "student_fee_status_history"
+    __table_args__ = (Index("ix_student_fee_status_history_student_from", "student_id", "valid_from"),)
+
+    student_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("student.id", ondelete="CASCADE"), index=True
+    )
+    fee_status: Mapped[str] = mapped_column(String(30))
+    source_event_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("student_lifecycle_event.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+
+
+class StudentLocationHistory(UUIDMixin, TenantMixin, HistoryMixin, Base):
+    """Where the student studies over time (effective dating, Phase 6; HESA location of study).
+    ``student.study_location`` caches today's."""
+    __tablename__ = "student_location_history"
+    __table_args__ = (Index("ix_student_location_history_student_from", "student_id", "valid_from"),)
+
+    student_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("student.id", ondelete="CASCADE"), index=True
+    )
+    study_location: Mapped[str] = mapped_column(String(60))
+    source_event_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("student_lifecycle_event.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+
+
 class ResearchProject(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """The student's research work — and the hinge of the funding lineage (Phase 6.3).
 
@@ -250,6 +284,9 @@ class StudentCustomField(UUIDMixin, TenantMixin, TimestampMixin, Base):
     label: Mapped[str] = mapped_column(String(120))
     # string | number | date | code — drives the entry-grid input and the picker's type badge.
     data_type: Mapped[str] = mapped_column(String(20), default="string")
+    # Effective dating, Phase 6 — opt-in: keep dated history of this attribute's values (for
+    # attributes a return reads as at a date). Off by default so one-off fields don't pay for it.
+    track_history: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     # Why this attribute was created — mandatory commentary, shown in the picker and the audit trail.
     reason: Mapped[str] = mapped_column(Text)
     created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -277,3 +314,20 @@ class StudentCustomValue(UUIDMixin, TenantMixin, TimestampMixin, Base):
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     field: Mapped[StudentCustomField] = relationship(back_populates="values")
+
+
+class StudentCustomValueHistory(UUIDMixin, TenantMixin, HistoryMixin, Base):
+    """Dated values of a custom attribute that keeps history (effective dating, Phase 6).
+    The subject is the student's value row; ``student_custom_value.value`` caches today's."""
+    __tablename__ = "student_custom_value_history"
+    __table_args__ = (
+        Index("ix_student_custom_value_history_value_from", "custom_value_id", "valid_from"),
+    )
+
+    custom_value_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("student_custom_value.id", ondelete="CASCADE"), index=True
+    )
+    value: Mapped[str] = mapped_column(Text)
+    source_event_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("student_lifecycle_event.id", ondelete="SET NULL"), nullable=True
+    )

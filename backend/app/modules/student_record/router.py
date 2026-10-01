@@ -34,6 +34,7 @@ from app.modules.student_record.repository import StudentRepository
 from app.modules.student_record.lifecycle import LifecycleService
 from app.modules.student_record.schemas import (
     EnrolRequest,
+    FactChangeRequest,
     IntensityPreviewRequest,
     LifecycleDecision,
     LifecycleEventOut,
@@ -278,6 +279,7 @@ def _custom_field_out(f) -> dict:
     return {
         "id": str(f.id), "key": f.key, "label": f.label, "dataType": f.data_type,
         "reason": f.reason, "sourcePath": f"custom.{f.key}",
+        "trackHistory": bool(f.track_history),
         "createdAt": f.created_at.isoformat() if f.created_at else None,
     }
 
@@ -301,8 +303,18 @@ async def create_custom_field(
         data_type=(body or {}).get("dataType", "string"),
         reason=(body or {}).get("reason", ""),
         user_id=principal.user_id,
+        track_history=bool((body or {}).get("trackHistory", False)),
     )
     return _custom_field_out(field)
+
+
+@router.post("/custom-fields/{field_id}/track-history", summary="Start keeping dated history (one-way)")
+async def enable_custom_field_history(
+    field_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_permission("admin.configure")),
+) -> dict:
+    return _custom_field_out(await CustomFieldService(session).enable_history(field_id, user_id=principal.user_id))
 
 
 @router.delete("/custom-fields/{field_id}", status_code=204, response_class=Response,
@@ -335,8 +347,16 @@ async def set_custom_field_values(
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(require_permission("student.write")),
 ) -> dict:
-    filled = await CustomFieldService(session).set_values(
-        field_id, entries=(body or {}).get("values", []), user_id=principal.user_id,
+    raw_date = (body or {}).get("effectiveDate")
+    try:
+        on = date.fromisoformat(raw_date) if raw_date else None
+    except ValueError:
+        raise ValidationAppError("effectiveDate must be YYYY-MM-DD") from None
+    svc = CustomFieldService(session)
+    if (await svc.get_field(field_id)).track_history:
+        await assert_backdate_allowed(session, on, principal, what="This attribute value")
+    filled = await svc.set_values(
+        field_id, entries=(body or {}).get("values", []), user_id=principal.user_id, effective_date=on,
     )
     return {"filled": filled}
 
@@ -546,6 +566,51 @@ async def student_history(
     if allowed is not None and student_id not in allowed:
         raise NotFoundError("Student not found")
     return await StudentTimeline(session).history(student_id, include_superseded=include_superseded)
+
+
+@router.post("/{student_id}/facts/{fact}",
+             summary="Record a dated fact (fee-status, study-location) from a date")
+async def change_student_fact(
+    student_id: uuid.UUID,
+    fact: str,
+    body: FactChangeRequest,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_permission("student.write")),
+) -> dict:
+    from app.modules.student_record.fact_history import DIRECT_FACTS, today
+
+    svc_cls = DIRECT_FACTS.get(fact)
+    if svc_cls is None:
+        raise NotFoundError(f"Unknown fact '{fact}' (expected one of: {', '.join(DIRECT_FACTS)})")
+    on = body.effective_date or today()
+    await assert_backdate_allowed(session, on, principal, what=f"This {svc_cls.label} change")
+    student = await session.get(Student, student_id)
+    if student is None:
+        raise NotFoundError("Student not found")
+    svc = svc_cls(session)
+    row = await svc.change(student, svc.validate(body.value), effective_from=on,
+                           reason=(body.reason or "").strip() or None, user_id=principal.user_id)
+    await session.commit()
+    return {"row": svc.out(row), "current": getattr(student, svc.value_attr)}
+
+
+@router.get("/{student_id}/facts/{fact}", summary="A dated fact's history (fee-status, study-location)")
+async def student_fact_history(
+    student_id: uuid.UUID,
+    fact: str,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_permission("student.read")),
+) -> list[dict]:
+    from app.modules.student_record.fact_history import DIRECT_FACTS
+
+    svc_cls = DIRECT_FACTS.get(fact)
+    if svc_cls is None:
+        raise NotFoundError(f"Unknown fact '{fact}'")
+    allowed = await scoped_ids(principal, session)
+    if allowed is not None and student_id not in allowed:
+        return []
+    svc = svc_cls(session)
+    return [svc.out(r) for r in await svc.live_rows(student_id)]
 
 
 @router.get("/{student_id}/as-of", summary="The student's record as it stood on a date")

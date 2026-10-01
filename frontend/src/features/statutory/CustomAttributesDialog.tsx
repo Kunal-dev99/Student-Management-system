@@ -26,7 +26,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { useToast } from '@/components/ui/use-toast'
 import { useConfirm } from '@/components/common/ConfirmDialog'
 import {
-  useCustomFields, useCreateCustomField, useDeleteCustomField,
+  useCustomFields, useCreateCustomField, useDeleteCustomField, useEnableCustomFieldHistory,
   useCustomFieldValues, useSetCustomFieldValues,
   type CustomField, type CustomFieldType,
 } from '@/features/statutory/customFields'
@@ -55,19 +55,26 @@ function ValuesDialog({ field, onClose }: { field: CustomField; onClose: () => v
   const { data, isLoading } = useCustomFieldValues(field.id)
   const save = useSetCustomFieldValues(field.id)
   const [draft, setDraft] = useState<Record<string, string>>({})
+  const [original, setOriginal] = useState<Record<string, string>>({})
+  // Effective dating, Phase 6 — the date new values take effect (attributes that keep history).
+  const [effectiveDate, setEffectiveDate] = useState('')
 
   useEffect(() => {
     if (data) {
       const seed: Record<string, string> = {}
       for (const r of data.rows) seed[r.studentId] = r.value ?? ''
       setDraft(seed)
+      setOriginal(seed)
     }
   }, [data])
 
   const onSave = async () => {
-    const values = Object.entries(draft).map(([studentId, value]) => ({ studentId, value: value || null }))
+    // A dated attribute records a change only for the rows that actually changed.
+    const values = Object.entries(draft)
+      .filter(([studentId, value]) => !field.trackHistory || value !== (original[studentId] ?? ''))
+      .map(([studentId, value]) => ({ studentId, value: value || null }))
     try {
-      const res = await save.mutateAsync(values)
+      const res = await save.mutateAsync({ values, effectiveDate: field.trackHistory ? effectiveDate || undefined : undefined })
       toast({ title: 'Values saved', description: `${res.filled} student(s) now have a value.` })
       onClose()
     } catch (e) {
@@ -82,9 +89,22 @@ function ValuesDialog({ field, onClose }: { field: CustomField; onClose: () => v
           <DialogTitle>Enter data — {field.label}</DialogTitle>
         </DialogHeader>
         <p className="flex-none text-helper">
-          Maps to <span className="font-mono text-xs">{field.sourcePath}</span>. Leave a row blank to
-          clear it. HESA is strict — enter the exact coded value the specification expects.
+          Maps to <span className="font-mono text-xs">{field.sourcePath}</span>.{' '}
+          {field.trackHistory
+            ? 'This attribute keeps dated history: changed values are recorded from the date below, and the return reads the value in force at the end of each period.'
+            : 'Leave a row blank to clear it.'}{' '}
+          HESA is strict — enter the exact coded value the specification expects.
         </p>
+        {field.trackHistory && (
+          <div className="flex-none flex items-end gap-2">
+            <div className="space-y-1">
+              <Label htmlFor="cf-eff">Changed values take effect from</Label>
+              <Input id="cf-eff" type="date" className="h-8 w-40" value={effectiveDate}
+                onChange={(e) => setEffectiveDate(e.target.value)} />
+            </div>
+            <span className="text-helper pb-1.5">Blank = today. Dates inside a signed-off return need returns-amendment rights.</span>
+          </div>
+        )}
         <div className="-mr-2 mt-2 flex-1 overflow-y-auto pr-2">
           {isLoading ? <Skeleton className="h-40 w-full" /> : (
             <Table>
@@ -137,12 +157,14 @@ export function CustomAttributesDialog() {
   const [label, setLabel] = useState('')
   const [dataType, setDataType] = useState<CustomFieldType>('code')
   const [reason, setReason] = useState('')
+  const [trackHistory, setTrackHistory] = useState(false)
+  const enableHistory = useEnableCustomFieldHistory()
 
-  const reset = () => { setLabel(''); setDataType('code'); setReason('') }
+  const reset = () => { setLabel(''); setDataType('code'); setReason(''); setTrackHistory(false) }
 
   const onCreate = async () => {
     try {
-      const f = await create.mutateAsync({ label: label.trim(), dataType, reason: reason.trim() })
+      const f = await create.mutateAsync({ label: label.trim(), dataType, reason: reason.trim(), trackHistory })
       toast({ title: `Created "${f.label}"`, description: `Map a field to ${f.sourcePath}, then enter data.` })
       reset()
     } catch (e) {
@@ -190,6 +212,17 @@ export function CustomAttributesDialog() {
                   onChange={(e) => setReason(e.target.value)}
                   placeholder="e.g. HESA CARELEAVER — mandatory, not held in the core model." />
               </div>
+              <label className="flex items-start gap-2 text-sm">
+                <input type="checkbox" className="mt-0.5" checked={trackHistory}
+                  onChange={(e) => setTrackHistory(e.target.checked)} />
+                <span>
+                  Keep dated history
+                  <span className="block text-helper">
+                    For attributes a return reads as at a date (e.g. a status that can change mid-year).
+                    Values are recorded with the date they took effect. Can&apos;t be switched off later.
+                  </span>
+                </span>
+              </label>
               <Button size="sm" onClick={onCreate}
                 disabled={!label.trim() || !reason.trim() || create.isPending}>
                 {create.isPending ? 'Creating…' : 'Create attribute'}
@@ -209,11 +242,31 @@ export function CustomAttributesDialog() {
                         <div className="flex items-center gap-2">
                           <span className="font-medium">{f.label}</span>
                           <Badge variant="secondary">{f.dataType}</Badge>
+                          {f.trackHistory && <Badge variant="info">dated history</Badge>}
                         </div>
                         <CopyPath path={f.sourcePath} />
                         <p className="text-xs text-muted-foreground">{f.reason}</p>
                       </div>
                       <div className="flex shrink-0 items-center gap-1">
+                        {!f.trackHistory && (
+                          <Button size="sm" variant="ghost" disabled={enableHistory.isPending}
+                            title="Record values with the date they took effect from now on"
+                            onClick={async () => {
+                              if (!(await confirm({
+                                title: `Keep dated history for "${f.label}"?`,
+                                description: 'Values already entered are kept from each student\'s start date. From now on a change is recorded with the date it took effect, and values can no longer be cleared. This can\'t be switched off.',
+                                confirmLabel: 'Keep dated history',
+                              }))) return
+                              try {
+                                await enableHistory.mutateAsync(f.id)
+                                toast({ title: `"${f.label}" now keeps dated history` })
+                              } catch (e) {
+                                toast({ title: 'Could not switch on history', description: (e as Error).message, variant: 'destructive' })
+                              }
+                            }}>
+                            Keep history
+                          </Button>
+                        )}
                         <Button size="sm" variant="secondary" onClick={() => setEntering(f)}>
                           <Table2 className="h-3.5 w-3.5 mr-1" /> Enter data
                         </Button>

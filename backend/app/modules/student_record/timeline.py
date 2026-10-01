@@ -21,17 +21,27 @@ from app.modules.funding.models import FundingArrangement, FundingSource
 from app.modules.identity.models import User
 from app.modules.person.models import Person
 from app.modules.student_record.fact_history import (
+    CustomValueHistoryService,
+    FeeStatusHistoryService,
     IntensityHistoryService,
+    LocationHistoryService,
     ProgrammeHistoryService,
     StatusHistoryService,
     mode_for_intensity,
 )
-from app.modules.student_record.models import Programme, Student
+from app.modules.student_record.models import (
+    Programme,
+    Student,
+    StudentCustomField,
+    StudentCustomValue,
+    StudentCustomValueHistory,
+)
 from app.modules.student_record.retrospective import affected, signed_off_returns
 from app.modules.supervision.models import SupervisorRelationship
 from app.modules.taught.models import ModuleEnrolment, ModuleEnrolmentStatusHistory, TaughtModule
 
-FACTS = ("status", "programme", "intensity", "module", "funding", "supervision")
+FACTS = ("status", "programme", "intensity", "fee_status", "location", "module", "funding",
+         "supervision", "custom")
 
 
 def _val(v):
@@ -80,6 +90,18 @@ class StudentTimeline:
             .order_by(rel.valid_from)
         )).all()
 
+    async def _custom_rows(self, student_id: uuid.UUID, include_superseded: bool):
+        """Dated values of the student's custom attributes that keep history (Phase 6)."""
+        h = StudentCustomValueHistory
+        q = (select(h, StudentCustomField)
+             .join(StudentCustomValue, StudentCustomValue.id == h.custom_value_id)
+             .join(StudentCustomField, StudentCustomField.id == StudentCustomValue.custom_field_id)
+             .where(StudentCustomValue.student_id == student_id, StudentCustomField.track_history.is_(True))
+             .order_by(h.valid_from, h.recorded_at))
+        if not include_superseded:
+            q = q.where(h.superseded_by.is_(None))
+        return (await self.session.execute(q)).all()
+
     # ---------------- history ----------------
 
     async def history(self, student_id: uuid.UUID, *, include_superseded: bool = False) -> dict:
@@ -115,6 +137,8 @@ class StudentTimeline:
             (IntensityHistoryService, "intensity",
              lambda r: (f"{r.intensity_pct}% ({mode_for_intensity(r.intensity_pct).value.replace('_', ' ')})",
                         r.intensity_pct)),
+            (FeeStatusHistoryService, "fee_status", lambda r: (r.fee_status, r.fee_status)),
+            (LocationHistoryService, "location", lambda r: (r.study_location, r.study_location)),
         ):
             h = svc(self.session)
             rows = await (h.all_rows(student_id) if include_superseded else h.live_rows(student_id))
@@ -130,6 +154,12 @@ class StudentTimeline:
                 reason=r.reason, superseded=r.superseded_by is not None, row_id=r.id,
                 detail={"moduleEnrolmentId": str(enr.id), "moduleCode": mod.code,
                         "academicYear": enr.academic_year})
+
+        for r, f in await self._custom_rows(student_id, include_superseded):
+            add("custom", f"{f.label}: {r.value}", r.value, r.valid_from, r.valid_to,
+                recorded_at=r.recorded_at, recorded_by=r.recorded_by_user_id, origin=r.origin,
+                reason=r.reason, superseded=r.superseded_by is not None, row_id=r.id,
+                detail={"key": f.key, "label": f.label})
 
         for a, source in await self._funding(student_id):
             label = _val(a.funding_type).replace("_", " ") + (f" — {source}" if source else "")
@@ -171,6 +201,12 @@ class StudentTimeline:
         status = await StatusHistoryService(self.session).value_at(student_id, on)
         prog = await ProgrammeHistoryService(self.session).value_at(student_id, on)
         inten = await IntensityHistoryService(self.session).value_at(student_id, on)
+        fee = await FeeStatusHistoryService(self.session).value_at(student_id, on)
+        loc = await LocationHistoryService(self.session).value_at(student_id, on)
+        custom = [
+            {"key": f.key, "label": f.label, "value": r.value}
+            for r, f in await self._custom_rows(student_id, False) if _covers(r.valid_from, r.valid_to, on)
+        ]
         programme_name = None
         if prog is not None and prog.programme_id is not None:
             p = await self.session.get(Programme, prog.programme_id)
@@ -202,5 +238,8 @@ class StudentTimeline:
             "programmeName": programme_name,
             "intensityPct": inten.intensity_pct if inten else None,
             "studyMode": mode_for_intensity(inten.intensity_pct).value if inten else None,
+            "feeStatus": fee.fee_status if fee else None,
+            "studyLocation": loc.study_location if loc else None,
+            "custom": custom,
             "modules": modules, "funding": funding, "supervisors": supervisors,
         }
