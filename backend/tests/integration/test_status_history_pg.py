@@ -102,3 +102,43 @@ async def test_overlapping_live_periods_are_rejected(engine):
                 ), {"id": uuid.uuid4(), "sid": sid})
         finally:
             await tx.rollback()
+
+
+_PHASE2 = ("student_programme_history", "student_intensity_history")
+
+
+@pytest.mark.parametrize("table", _PHASE2)
+async def test_phase2_tables_are_isolated_and_overlap_proof(engine, table):
+    async with engine.connect() as conn:
+        if await conn.scalar(text(f"SELECT to_regclass('public.{table}')")) is None:
+            pytest.skip("Database not migrated to ed2 yet")
+        rls = (await conn.execute(text(
+            "SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE relname = :t"
+        ), {"t": table})).one()
+        assert tuple(rls) == (True, True)
+        assert await conn.scalar(text(
+            "SELECT count(*) FROM pg_policies WHERE tablename = :t AND policyname = 'tenant_isolation'"
+        ), {"t": table}) == 1
+        assert await conn.scalar(text(
+            "SELECT count(*) FROM pg_constraint WHERE conname = :c"
+        ), {"c": f"ex_{table}_no_overlap"}) == 1
+
+
+async def test_phase2_history_matches_cached_values(engine):
+    async with engine.connect() as conn:
+        if await conn.scalar(text("SELECT to_regclass('public.student_intensity_history')")) is None:
+            pytest.skip("Database not migrated to ed2 yet")
+        prog_mismatch = await conn.scalar(text(
+            "SELECT count(*) FROM student s JOIN student_programme_history h ON h.student_id = s.id "
+            "AND h.superseded_by IS NULL AND h.valid_from <= current_date "
+            "AND (h.valid_to IS NULL OR h.valid_to > current_date) "
+            "WHERE h.programme_id IS DISTINCT FROM s.programme_id"
+        ))
+        mode_mismatch = await conn.scalar(text(
+            "SELECT count(*) FROM student s JOIN student_intensity_history h ON h.student_id = s.id "
+            "AND h.superseded_by IS NULL AND h.valid_from <= current_date "
+            "AND (h.valid_to IS NULL OR h.valid_to > current_date) "
+            "WHERE (CASE WHEN h.intensity_pct >= 100 THEN 'full_time' ELSE 'part_time' END) "
+            "<> s.study_mode::text"
+        ))
+        assert prog_mismatch == 0 and mode_mismatch == 0

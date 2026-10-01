@@ -34,7 +34,12 @@ from app.modules.student_record.constants import (
     StudyMode,
 )
 from app.modules.student_record.models import Student, StudentLifecycleEvent
-from app.modules.student_record.status_history import StatusHistoryService
+from app.modules.student_record.fact_history import (
+    IntensityHistoryService,
+    ProgrammeHistoryService,
+    StatusHistoryService,
+    intensity_for_mode,
+)
 
 
 def _now() -> datetime:
@@ -277,17 +282,22 @@ class LifecycleService:
 
             factor = await setting_value(self.session, "lifecycle.part_time_factor")
             event.days_applied = self._mode_change_days(student, event, factor)
-            student.study_mode = event.new_mode
+            # A mode change is an intensity change to the mode's default %; study mode is the
+            # cached summary of intensity and moves when the effective date arrives.
+            await IntensityHistoryService(self.session).change(
+                student, intensity_for_mode(event.new_mode), effective_from=event.start_date,
+                reason=event.reason, user_id=approver_user_id, source_event_id=event.id,
+            )
         elif event.event_type is LifecycleEventType.intensity_change:
             prev = event.previous_intensity_pct or await self._current_intensity(student)
             event.previous_intensity_pct = prev
             event.days_applied = self._intensity_change_days(
                 student, event.start_date, prev, event.intensity_pct or prev
             )
-            # Study mode stays a derived summary of the intensity.
-            student.study_mode = (
-                StudyMode.full_time if (event.intensity_pct or 0) >= FULL_TIME_INTENSITY_PCT
-                else StudyMode.part_time
+            # Dated intensity history; study mode stays its derived (cached) summary.
+            await IntensityHistoryService(self.session).change(
+                student, event.intensity_pct or prev, effective_from=event.start_date,
+                reason=event.reason, user_id=approver_user_id, source_event_id=event.id,
             )
         elif event.event_type in STATUS_EVENT_TARGETS:
             await StatusHistoryService(self.session).change(
@@ -366,6 +376,11 @@ class LifecycleService:
         """The student's FTE % **as of today**: the most recent approved change whose effective
         date has arrived. A change dated in the future is scheduled, not current — so it does not
         move "now". Falls back to the study-mode default when nothing has taken effect yet."""
+        from app.modules.student_record.fact_history import today as _history_today
+
+        current = await IntensityHistoryService(self.session).value_at(student.id, _history_today())
+        if current is not None:
+            return current.intensity_pct
         today = date.today()
         events = await self._intensity_events(student.id)
         effective = [e for e in events if e.start_date <= today]
@@ -584,9 +599,14 @@ class LifecycleService:
         }
 
     async def intensity_periods(self, student: Student) -> list[dict]:
-        """The dated FTE-% timeline, derived from approved intensity changes + registration."""
+        """The dated FTE-% timeline from intensity history (or, for a student who predates it,
+        derived from approved intensity changes + registration)."""
         start = student.start_date or date.today()
         end_cap = student.expected_end_date or date.today()
+        rows = await IntensityHistoryService(self.session).live_rows(student.id)
+        if rows:
+            return [{"from": r.valid_from, "to": r.valid_to or max(end_cap, r.valid_from),
+                     "pct": r.intensity_pct} for r in rows]
         events = await self._intensity_events(student.id)
         base = (events[0].previous_intensity_pct if events and events[0].previous_intensity_pct
                 else (FULL_TIME_INTENSITY_PCT if student.study_mode is StudyMode.full_time
@@ -728,8 +748,12 @@ class LifecycleService:
                 "remain appropriate under the new programme."
             )
 
-        # 1) Swap the current programme pointer.
-        student.programme_id = new_prog.id
+        # 1) Programme history from the effective date. A future-dated transfer leaves the current
+        #    programme in place until the day (the scheduler moves the cached pointer then).
+        await ProgrammeHistoryService(self.session).change(
+            student, new_prog.id, effective_from=effective, reason=event.reason,
+            user_id=event.approved_by_user_id, source_event_id=event.id,
+        )
 
         # 2) Cancel undecided milestones from the old schedule (decided = historical fact).
         cancelled = 0
@@ -823,6 +847,15 @@ class LifecycleService:
         """
         start = student.start_date or year_start
         end_cap = student.expected_end_date or year_end
+        rows = await ProgrammeHistoryService(self.session).live_rows(student.id)
+        if rows:
+            out: list[dict] = []
+            for r in rows:
+                lo = max(r.valid_from, year_start)
+                hi = min(r.valid_to or max(end_cap, r.valid_from), year_end)
+                if hi > lo:
+                    out.append({"programme_id": r.programme_id, "period_start": lo, "period_end": hi})
+            return out
         events = sorted(
             [
                 e for e in await self.events_for_student(student.id)

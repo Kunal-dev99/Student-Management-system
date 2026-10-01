@@ -18,6 +18,8 @@ from __future__ import annotations
 from datetime import date
 
 import pytest
+
+from app.modules.student_record import fact_history
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -164,8 +166,11 @@ async def test_request_alone_leaves_the_student_unchanged(ctx):
 
 
 @pytest.mark.asyncio
-async def test_approval_swaps_programme_and_rebuilds_milestone_schedule(ctx):
+async def test_approval_swaps_programme_and_rebuilds_milestone_schedule(ctx, monkeypatch):
     c, token, ids, _ = ctx
+    # Effective dating: the cached programme moves once the effective date has arrived (a
+    # future-dated transfer waits — see test_fact_history). Run as of the day after it.
+    monkeypatch.setattr(fact_history, "today", lambda: date(2027, 2, 2))
     h = await token("a@t.com")
     ev = (await _request(c, h, ids["student"], ids["phd"])).json()
     result = (await c.post(f"/api/v1/lifecycle-events/{ev['id']}/approve", headers=h, json={})).json()
@@ -202,8 +207,9 @@ async def test_approval_swaps_programme_and_rebuilds_milestone_schedule(ctx):
 # --------------------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_cross_type_transfer_is_allowed_and_warns(ctx):
+async def test_cross_type_transfer_is_allowed_and_warns(ctx, monkeypatch):
     c, token, ids, _ = ctx
+    monkeypatch.setattr(fact_history, "today", lambda: date(2027, 6, 2))   # both transfers in force
     h = await token("a@t.com")
     # Move onto the PhD first so we can then downgrade to a taught MSc.
     ev = (await _request(c, h, ids["student"], ids["phd"])).json()

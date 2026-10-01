@@ -33,7 +33,7 @@ from app.main import app
 from app.modules.identity.constants import PERMISSIONS
 from app.modules.identity.models import Permission, Role, User
 from app.modules.person.models import Person
-from app.modules.student_record import status_history
+from app.modules.student_record import fact_history
 from app.modules.student_record.constants import (
     LifecycleEventStatus,
     LifecycleEventType,
@@ -112,7 +112,7 @@ async def ctx():
 def clock(monkeypatch):
     """Move the history service's notion of today."""
     state = {"today": date(2026, 10, 1)}
-    monkeypatch.setattr(status_history, "today", lambda: state["today"])
+    monkeypatch.setattr(fact_history, "today", lambda: state["today"])
     return state
 
 

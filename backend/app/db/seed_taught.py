@@ -137,8 +137,8 @@ async def _student(session, s: dict, programme_id) -> Student:
     )
     session.add(student)
     await session.flush()
-    from app.modules.student_record.status_history import StatusHistoryService
-    await StatusHistoryService(session).initialise(student, origin="backfill", reason="Seeded")
+    from app.modules.student_record.fact_history import initialise_all
+    await initialise_all(session, student, origin="backfill", reason="Seeded")
     return student
 
 
