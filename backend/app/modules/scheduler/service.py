@@ -46,8 +46,10 @@ class SchedulerService:
 
     async def _apply_due_status_changes(self) -> int:
         from app.modules.student_record.fact_history import refresh_all_due
+        from app.modules.taught.module_history import ModuleStatusHistoryService
 
         changed = await refresh_all_due(self.session)
+        changed += await ModuleStatusHistoryService(self.session).refresh_due()
         if changed:
             await self.session.commit()
         return changed

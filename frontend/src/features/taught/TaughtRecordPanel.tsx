@@ -15,8 +15,8 @@ import { useCan } from '@/shared/auth/Can'
 import {
   useAddAssessment, useAvailableElectives, useComputeAward, useCondoneModule, useCreateModule,
   useEnrolModule, useLinkElective, useProgrammeModules, useRecordResult, useSetEnrolmentStatus,
-  useTaughtBoardSummary, useTaughtRecord, useUnlinkElective, useUpsertDissertation,
-  type AssessmentType, type ClassificationBand, type Enrolment, type ModuleOutcome,
+  useSetModuleDates, useTaughtBoardSummary, useTaughtRecord, useUnlinkElective, useUpsertDissertation,
+  type AssessmentType, type ClassificationBand, type Enrolment, type ModuleEnrolmentStatus, type ModuleOutcome,
 } from './api'
 
 const BAND_VARIANT: Record<ClassificationBand, 'success' | 'info' | 'secondary' | 'destructive'> = {
@@ -24,7 +24,10 @@ const BAND_VARIANT: Record<ClassificationBand, 'success' | 'info' | 'secondary' 
 }
 const STATUS_VARIANT: Record<Enrolment['status'], 'secondary' | 'success' | 'warning' | 'destructive'> = {
   enrolled: 'secondary', completed: 'success', withdrawn: 'warning', failed: 'destructive',
+  interrupted: 'warning',
 }
+const MODULE_STATUSES: ModuleEnrolmentStatus[] = ['enrolled', 'completed', 'withdrawn', 'interrupted', 'failed']
+const todayIso = () => new Date().toISOString().slice(0, 10)
 const OUTCOME_VARIANT: Record<ModuleOutcome, 'secondary' | 'success' | 'info' | 'destructive'> = {
   pending: 'secondary', passed: 'success', condoned: 'info', failed: 'destructive',
 }
@@ -62,6 +65,7 @@ export function TaughtRecordPanel({ studentId, programmeId }: { studentId: strin
   const enrol = useEnrolModule(studentId)
   const recordResult = useRecordResult(studentId)
   const setStatus = useSetEnrolmentStatus(studentId)
+  const setDates = useSetModuleDates(studentId)
   const condone = useCondoneModule(studentId)
   const upsertDiss = useUpsertDissertation(studentId)
   const computeAward = useComputeAward(studentId)
@@ -76,6 +80,9 @@ export function TaughtRecordPanel({ studentId, programmeId }: { studentId: strin
   const [dissMark, setDissMark] = useState('')
   const [dissWords, setDissWords] = useState('')
   const [manageOpen, setManageOpen] = useState(false)
+  // Per-enrolment drafts: a dated status change, and the student's own module dates.
+  const [statusDraft, setStatusDraft] = useState<Record<string, { status: ModuleEnrolmentStatus; date: string; reason: string }>>({})
+  const [datesDraft, setDatesDraft] = useState<Record<string, { start: string; end: string; reason: string }>>({})
 
   const moduleById = useMemo(
     () => new Map((modules.data ?? []).map((m) => [m.id, m])),
@@ -150,8 +157,14 @@ export function TaughtRecordPanel({ studentId, programmeId }: { studentId: strin
                       <span className="text-sm font-medium truncate">{e.moduleCode} — {e.moduleTitle}</span>
                       {mod && <Badge variant="outline">L{mod.level}{mod.isCore ? ' · core' : ' · optional'}</Badge>}
                       <span className="text-helper num whitespace-nowrap">{e.credits ?? 0} cr · {e.academicYear}</span>
+                      {e.startDate && (
+                        <span className="text-helper num whitespace-nowrap" title="The student's own dates on this module">
+                          {e.startDate} → {e.endDate ?? 'open'}
+                        </span>
+                      )}
                     </button>
                     <div className="flex items-center gap-2 shrink-0">
+                      {e.status !== 'enrolled' && <Badge variant={STATUS_VARIANT[e.status]}>{e.status}</Badge>}
                       <Badge variant={OUTCOME_VARIANT[e.outcome]}>
                         {e.outcome}{e.condoned ? ' (condoned)' : ''}
                       </Badge>
@@ -224,16 +237,59 @@ export function TaughtRecordPanel({ studentId, programmeId }: { studentId: strin
                         </div>
                       )}
 
-                      {canChange && (
-                        <div className="flex flex-wrap items-center gap-2 pt-1">
-                          <span className="text-helper">Set status:</span>
-                          {(['enrolled', 'completed', 'withdrawn', 'failed'] as const).map((st) => (
-                            <Button key={st} size="sm" variant={e.status === st ? 'secondary' : 'ghost'} className="h-7"
-                              disabled={setStatus.isPending}
-                              onClick={async () => { try { await setStatus.mutateAsync({ enrolmentId: e.id, status: st }); toast({ title: `Marked ${st}` }) } catch (er) { err(er) } }}>
-                              {st}
-                            </Button>
-                          ))}
+                      {canChange && (() => {
+                        const sd = statusDraft[e.id] ?? { status: e.status, date: todayIso(), reason: '' }
+                        const dd = datesDraft[e.id] ?? { start: e.startDate ?? '', end: e.endDate ?? '', reason: '' }
+                        const datesChanged = dd.start !== (e.startDate ?? '') || dd.end !== (e.endDate ?? '')
+                        return (
+                          <div className="space-y-2 pt-1">
+                            {/* Dated status change — recorded in the module's status history. */}
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-helper">Status</span>
+                              <Select value={sd.status}
+                                onValueChange={(v) => setStatusDraft((s) => ({ ...s, [e.id]: { ...sd, status: v as ModuleEnrolmentStatus } }))}>
+                                <SelectTrigger className="h-7 w-36"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                  {MODULE_STATUSES.map((st) => <SelectItem key={st} value={st}>{st}</SelectItem>)}
+                                </SelectContent>
+                              </Select>
+                              <span className="text-helper">from</span>
+                              <Input className="h-7 w-36" type="date" value={sd.date}
+                                onChange={(ev) => setStatusDraft((s) => ({ ...s, [e.id]: { ...sd, date: ev.target.value } }))} />
+                              <Input className="h-7 w-56" placeholder="Reason" value={sd.reason}
+                                onChange={(ev) => setStatusDraft((s) => ({ ...s, [e.id]: { ...sd, reason: ev.target.value } }))} />
+                              <Button size="sm" className="h-7" disabled={sd.status === e.status || !sd.date || setStatus.isPending}
+                                title="Withdrawing or interrupting ends the module on this date. A future date takes effect on the day."
+                                onClick={async () => {
+                                  try {
+                                    await setStatus.mutateAsync({ enrolmentId: e.id, status: sd.status, effectiveDate: sd.date, reason: sd.reason.trim() || undefined })
+                                    setStatusDraft((s) => { const n = { ...s }; delete n[e.id]; return n })
+                                    toast({ title: `Status ${sd.status} from ${sd.date}` })
+                                  } catch (er) { err(er) }
+                                }}>Apply</Button>
+                            </div>
+                            {/* The student's own module dates (e.g. a late joiner). */}
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-helper">Dates</span>
+                              <Input className="h-7 w-36" type="date" value={dd.start}
+                                onChange={(ev) => setDatesDraft((s) => ({ ...s, [e.id]: { ...dd, start: ev.target.value } }))} />
+                              <span className="text-helper">to</span>
+                              <Input className="h-7 w-36" type="date" value={dd.end}
+                                onChange={(ev) => setDatesDraft((s) => ({ ...s, [e.id]: { ...dd, end: ev.target.value } }))} />
+                              <Input className="h-7 w-56" placeholder="Reason (required)" value={dd.reason}
+                                onChange={(ev) => setDatesDraft((s) => ({ ...s, [e.id]: { ...dd, reason: ev.target.value } }))} />
+                              <Button size="sm" variant="secondary" className="h-7"
+                                disabled={!datesChanged || !dd.reason.trim() || setDates.isPending}
+                                title="Dates must fall within the student's time on a programme offering this module."
+                                onClick={async () => {
+                                  try {
+                                    await setDates.mutateAsync({ enrolmentId: e.id, startDate: dd.start || undefined, endDate: dd.end || undefined, reason: dd.reason.trim() })
+                                    setDatesDraft((s) => { const n = { ...s }; delete n[e.id]; return n })
+                                    toast({ title: 'Module dates saved' })
+                                  } catch (er) { err(er) }
+                                }}>Save dates</Button>
+                            </div>
+                          <div className="flex flex-wrap items-center gap-2">
                           {/* Board condonement — only relevant when the module has failed. */}
                           {(e.outcome === 'failed' || e.condoned) && (
                             <Button size="sm" variant={e.condoned ? 'ghost' : 'secondary'} className="h-7 ml-2"
@@ -247,8 +303,10 @@ export function TaughtRecordPanel({ studentId, programmeId }: { studentId: strin
                               {e.condoned ? 'Un-condone' : 'Condone fail'}
                             </Button>
                           )}
-                        </div>
-                      )}
+                          </div>
+                          </div>
+                        )
+                      })()}
                     </div>
                   )}
                 </div>

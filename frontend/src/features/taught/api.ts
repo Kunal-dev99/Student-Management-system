@@ -5,7 +5,7 @@ import { api } from '@/shared/api/client'
 
 // Marks/weights are Decimal server-side and serialize to strings to preserve precision.
 export type AssessmentType = 'essay' | 'exam' | 'coursework' | 'presentation' | 'dissertation'
-export type ModuleEnrolmentStatus = 'enrolled' | 'completed' | 'withdrawn' | 'failed'
+export type ModuleEnrolmentStatus = 'enrolled' | 'completed' | 'withdrawn' | 'failed' | 'interrupted'
 export type ModuleOutcome = 'pending' | 'passed' | 'condoned' | 'failed'
 export type ClassificationBand = 'distinction' | 'merit' | 'pass' | 'fail'
 
@@ -59,6 +59,9 @@ export interface Enrolment {
   credits: number | null
   academicYear: string
   status: ModuleEnrolmentStatus
+  /** The student's own dates on the module (inclusive; HESA ModuleInstance start / end). */
+  startDate: string | null
+  endDate: string | null
   moduleMark: string | null
   outcome: ModuleOutcome
   creditsAwarded: number | null
@@ -264,11 +267,41 @@ export function useRecordResult(studentId: string) {
   })
 }
 
+/** Change a module's status from a date (default today; a future date takes effect on the day).
+ * Withdrawing or interrupting ends the module on that date. */
 export function useSetEnrolmentStatus(studentId: string) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ enrolmentId, status }: { enrolmentId: string; status: ModuleEnrolmentStatus }) =>
-      api.patch<Enrolment>(`/module-enrolments/${enrolmentId}/status`, { status }),
+    mutationFn: ({ enrolmentId, status, effectiveDate, reason }: {
+      enrolmentId: string; status: ModuleEnrolmentStatus; effectiveDate?: string; reason?: string
+    }) => api.patch<Enrolment>(`/module-enrolments/${enrolmentId}/status`, { status, effectiveDate, reason }),
+    onSuccess: () => invalidate(qc, studentId),
+  })
+}
+
+/** Set the student's own start / end dates on a module (e.g. a late joiner). Needs a reason. */
+export function useSetModuleDates(studentId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ enrolmentId, ...body }: {
+      enrolmentId: string; startDate?: string; endDate?: string; reason: string
+    }) => api.patch<Enrolment>(`/module-enrolments/${enrolmentId}/dates`, body),
+    onSuccess: () => invalidate(qc, studentId),
+  })
+}
+
+/** What approving a suspension proposes: the student's open modules, to interrupt on its start date. */
+export interface ModuleProposal {
+  effectiveDate: string
+  sourceEventId: string
+  modules: { enrolmentId: string; moduleCode: string | null; moduleTitle: string | null; academicYear: string; startDate: string | null }[]
+}
+
+export function useInterruptModules(studentId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: { effectiveDate: string; enrolmentIds: string[]; reason: string; sourceEventId?: string }) =>
+      api.post<Enrolment[]>(`/students/${studentId}/module-enrolments/interrupt`, body),
     onSuccess: () => invalidate(qc, studentId),
   })
 }

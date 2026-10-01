@@ -65,9 +65,21 @@ class FactHistoryService:
     value_attr: str
     label: str        # used in messages, e.g. "status"
     out_key: str      # key for the value in API output
+    # The record the history belongs to (a student by default; e.g. a module enrolment).
+    subject_model: type = Student
+    subject_attr: str = "student_id"
+    subject_out_key: str = "studentId"
+    subject_label: str = "student"
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    def _subject_col(self):
+        return getattr(self.model, self.subject_attr)
+
+    @staticmethod
+    def _start(subject) -> date | None:
+        return getattr(subject, "start_date", None)
 
     # ---- per-fact hooks ----
 
@@ -95,7 +107,7 @@ class FactHistoryService:
     async def live_rows(self, student_id: uuid.UUID) -> list:
         m = self.model
         rows = await self.session.execute(
-            select(m).where(m.student_id == student_id, m.superseded_by.is_(None)).order_by(m.valid_from)
+            select(m).where(self._subject_col() == student_id, m.superseded_by.is_(None)).order_by(m.valid_from)
         )
         return list(rows.scalars().all())
 
@@ -103,7 +115,7 @@ class FactHistoryService:
         """Live and superseded rows, oldest first — the full audit view."""
         m = self.model
         rows = await self.session.execute(
-            select(m).where(m.student_id == student_id).order_by(m.valid_from, m.recorded_at)
+            select(m).where(self._subject_col() == student_id).order_by(m.valid_from, m.recorded_at)
         )
         return list(rows.scalars().all())
 
@@ -120,14 +132,14 @@ class FactHistoryService:
         m = self.model
         rows = await self.session.execute(
             select(m)
-            .where(m.student_id.in_(student_ids), m.superseded_by.is_(None),
+            .where(self._subject_col().in_(student_ids), m.superseded_by.is_(None),
                    m.valid_from < window_end,
                    or_(m.valid_to.is_(None), m.valid_to > window_start))
-            .order_by(m.student_id, m.valid_from)
+            .order_by(self._subject_col(), m.valid_from)
         )
         out: dict[uuid.UUID, list[dict]] = {}
         for r in rows.scalars().all():
-            out.setdefault(r.student_id, []).append({
+            out.setdefault(getattr(r, self.subject_attr), []).append({
                 "value": self._value(r), "from": max(r.valid_from, window_start),
                 "to": min(r.valid_to, window_end) if r.valid_to is not None else None,
                 "rowId": r.id,
@@ -141,9 +153,10 @@ class FactHistoryService:
         origin: str, reason: str | None, user_id: uuid.UUID | None, source_event_id: uuid.UUID | None,
     ):
         row = self.model(
-            id=uuid.uuid4(), student_id=student.id, valid_from=valid_from, valid_to=valid_to,
+            id=uuid.uuid4(), valid_from=valid_from, valid_to=valid_to,
             origin=origin, reason=reason, recorded_by_user_id=user_id, source_event_id=source_event_id,
         )
+        setattr(row, self.subject_attr, student.id)
         setattr(row, self.value_attr, value)
         # History belongs to the student's institution, whatever context wrote it.
         if getattr(student, "tenant_id", None) is not None:
@@ -158,7 +171,7 @@ class FactHistoryService:
         """Open the first period with the student's current value (no-op if history exists)."""
         if await self.live_rows(student.id):
             return None
-        start = valid_from or student.start_date or today()
+        start = valid_from or self._start(student) or today()
         row = self._new_row(student, self.initial_value(student) if value is None else value, start, None,
                             origin=origin, reason=reason, user_id=user_id, source_event_id=None)
         await self.session.flush()
@@ -172,16 +185,16 @@ class FactHistoryService:
         """Record that the fact became ``value`` on ``effective_from`` (until ``effective_to`` if
         given, else until the next recorded change)."""
         d = effective_from
-        if student.start_date is not None and d < student.start_date:
+        if self._start(student) is not None and d < self._start(student):
             raise WorkflowError(
-                f"A {self.label} change cannot take effect before the student's start date ({student.start_date})"
+                f"A {self.label} change cannot take effect before the {self.subject_label}'s start date ({self._start(student)})"
             )
         if effective_to is not None and effective_to <= d:
             raise WorkflowError(f"The end of a {self.label} period must be after its start")
 
         if not await self.live_rows(student.id):
             # A student who predates this history: open it with today's value first.
-            seed_from = min(d, student.start_date) if student.start_date else d
+            seed_from = min(d, self._start(student)) if self._start(student) else d
             await self.initialise(student, valid_from=seed_from, origin="backfill",
                                   reason="Opened when the first dated change was recorded")
         rows = await self.live_rows(student.id)
@@ -238,9 +251,9 @@ class FactHistoryService:
             raise NotFoundError(f"{self.label.capitalize()} history row not found")
         if row.superseded_by is not None:
             raise ConflictError("This row has already been corrected; correct the current version")
-        student = await self.session.get(Student, row.student_id)
+        student = await self.session.get(self.subject_model, getattr(row, self.subject_attr))
 
-        rows = await self.live_rows(row.student_id)
+        rows = await self.live_rows(getattr(row, self.subject_attr))
         idx = next(i for i, r in enumerate(rows) if r.id == row.id)
         prev = rows[idx - 1] if idx > 0 else None
         new_from = valid_from or row.valid_from
@@ -254,8 +267,8 @@ class FactHistoryService:
                 raise WorkflowError(
                     f"The start must stay after the previous period's start ({prev.valid_from})"
                 )
-            if prev is None and student.start_date is not None and new_from < student.start_date:
-                raise WorkflowError(f"The start cannot precede the student's start date ({student.start_date})")
+            if prev is None and self._start(student) is not None and new_from < self._start(student):
+                raise WorkflowError(f"The start cannot precede the {self.subject_label}'s start date ({self._start(student)})")
 
         fixed = self._new_row(student, new_value, new_from, row.valid_to, origin="correction",
                               reason=reason, user_id=user_id, source_event_id=row.source_event_id)
@@ -287,8 +300,8 @@ class FactHistoryService:
         on = today()
         m = self.model
         rows = await self.session.execute(
-            select(Student, m)
-            .join(m, m.student_id == Student.id)
+            select(self.subject_model, m)
+            .join(m, self._subject_col() == self.subject_model.id)
             .where(m.superseded_by.is_(None), m.valid_from <= on,
                    or_(m.valid_to.is_(None), m.valid_to > on))
         )
@@ -327,7 +340,8 @@ class FactHistoryService:
 
     async def previous_value(self, row) -> Any:
         """The value in force just before ``row`` started."""
-        prev = next((r for r in await self.live_rows(row.student_id) if r.valid_to == row.valid_from), None)
+        prev = next((r for r in await self.live_rows(getattr(row, self.subject_attr))
+                     if r.valid_to == row.valid_from), None)
         return self._value(prev) if prev else None
 
     async def row_for_event(self, student_id: uuid.UUID, event_id: uuid.UUID, value: Any = None):
@@ -338,7 +352,7 @@ class FactHistoryService:
     def out(self, row) -> dict:
         return {
             "id": str(row.id),
-            "studentId": str(row.student_id),
+            self.subject_out_key: str(getattr(row, self.subject_attr)),
             self.out_key: self._out_value(self._value(row)),
             "validFrom": row.valid_from.isoformat(),
             "validTo": row.valid_to.isoformat() if row.valid_to else None,
