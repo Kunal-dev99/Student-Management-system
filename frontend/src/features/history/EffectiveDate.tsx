@@ -3,8 +3,9 @@
 /** Effective dating, Phase 5 — the "from when?" input every change form shares, plus the
  *  warnings that go with it:
  *  - the date reaches a return that has already been signed off (it may need resubmitting);
- *  - the date is before the open reporting year, which needs the history-correction permission.
- *  The server enforces both; this only says so before the user presses the button. */
+ *  - changing a signed-off year is a data amendment and needs the returns.amend permission.
+ *  Years whose return isn't signed off yet stay open to normal back-dating.
+ *  The server enforces this; here it is said before the user presses the button. */
 
 import { AlertTriangle, Lock } from 'lucide-react'
 import { Input } from '@/components/ui/input'
@@ -32,22 +33,19 @@ export function EffectiveDateCheck({
   const check = useRetrospectiveCheck(studentId, from, to)
   const c = check.data
   if (!c) return null
-  const blocked = c.beforeOpenYear && !c.canBackdate
-  if (!c.beforeOpenYear && c.warnings.length === 0) return null
+  if (!c.closed) return null
+  const blocked = !c.canAmend
   return (
     <div className={cn('space-y-1', className)}>
-      {c.beforeOpenYear && (
-        <p className={cn('flex items-start gap-1.5 text-xs',
-          blocked ? 'text-[hsl(var(--destructive))]' : 'text-muted-foreground')}>
-          <Lock className="h-3.5 w-3.5 mt-px shrink-0" />
-          <span>
-            Before the open reporting year (from {c.openYearStart}).{' '}
-            {blocked
-              ? 'Back-dating into a closed year needs history-correction rights — ask Registry.'
-              : 'You can back-date this because you hold history-correction rights.'}
-          </span>
-        </p>
-      )}
+      <p className={cn('flex items-start gap-1.5 text-xs',
+        blocked ? 'text-[hsl(var(--destructive))]' : 'text-muted-foreground')}>
+        <Lock className="h-3.5 w-3.5 mt-px shrink-0" />
+        <span>
+          {blocked
+            ? 'This date falls in a signed-off return. Changing it is a data amendment — ask the student data / returns team.'
+            : 'This date falls in a signed-off return. You can make this amendment because you hold returns-amendment rights.'}
+        </span>
+      </p>
       <RetrospectiveWarnings warnings={c.warnings} />
     </div>
   )

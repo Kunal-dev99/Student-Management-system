@@ -570,18 +570,18 @@ async def retrospective_check(
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(require_permission("student.read")),
 ) -> dict:
-    from app.modules.student_record.periods import BACKDATE_PERMISSION, open_year_start
+    from app.modules.student_record.periods import AMEND_PERMISSION
 
     student = await session.get(Student, student_id)
     if student is None:
         raise NotFoundError("Student not found")
-    year_start = open_year_start()
+    warnings = await warnings_for(session, student, start, end)
     return {
         "from": start.isoformat(), "to": end.isoformat() if end else None,
-        "openYearStart": year_start.isoformat(),
-        "beforeOpenYear": start < year_start,
-        "canBackdate": principal.has_permission(BACKDATE_PERMISSION),
-        "warnings": await warnings_for(session, student, start, end),
+        # A signed-off return covers this period: changing it is a data amendment.
+        "closed": bool(warnings),
+        "canAmend": principal.has_permission(AMEND_PERMISSION),
+        "warnings": warnings,
     }
 
 
@@ -604,8 +604,9 @@ async def approve_lifecycle_event(
 ) -> dict:
     svc = LifecycleService(session)
     event = await svc._get_event(event_id)
-    assert_backdate_allowed(event.start_date, principal,
-                            what=f"This {event.event_type.value.replace('_', ' ')}")
+    end = event.end_date if event.event_type is LifecycleEventType.suspension else None
+    await assert_backdate_allowed(session, event.start_date, principal, end=end,
+                                  what=f"This {event.event_type.value.replace('_', ' ')}")
     return await svc.approve_event(
         event_id, approver_user_id=principal.user_id, note=body.note if body else None
     )

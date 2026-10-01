@@ -7,7 +7,7 @@ What must hold:
   backfilled rows are not; unsigning clears the baseline
 - the history timeline merges every dated fact and marks the retrospective ones
 - the as-of view shows the record as it stood on a past date
-- dates before the open reporting year need the history-correction permission
+- a change reaching a signed-off return needs returns.amend; open years stay free
 """
 from __future__ import annotations
 
@@ -33,11 +33,7 @@ from app.modules.student_record import fact_history
 from app.modules.student_record.constants import StudentStatus, StudyMode
 from app.modules.student_record.fact_history import StatusHistoryService, initialise_all
 from app.modules.student_record.models import Programme, Student
-from app.modules.student_record.periods import (
-    BACKDATE_PERMISSION,
-    assert_backdate_allowed,
-    open_year_start,
-)
+from app.modules.student_record.periods import AMEND_PERMISSION, assert_backdate_allowed
 from app.modules.student_record.retrospective import changes_since_signoff, warnings_for
 from app.modules.student_record.timeline import StudentTimeline
 from app.modules.supervision.constants import SupervisorRole
@@ -195,20 +191,36 @@ async def test_as_of_shows_the_record_on_a_past_date(ctx, clock):
 
 
 # --------------------------------------------------------------------------------------
-# Back-dating limit
+# Closed years: a year closes when its return is signed off
 # --------------------------------------------------------------------------------------
 
-def test_open_year_start():
-    assert open_year_start(date(2026, 10, 1)) == date(2026, 8, 1)
-    assert open_year_start(date(2027, 7, 31)) == date(2026, 8, 1)
-    assert open_year_start(date(2026, 8, 1)) == date(2026, 8, 1)
-
-
-def test_backdating_before_the_open_year_needs_permission(clock):
+async def test_signed_off_year_needs_the_amend_permission(ctx, clock):
+    ids, sm = ctx
     plain = _principal("student.write")
-    assert_backdate_allowed(date(2026, 8, 1), plain, what="This change")      # inside the open year
-    assert_backdate_allowed(None, plain, what="This change")                  # today by default
-    assert_backdate_allowed(date(2026, 3, 1), None, what="This change")       # internal call
-    with pytest.raises(AppPermissionError, match="before the open reporting year"):
-        assert_backdate_allowed(date(2026, 7, 31), plain, what="This change")
-    assert_backdate_allowed(date(2026, 3, 1), _principal(BACKDATE_PERMISSION), what="This change")
+    async with sm() as s:
+        with pytest.raises(AppPermissionError, match="signed-off HESA Student 2025/26"):
+            await assert_backdate_allowed(s, date(2026, 3, 1), plain, what="This change")
+        # Open-ended from an older year still runs into the signed-off one.
+        with pytest.raises(AppPermissionError):
+            await assert_backdate_allowed(s, date(2025, 1, 1), plain, what="This change")
+        # History-correction rights are a different thing and don't amend returns.
+        with pytest.raises(AppPermissionError):
+            await assert_backdate_allowed(s, date(2026, 3, 1), _principal("student.history.correct"),
+                                          what="This change")
+        # Allowed: the open year, a bounded period ending before the signed-off year, today,
+        # internal calls, and holders of returns.amend.
+        await assert_backdate_allowed(s, date(2026, 8, 1), plain, what="This change")
+        await assert_backdate_allowed(s, date(2025, 1, 1), plain, what="This change", end=date(2025, 8, 1))
+        await assert_backdate_allowed(s, None, plain, what="This change")
+        await assert_backdate_allowed(s, date(2026, 3, 1), None, what="This change")
+        await assert_backdate_allowed(s, date(2026, 3, 1), _principal(AMEND_PERMISSION), what="This change")
+
+
+async def test_unsigned_years_stay_open(ctx, clock):
+    ids, sm = ctx
+    async with sm() as s:
+        p = await s.get(ReportProfile, ids["profile"])
+        p.signed_off_at = None
+        await s.commit()
+        # Last year's return is still being prepared: registry fixes its dates freely.
+        await assert_backdate_allowed(s, date(2026, 3, 1), _principal("student.write"), what="This change")

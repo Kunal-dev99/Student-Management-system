@@ -8,7 +8,7 @@ half-open periods (``valid_to`` is the first day no longer true) and follow thes
   read their ``status`` rather than their dates, so a future date would be wrong until the day;
 - a period can't end before it started;
 - the same supervisor can't have two overlapping periods for one student;
-- dates before the open reporting year need the history-correction permission (Phase 5).
+- a change reaching a signed-off return needs the returns-amendment permission (Phase 5).
 
 Recorded time is the row's ``created_at`` / ``updated_at`` plus the audit log.
 """
@@ -44,31 +44,32 @@ def overlaps(a_from: date, a_to: date | None, b_from: date, b_to: date | None) -
 
 
 # --------------------------------------------------------------------------------------
-# Back-dating limit (Phase 5): free within the open reporting year, elevated permission before it.
+# Closed years (Phase 5): a reporting year closes when its return is signed off.
 # --------------------------------------------------------------------------------------
 
-# Back-dating into a closed reporting year rewrites what an earlier return said, so it needs the
-# same permission as correcting history.
-BACKDATE_PERMISSION = "student.history.correct"
+# Changing what a signed-off return covered is a statutory data amendment (OfS: only for genuine,
+# material errors). Like a closed accounting period it belongs to a small returns / student-data
+# team, not to everyone who records day-to-day changes — and it is kept separate from
+# student.history.correct, which rewrites recorded history.
+AMEND_PERMISSION = "returns.amend"
 
 
-def open_year_start(on: date | None = None) -> date:
-    """1 August of the HESA reporting year that contains ``on`` (default today)."""
-    on = on or fact_history.today()
-    return date(on.year if on.month >= 8 else on.year - 1, 8, 1)
-
-
-def assert_backdate_allowed(d: date | None, principal, *, what: str) -> None:
-    """Refuse a date before the open reporting year unless the user may correct history.
+async def assert_backdate_allowed(session, d: date | None, principal, *, what: str,
+                                  end: date | None = None) -> None:
+    """Refuse a change whose period ``[d, end)`` reaches a signed-off return, unless the user may
+    amend returns. Years without a signed-off return stay open to normal back-dating.
 
     ``principal`` None means an internal call (scheduler, tests, migrations): no check.
     """
-    if d is None or principal is None:
+    if d is None or principal is None or principal.has_permission(AMEND_PERMISSION):
         return
-    start = open_year_start()
-    if d < start and not principal.has_permission(BACKDATE_PERMISSION):
+    from app.modules.student_record.retrospective import affected, signed_off_returns
+
+    hits = affected(await signed_off_returns(session), d, end, None)
+    if hits:
+        names = ", ".join(f"{r.name} {r.academic_year}" for r in hits)
         raise PermissionError(
-            f"{what} is dated {d.isoformat()}, before the open reporting year (from "
-            f"{start.isoformat()}). Back-dating into a closed year needs the "
-            f"'{BACKDATE_PERMISSION}' permission — ask Registry."
+            f"{what} is dated {d.isoformat()}, inside the signed-off {names} return. Changing a "
+            f"signed-off year is a data amendment and needs the '{AMEND_PERMISSION}' permission "
+            "— ask the student data / returns team."
         )

@@ -94,7 +94,7 @@ async def create_funding(
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(require_permission("funding.change")),
 ) -> ArrangementOut:
-    assert_backdate_allowed(body.valid_from, principal, what="This funding")
+    await assert_backdate_allowed(session, body.valid_from, principal, what="This funding")
     a = await _svc(session).create_arrangement(student_id, body)
     names = await FundingRepository(session).source_names()
     return ArrangementOut.model_validate(await _svc(session)._arrangement_dict(a, names))
@@ -107,7 +107,7 @@ async def change_funding(
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(require_permission("funding.change")),
 ) -> ArrangementOut:
-    assert_backdate_allowed(body.effective_date, principal, what="This funding change")
+    await assert_backdate_allowed(session, body.effective_date, principal, what="This funding change")
     a = await _svc(session).change(arrangement_id, body)
     names = await FundingRepository(session).source_names()
     return ArrangementOut.model_validate(await _svc(session)._arrangement_dict(a, names))
@@ -120,7 +120,7 @@ async def end_funding(
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(require_permission("funding.change")),
 ) -> ArrangementOut:
-    assert_backdate_allowed(body.effective_date if body else None, principal, what="Ending this funding")
+    await assert_backdate_allowed(session, body.effective_date if body else None, principal, what="Ending this funding")
     a = await _svc(session).end(arrangement_id, on=body.effective_date if body else None)
     names = await FundingRepository(session).source_names()
     return ArrangementOut.model_validate(await _svc(session)._arrangement_dict(a, names))

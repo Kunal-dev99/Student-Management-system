@@ -55,7 +55,7 @@ async def assign_supervisor(
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(require_permission("student.write")),
 ) -> SupervisorOut:
-    assert_backdate_allowed(body.valid_from, principal, what="This supervision")
+    await assert_backdate_allowed(session, body.valid_from, principal, what="This supervision")
     rel = await _svc(session).assign(
         student_id, body.supervisor_person_id, body.role, weighting_pct=body.weighting_pct,
         valid_from=body.valid_from,
@@ -72,7 +72,7 @@ async def end_supervision(
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(require_permission("student.write")),
 ) -> SupervisorOut:
-    assert_backdate_allowed(body.effective_date if body else None, principal, what="Ending this supervision")
+    await assert_backdate_allowed(session, body.effective_date if body else None, principal, what="Ending this supervision")
     rel = await _svc(session).end(
         rel_id, body.reason if body else None, on=body.effective_date if body else None,
     )
@@ -89,7 +89,7 @@ async def replace_supervisor(
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(require_permission("student.write")),
 ) -> SupervisorOut:
-    assert_backdate_allowed(body.effective_date, principal, what="This change of supervisor")
+    await assert_backdate_allowed(session, body.effective_date, principal, what="This change of supervisor")
     rel = await _svc(session).replace(
         rel_id, body.new_supervisor_person_id, reason=body.reason, on=body.effective_date,
         weighting_pct=body.weighting_pct,

@@ -63,9 +63,10 @@ export interface StudentAsOf {
 export interface RetrospectiveCheck {
   from: string
   to: string | null
-  openYearStart: string
-  beforeOpenYear: boolean
-  canBackdate: boolean
+  /** A signed-off return covers this period — changing it is a data amendment. */
+  closed: boolean
+  /** The user holds returns.amend. */
+  canAmend: boolean
   warnings: RetrospectiveWarning[]
 }
 
