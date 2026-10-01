@@ -37,6 +37,7 @@ import { ApiError } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthContext'
 import { downloadExport } from '@/features/exports/api'
 import { AdvisoriesPanel } from '@/features/statutory/AdvisoriesPanel'
+import { RetrospectiveChangesPanel } from '@/features/statutory/RetrospectiveChangesPanel'
 import {
   useAddField, useCloneProfile, useCompileProfile, useCreateFromSpec, useCreateProfile,
   useGenerateProfile, useProfile, useProfiles, useSignOffProfile, useSpecs, useTransforms,
@@ -1986,6 +1987,9 @@ function SignOffCard({ profileId, canSignOff }: { profileId: string; canSignOff:
           </span>
         )}
       </div>
+
+      {/* Effective dating, Phase 5 — what moved inside this return's year since sign-off. */}
+      {signed && <RetrospectiveChangesPanel profileId={profileId} />}
 
       {r.suppressions && r.suppressions.length > 0 && (
         <SuppressionsPanel profileId={profileId} suppressions={r.suppressions} canManage={canSignOff} signed={signed} />

@@ -122,6 +122,8 @@ class LifecycleEventOut(_Camel):
     decided_at: str | None = None
     # ICR G6 — deterministic "what will this do" preview, attached to a requested intensity change.
     impact: dict | None = None
+    # Effective dating, Phase 5 — signed-off returns approving this would reach.
+    retrospective: list[dict] = []
 
 
 class StudentUpdate(_Camel):

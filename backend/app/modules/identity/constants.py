@@ -41,6 +41,10 @@ PERMISSIONS: dict[str, str] = {
     # Effective dating — fixing a status period that was recorded wrongly rewrites history, so it
     # is an elevated act: not in the PGR Administrator bundle; "*" roles hold it by default.
     "student.history.correct": "Correct a student's recorded status history (dates or values)",
+    # Effective dating, Phase 5 — a change dated inside a year whose statutory return is signed
+    # off is a data amendment. Held by a returns / student-data team (and "*" roles), deliberately
+    # not by PGR Administrator, who signs returns off (separation of duties).
+    "returns.amend": "Make changes dated inside a signed-off statutory return (data amendment)",
     # Pattern Lab (PL-1) — discovery is powerful enough to deserve its own verbs; training
     # and approval permissions arrive with PL-3/PL-4.
     "ml.read": "View Pattern Lab targets, datasets, findings and predictions",

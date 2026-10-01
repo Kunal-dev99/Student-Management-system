@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/select'
 import { useToast } from '@/components/ui/use-toast'
 import { useCan } from '@/shared/auth/Can'
+import { EffectiveDateCheck } from '@/features/history/EffectiveDate'
 import {
   useAddAssessment, useAvailableElectives, useComputeAward, useCondoneModule, useCreateModule,
   useEnrolModule, useLinkElective, useProgrammeModules, useRecordResult, useSetEnrolmentStatus,
@@ -268,6 +269,9 @@ export function TaughtRecordPanel({ studentId, programmeId }: { studentId: strin
                                   } catch (er) { err(er) }
                                 }}>Apply</Button>
                             </div>
+                            {sd.status !== e.status && sd.date && (
+                              <EffectiveDateCheck studentId={studentId} from={sd.date} className="max-w-xl" />
+                            )}
                             {/* The student's own module dates (e.g. a late joiner). */}
                             <div className="flex flex-wrap items-center gap-2">
                               <span className="text-helper">Dates</span>

@@ -515,6 +515,18 @@ async def sign_off_profile(
     return eng.profile_out(profile)
 
 
+@profiles_router.get("/{profile_id}/retrospective-changes",
+                     summary="Changes recorded after sign-off that fall inside this return's year")
+async def retrospective_changes(
+    profile_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("reporting.read")),
+) -> dict:
+    from app.modules.student_record.retrospective import changes_since_signoff
+
+    return await changes_since_signoff(session, profile_id)
+
+
 @profiles_router.post("/{profile_id}/unsign", summary="Unlock a signed-off profile for edits")
 async def unsign_profile(
     profile_id: uuid.UUID,
