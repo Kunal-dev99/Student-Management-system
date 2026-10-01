@@ -24,13 +24,17 @@ from app.modules.student_record.constants import (
     DEFAULT_PART_TIME_INTENSITY_PCT,
     FULL_TIME_INTENSITY_PCT,
     PART_TIME_FACTOR,
+    PAUSED_STATUSES,
+    STATUS_EVENT_TARGETS,
     SUSPENDABLE_STATUSES,
+    TERMINAL_STATUSES,
     LifecycleEventStatus,
     LifecycleEventType,
     StudentStatus,
     StudyMode,
 )
 from app.modules.student_record.models import Student, StudentLifecycleEvent
+from app.modules.student_record.status_history import StatusHistoryService
 
 
 def _now() -> datetime:
@@ -151,6 +155,22 @@ class LifecycleService:
             if new_prog is None:
                 raise NotFoundError("Target programme not found")
             previous_programme_id = student.programme_id
+        elif event_type in STATUS_EVENT_TARGETS:
+            # Writing up / withdrawal / termination: an effective-dated status change.
+            if student.status in TERMINAL_STATUSES:
+                raise WorkflowError(
+                    f"A student with status '{student.status.value}' has already left; "
+                    "correct their status history instead"
+                )
+            if (event_type is LifecycleEventType.writing_up
+                    and student.status not in (StudentStatus.registered, StudentStatus.active)):
+                raise WorkflowError(
+                    f"A student with status '{student.status.value}' cannot move to writing up"
+                )
+            if student.start_date is not None and start_date < student.start_date:
+                raise WorkflowError(
+                    f"The effective date cannot precede the student's start date ({student.start_date})"
+                )
 
         event = StudentLifecycleEvent(
             student_id=student_id, event_type=event_type,
@@ -244,7 +264,12 @@ class LifecycleService:
             # Days are provisional until the student actually returns; the planned window is
             # applied now and corrected on return.
             event.days_applied = (event.end_date - event.start_date).days
-            student.status = StudentStatus.suspended
+            # Suspended from the start date. A future start leaves today's status alone; the
+            # scheduler moves the cached status when the date arrives.
+            await StatusHistoryService(self.session).change(
+                student, StudentStatus.suspended, effective_from=event.start_date,
+                reason=event.reason, user_id=approver_user_id, source_event_id=event.id,
+            )
         elif event.event_type is LifecycleEventType.extension:
             event.days_applied = event.extension_days
         elif event.event_type is LifecycleEventType.mode_change:
@@ -263,6 +288,11 @@ class LifecycleService:
             student.study_mode = (
                 StudyMode.full_time if (event.intensity_pct or 0) >= FULL_TIME_INTENSITY_PCT
                 else StudyMode.part_time
+            )
+        elif event.event_type in STATUS_EVENT_TARGETS:
+            await StatusHistoryService(self.session).change(
+                student, STATUS_EVENT_TARGETS[event.event_type], effective_from=event.start_date,
+                reason=event.reason, user_id=approver_user_id, source_event_id=event.id,
             )
         elif event.event_type is LifecycleEventType.programme_change:
             # Programme transfer has its own recalc — no days_applied contribution; the
@@ -608,22 +638,47 @@ class LifecycleService:
         """End the current suspension. If the student returned early or late, the difference is
         applied so the expected end date reflects what actually happened."""
         student = await self._get_student(student_id)
-        if student.status not in (StudentStatus.suspended, StudentStatus.on_leave):
-            raise WorkflowError("This student is not currently suspended")
         current = await self._current_suspension(student_id)
+        if student.status not in PAUSED_STATUSES and current is None:
+            raise WorkflowError("This student is not currently suspended")
         if current is None:
             raise NotFoundError("No approved suspension to return from")
 
         actual = returned_on or date.today()
         if actual < current.start_date:
             raise WorkflowError("The return date cannot precede the suspension start")
-        current.actual_end_date = actual
-        current.days_applied = (actual - current.start_date).days   # correct the provisional figure
-        student.status = StudentStatus.active
+        await self._end_suspension(student, current, actual)
 
         recalc = await self._recalculate(student)
         await self.session.commit()
         return {"event": self.out(current), "recalculation": recalc}
+
+    async def _end_suspension(
+        self, student: Student, ev: StudentLifecycleEvent, actual: date,
+        user_id: uuid.UUID | None = None,
+    ) -> None:
+        """Close a suspension on ``actual`` and restore the status the student had before it
+        (e.g. writing up), rather than assuming they were active."""
+        hist = StatusHistoryService(self.session)
+        row = await hist.row_for_event(student.id, ev.id, StudentStatus.suspended)
+        if row is not None and row.valid_to is not None and actual >= row.valid_to:
+            # Something else (e.g. a withdrawal) already ended the suspended status earlier.
+            actual = row.valid_to
+            restore = None
+        elif row is not None:
+            restore = await hist.previous_value(row)
+            if restore is None or restore in PAUSED_STATUSES or restore in TERMINAL_STATUSES:
+                restore = StudentStatus.active
+        else:
+            # A suspension approved before status history existed.
+            restore = StudentStatus.active if student.status in PAUSED_STATUSES else None
+
+        ev.actual_end_date = actual
+        ev.days_applied = (actual - ev.start_date).days   # correct the provisional figure
+        if restore is not None:
+            await hist.change(student, restore, effective_from=actual,
+                              reason="Returned from suspension", user_id=user_id,
+                              source_event_id=ev.id)
 
     async def _current_suspension(self, student_id: uuid.UUID) -> StudentLifecycleEvent | None:
         for ev in sorted(await self.events_for_student(student_id), key=lambda e: e.start_date, reverse=True):
@@ -875,13 +930,15 @@ class LifecycleService:
             )
         )
         returned = 0
+        hist = StatusHistoryService(self.session)
         for ev in rows.scalars().all():
             student = await self._get_student(ev.student_id)
-            if student.status not in (StudentStatus.suspended, StudentStatus.on_leave):
+            # Decide from history, not the cache: a suspension whose start and end both passed
+            # while the worker was down never showed "suspended" in the cache.
+            tracked = await hist.row_for_event(student.id, ev.id, StudentStatus.suspended)
+            if tracked is None and student.status not in PAUSED_STATUSES:
                 continue
-            ev.actual_end_date = ev.end_date
-            ev.days_applied = (ev.end_date - ev.start_date).days
-            student.status = StudentStatus.active
+            await self._end_suspension(student, ev, ev.end_date)
             await self._recalculate(student)
             returned += 1
         if returned:

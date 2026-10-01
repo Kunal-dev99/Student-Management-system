@@ -10,6 +10,10 @@ from app.modules.person.service import PersonService
 from app.modules.student_record.constants import StudentStatus, StudyMode
 from app.modules.student_record.models import Programme, ResearchProject, Student
 from app.modules.student_record.repository import StudentRepository
+from app.modules.student_record.status_history import StatusHistoryService
+
+# Fields whose changes must be effective-dated, so a direct edit is refused.
+DATED_FIELDS = {"status", "study_mode", "programme_id"}
 
 
 def _generate_student_ref() -> str:
@@ -70,6 +74,14 @@ class StudentService:
         )).scalar())
 
     async def update_student(self, student_id: uuid.UUID, patch: dict) -> Student:
+        # Status, mode and programme are effective-dated: they change through an approved
+        # lifecycle event (with a date and an approver), never by a direct edit.
+        dated = sorted(set(patch) & DATED_FIELDS)
+        if dated:
+            raise ConflictError(
+                f"{', '.join(dated)} can't be edited directly; request a lifecycle change "
+                "(suspension, withdrawal, writing up, mode or programme change) instead"
+            )
         student = await self.get_student(student_id)
         for key, value in patch.items():
             setattr(student, key, value)
@@ -159,6 +171,8 @@ class StudentService:
                 start_date=student.start_date,
             )
         await self.repo.add(student)
+        # Every student's status history starts at enrolment (effective dating).
+        await StatusHistoryService(self.repo.session).initialise(student, valid_from=student.start_date)
         return student
 
     async def enrol(

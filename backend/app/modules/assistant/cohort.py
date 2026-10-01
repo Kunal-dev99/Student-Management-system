@@ -20,13 +20,13 @@ from app.modules.funding.models import FundingArrangement
 from app.modules.person.models import Person
 from app.modules.progression.constants import MilestoneStatus
 from app.modules.progression.models import Milestone, MilestoneDefinition
-from app.modules.student_record.constants import StudentStatus
+from app.modules.student_record.constants import STUDYING_STATUSES, StudentStatus
 from app.modules.student_record.models import Programme, Student
 from app.modules.supervision.models import SupervisionMeeting, SupervisorRelationship
 from app.modules.thesis.models import Thesis
 
 # Statuses that count as "currently studying".
-ACTIVE_STATUSES = [StudentStatus.registered, StudentStatus.active]
+ACTIVE_STATUSES = list(STUDYING_STATUSES)
 
 
 class CohortQuery:

@@ -20,10 +20,10 @@ from app.modules.person.constants import PersonRelationshipType
 from app.modules.person.models import Person, PersonRelationship
 from app.modules.progression.constants import MilestoneStatus
 from app.modules.progression.models import Milestone
-from app.modules.student_record.constants import StudentStatus
+from app.modules.student_record.constants import STUDYING_STATUSES, StudentStatus
 from app.modules.student_record.models import Programme, ResearchArea, ResearchProject, Student
 
-ACTIVE_STATES = {StudentStatus.registered, StudentStatus.active}
+ACTIVE_STATES = set(STUDYING_STATUSES)
 
 
 class AnalyticsService:

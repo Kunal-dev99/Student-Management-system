@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.authorization import student_scope
 from app.core.dependencies import get_current_principal, require_permission
-from app.core.errors import ValidationAppError
+from app.core.errors import NotFoundError, ValidationAppError
 from app.core.pagination import PageParams, list_envelope, page_params
 from app.core.principal import Principal
 from app.db.session import get_session
@@ -41,11 +41,14 @@ from app.modules.student_record.schemas import (
     ProgrammeUpdate,
     ResearchProjectOut,
     ReturnRequest,
+    StatusCorrectionRequest,
     StudentOut,
     StudentSummary,
     StudentUpdate,
 )
+from app.modules.student_record.models import Student, StudentStatusHistory
 from app.modules.student_record.service import StudentService
+from app.modules.student_record.status_history import StatusHistoryService
 
 router = APIRouter(prefix="/students", tags=["student"])
 programmes_router = APIRouter(prefix="/programmes", tags=["student"])
@@ -477,6 +480,43 @@ async def record_return(
     return await LifecycleService(session).record_return(
         student_id, returned_on=body.returned_on if body else None
     )
+
+
+# --- Effective dating — status history ---
+
+@router.get("/{student_id}/status-history", summary="Status history (effective-dated periods)")
+async def status_history(
+    student_id: uuid.UUID,
+    include_superseded: bool = Query(False, alias="includeSuperseded"),
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_permission("student.read")),
+) -> list[dict]:
+    allowed = await scoped_ids(principal, session)
+    if allowed is not None and student_id not in allowed:
+        return []
+    hist = StatusHistoryService(session)
+    rows = await (hist.all_rows(student_id) if include_superseded else hist.live_rows(student_id))
+    return [hist.out(r) for r in rows]
+
+
+@router.post("/{student_id}/status-history/{row_id}/correct",
+             summary="Correct a status period recorded wrongly (kept for audit, superseded)")
+async def correct_status_history(
+    student_id: uuid.UUID,
+    row_id: uuid.UUID,
+    body: StatusCorrectionRequest,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_permission("student.history.correct")),
+) -> dict:
+    hist = StatusHistoryService(session)
+    row = await session.get(StudentStatusHistory, row_id)
+    if row is None or row.student_id != student_id:
+        raise NotFoundError("Status history row not found for this student")
+    fixed = await hist.correct(row_id, valid_from=body.valid_from, status=body.status,
+                               reason=body.reason, user_id=principal.user_id)
+    student = await session.get(Student, student_id)
+    await session.commit()
+    return {"row": hist.out(fixed), "studentStatus": student.status.value}
 
 
 @lifecycle_router.get("/{event_id}/impact",

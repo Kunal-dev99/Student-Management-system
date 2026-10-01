@@ -92,6 +92,13 @@ class ReturnRequest(_Camel):
     returned_on: date | None = None
 
 
+class StatusCorrectionRequest(_Camel):
+    """Fix a status period that was recorded wrongly: a new start date and/or value."""
+    valid_from: date | None = None
+    status: StudentStatus | None = None
+    reason: str
+
+
 class LifecycleEventOut(_Camel):
     id: str
     student_id: str

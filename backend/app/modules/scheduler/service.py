@@ -16,7 +16,7 @@ from app.modules.funding.constants import FundingStatus
 from app.modules.funding.models import FundingArrangement
 from app.modules.progression.repository import ProgressionRepository
 from app.modules.progression.service import ProgressionService
-from app.modules.student_record.constants import StudentStatus
+from app.modules.student_record.constants import STUDYING_STATUSES
 from app.modules.student_record.models import Student
 from app.modules.workflow.constants import NotificationStatus, OPEN_TASK_STATES, TaskStatus
 from app.modules.workflow.engine import WorkflowEngine
@@ -31,7 +31,10 @@ class SchedulerService:
 
     async def run_all(self) -> dict:
         return {
-            # Returns come first: a student who returned today should be chased normally again.
+            # Dated status changes whose day has arrived (e.g. a suspension starting today) first,
+            # so every later step sees today's status.
+            "statusChangesApplied": await self._apply_due_status_changes(),
+            # Returns come next: a student who returned today should be chased normally again.
             "studentsReturnedFromSuspension": await self._auto_return_suspensions(),
             "milestonesGenerated": await self._generate_due_milestones(),
             "fundingExpiringFlagged": await self._flag_funding_expiring(),
@@ -40,6 +43,14 @@ class SchedulerService:
             "viewsRefreshed": "n/a (dashboards computed on demand)",
             "ranAt": datetime.now(timezone.utc).isoformat(),
         }
+
+    async def _apply_due_status_changes(self) -> int:
+        from app.modules.student_record.status_history import StatusHistoryService
+
+        changed = await StatusHistoryService(self.session).refresh_due()
+        if changed:
+            await self.session.commit()
+        return changed
 
     async def _auto_return_suspensions(self) -> int:
         from app.modules.student_record.lifecycle import LifecycleService
@@ -65,7 +76,7 @@ class SchedulerService:
     async def _generate_due_milestones(self) -> int:
         stmt = select(Student).where(
             Student.programme_id.is_not(None),
-            Student.status.in_([StudentStatus.registered, StudentStatus.active]),
+            Student.status.in_(list(STUDYING_STATUSES)),
         )
         students = (await self.session.execute(stmt)).scalars().all()
         prog = ProgressionService(ProgressionRepository(self.session))

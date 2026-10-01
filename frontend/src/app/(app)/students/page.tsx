@@ -13,13 +13,14 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { useCan } from '@/shared/auth/Can'
 import { EnrolStudentDialog } from '@/features/students/EnrolStudentDialog'
 import { CohortImportDialog } from '@/features/students/CohortImportDialog'
-import { useStudents, type StudentStatus } from '@/features/students/api'
+import { STUDENT_STATUS_TONE, useStudents, type StudentStatus } from '@/features/students/api'
 
 const PAGE_SIZE = 50
 
 const STATUS_FILTERS: { value: StudentStatus | 'all'; label: string }[] = [
   { value: 'all', label: 'All' },
   { value: 'active', label: 'Active' },
+  { value: 'writing_up', label: 'Writing up' },
   { value: 'registered', label: 'Registered' },
   { value: 'prospective', label: 'Prospective' },
   { value: 'on_leave', label: 'On leave' },
@@ -29,16 +30,7 @@ const STATUS_FILTERS: { value: StudentStatus | 'all'; label: string }[] = [
   { value: 'terminated', label: 'Terminated' },
 ]
 
-const STATUS_TONE: Record<StudentStatus, BadgeProps['variant']> = {
-  prospective: 'secondary',
-  registered: 'info',
-  active: 'success',
-  on_leave: 'warning',
-  suspended: 'warning',
-  completed: 'success',
-  withdrawn: 'destructive',
-  terminated: 'destructive',
-}
+const STATUS_TONE: Record<StudentStatus, BadgeProps['variant']> = STUDENT_STATUS_TONE
 
 export default function StudentsPage() {
   const [search, setSearch] = useState('')

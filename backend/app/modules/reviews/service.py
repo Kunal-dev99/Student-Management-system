@@ -20,12 +20,12 @@ from app.modules.funding.constants import FundingStatus
 from app.modules.funding.models import FundingArrangement
 from app.modules.progression.constants import MilestoneStatus
 from app.modules.progression.models import Milestone
-from app.modules.student_record.constants import StudentStatus
+from app.modules.student_record.constants import STUDYING_STATUSES, StudentStatus
 from app.modules.student_record.models import Student
 from app.modules.person.models import Person
 
 
-ACTIVE = {StudentStatus.registered, StudentStatus.active}
+ACTIVE = set(STUDYING_STATUSES)
 
 
 @dataclass(frozen=True)

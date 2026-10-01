@@ -38,6 +38,9 @@ PERMISSIONS: dict[str, str] = {
     # Phase 6.5 — approving a suspension/extension is what actually moves a student's dates,
     # so it is a separate permission from ordinary student.write.
     "student.lifecycle.approve": "Approve suspensions, extensions and mode changes",
+    # Effective dating — fixing a status period that was recorded wrongly rewrites history, so it
+    # is an elevated act: not in the PGR Administrator bundle; "*" roles hold it by default.
+    "student.history.correct": "Correct a student's recorded status history (dates or values)",
     # Pattern Lab (PL-1) — discovery is powerful enough to deserve its own verbs; training
     # and approval permissions arrive with PL-3/PL-4.
     "ml.read": "View Pattern Lab targets, datasets, findings and predictions",

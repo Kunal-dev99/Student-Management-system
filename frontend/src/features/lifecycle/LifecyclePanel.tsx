@@ -37,6 +37,18 @@ const EVENT_LABELS: Record<LifecycleEventType, string> = {
   mode_change: 'Mode change',
   intensity_change: 'Intensity change',
   programme_change: 'Transfer to another programme',
+  writing_up: 'Move to writing up',
+  withdrawal: 'Withdrawal',
+  termination: 'Termination',
+}
+
+/** Effective-dated status changes: the student's status changes from the effective date. */
+const STATUS_EVENTS: LifecycleEventType[] = ['writing_up', 'withdrawal', 'termination']
+
+const STATUS_EVENT_HELP: Partial<Record<LifecycleEventType, string>> = {
+  writing_up: 'The research period is complete and the student is writing up the thesis. They stay a studying student.',
+  withdrawal: 'The student leaves the programme. Use the last date of engagement.',
+  termination: 'The institution ends the registration. Use the date it takes effect.',
 }
 
 const STATUS_VARIANT: Record<LifecycleEventStatus, 'success' | 'warning' | 'destructive' | 'secondary'> = {
@@ -48,7 +60,7 @@ const STATUS_VARIANT: Record<LifecycleEventStatus, 'success' | 'warning' | 'dest
 
 /** Statuses where the student is off the clock and a return can be recorded. */
 const PAUSED = ['suspended', 'on_leave']
-const HEALTHY = ['active', 'registered']
+const HEALTHY = ['active', 'registered', 'writing_up']
 
 function dayDelta(from: string, to: string): number {
   return Math.round((Date.parse(to) - Date.parse(from)) / 86_400_000)
@@ -60,6 +72,9 @@ function eventDates(e: LifecycleEvent): string {
   }
   if (e.eventType === 'programme_change') {
     return `effective ${e.effectiveDate ?? e.startDate}`
+  }
+  if (STATUS_EVENTS.includes(e.eventType)) {
+    return `effective ${e.startDate}`
   }
   const end = e.actualEndDate ?? e.endDate
   return end ? `${e.startDate} → ${end}${e.actualEndDate ? ' (actual)' : ''}` : e.startDate
@@ -154,10 +169,10 @@ function RequestDialog({ studentId, student }: { studentId: string; student?: St
     setNewProgrammeId(''); setLeaveCategory(''); setReason('')
   }
 
-  // Default the programme-change effective date to today the first time the user picks the type.
+  // Default an effective date to today the first time the user picks a dated type.
   const onTypeChange = (v: LifecycleEventType) => {
     setEventType(v)
-    if (v === 'programme_change' && !startDate) setStartDate(today)
+    if ((v === 'programme_change' || STATUS_EVENTS.includes(v)) && !startDate) setStartDate(today)
   }
 
   const intensityValid = Number(intensityPct) >= 1 && Number(intensityPct) <= 100
@@ -218,7 +233,7 @@ function RequestDialog({ studentId, student }: { studentId: string; student?: St
         <div className="-mr-2 flex-1 space-y-3 overflow-y-auto pr-2">
           <div className="space-y-1.5">
             <Label>Type</Label>
-            <Select value={eventType} onValueChange={(v) => setEventType(v as LifecycleEventType)}>
+            <Select value={eventType} onValueChange={(v) => onTypeChange(v as LifecycleEventType)}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 {(Object.keys(EVENT_LABELS) as LifecycleEventType[]).map((t) => (
@@ -379,6 +394,18 @@ function RequestDialog({ studentId, student }: { studentId: string; student?: St
                 />
               )}
             </>
+          )}
+
+          {STATUS_EVENTS.includes(eventType) && (
+            <div className="space-y-1.5">
+              <Label htmlFor="lc-seff">Effective date</Label>
+              <Input id="lc-seff" type="date" value={startDate}
+                onChange={(e) => setStartDate(e.target.value)} />
+              <p className="text-helper">
+                {STATUS_EVENT_HELP[eventType]} The status changes from this date once approved;
+                a future date takes effect on the day.
+              </p>
+            </div>
           )}
 
           <div className="space-y-1.5">
@@ -545,7 +572,7 @@ export function LifecyclePanel({ studentId, student }: { studentId: string; stud
       icon={CalendarRange}
       title="Lifecycle changes"
       accent={shifted ? 'warning' : 'primary'}
-      description="Suspensions, extensions and mode changes — and what they did to the timeline."
+      description="Suspensions, extensions, mode and programme changes, writing up and withdrawals — and what they did to the timeline."
       headerRight={
         canRequest ? (
           <div className="flex items-center gap-2">
