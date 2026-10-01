@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import uuid
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, ConfigDict
 from pydantic.alias_generators import to_camel
 from fastapi.responses import Response
@@ -104,6 +104,8 @@ class FieldUpdate(BaseModel):
 class SignOffRequest(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
     notes: str | None = None
+    # Phase 7 — the date the signed-off return's values are taken as at (default: year end).
+    as_at: date | None = None
 
 
 class FromSpecRequest(BaseModel):
@@ -250,14 +252,24 @@ async def clone_profile(
     return eng.profile_out(await eng.clone_profile(profile_id, academic_year=body.academic_year))
 
 
+def _snapshot(as_at: date | None, known_at: datetime | None) -> dict:
+    """Effective dating, Phase 7 — HESA snapshot parameters, shared by generate / validate."""
+    if known_at is not None and known_at.tzinfo is None:
+        known_at = known_at.replace(tzinfo=timezone.utc)
+    return {"as_at": as_at, "known_at": known_at}
+
+
 @profiles_router.get("/{profile_id}/validate", summary="Validation report without producing a file")
 async def validate_profile(
     profile_id: uuid.UUID,
+    as_at: date | None = Query(None, alias="asAt", description="Values as in force on this date"),
+    known_at: datetime | None = Query(None, alias="knownAt", description="Data as recorded at this moment"),
     session: AsyncSession = Depends(get_session),
     _=Depends(require_permission("reporting.read")),
 ) -> dict:
-    result = await _engine(session).generate(profile_id)
+    result = await _engine(session).generate(profile_id, **_snapshot(as_at, known_at))
     return {"profile": result["profile"], "rowCount": result["rowCount"],
+            "asAt": result["asAt"], "knownAt": result["knownAt"],
             "validation": result["validation"]}
 
 
@@ -452,12 +464,14 @@ async def preview_transform(
 @profiles_router.post("/{profile_id}/generate", status_code=201, summary="Produce the statutory extract")
 async def generate_profile(
     profile_id: uuid.UUID,
+    as_at: date | None = Query(None, alias="asAt", description="Values as in force on this date"),
+    known_at: datetime | None = Query(None, alias="knownAt", description="Data as recorded at this moment"),
     session: AsyncSession = Depends(get_session),
     _=Depends(require_permission("reporting.read")),
 ) -> dict:
     from app.modules.exports.service import ExportService
 
-    return await ExportService(session).run_statutory_profile(profile_id)
+    return await ExportService(session).run_statutory_profile(profile_id, **_snapshot(as_at, known_at))
 
 
 # --- F1 — sign-off, immutability, and mandatory-field gap report ---
@@ -511,8 +525,45 @@ async def sign_off_profile(
     principal=Depends(require_permission("reports.signoff")),
 ) -> dict:
     eng = _engine(session)
-    profile = await eng.sign_off(profile_id, user_id=principal.user_id, notes=body.notes)
+    profile = await eng.sign_off(profile_id, user_id=principal.user_id, notes=body.notes,
+                                 as_at=body.as_at)
     return eng.profile_out(profile)
+
+
+# --- Effective dating, Phase 7 — the return frozen at sign-off ---
+
+@profiles_router.get("/{profile_id}/versions", summary="Returns frozen at sign-off (newest first)")
+async def list_return_versions(
+    profile_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("reporting.read")),
+) -> list[dict]:
+    eng = _engine(session)
+    return [eng.version_out(v) for v in await eng.versions(profile_id)]
+
+
+@profiles_router.get("/{profile_id}/versions/{version_id}/download",
+                     summary="Download a frozen return exactly as it was signed off (CSV)")
+async def download_return_version(
+    profile_id: uuid.UUID,
+    version_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("reporting.read")),
+) -> Response:
+    import csv
+    import io
+
+    eng = _engine(session)
+    v = await eng.get_version(profile_id, version_id)
+    profile = await eng.get_profile(profile_id)
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(v.header)
+    w.writerows(v.rows)
+    name = (f"{profile.code.lower()}_{v.academic_year.replace('/', '-')}_v{v.version_no}_"
+            f"{v.known_at.strftime('%Y%m%d')}.csv")
+    return Response(content=buf.getvalue(), media_type="text/csv",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
 @profiles_router.get("/{profile_id}/retrospective-changes",

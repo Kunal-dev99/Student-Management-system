@@ -47,7 +47,7 @@ class ExportService:
         await self.session.refresh(job)
         return job
 
-    async def run_statutory_profile(self, profile_id) -> dict:
+    async def run_statutory_profile(self, profile_id, *, as_at=None, known_at=None) -> dict:
         """Phase 6.6 — run a configured statutory profile as an export job.
 
         The validation report travels with the job, so an administrator sees what is wrong
@@ -56,7 +56,7 @@ class ExportService:
         from app.modules.exports.statutory import StatutoryEngine
 
         engine = StatutoryEngine(self.session)
-        result = await engine.generate(profile_id)
+        result = await engine.generate(profile_id, as_at=as_at, known_at=known_at)
 
         buf = io.StringIO()
         w = csv.writer(buf)
@@ -78,6 +78,7 @@ class ExportService:
             "job": {"id": str(job.id), "filename": job.filename, "rowCount": job.row_count,
                     "status": job.status.value},
             "profile": profile,
+            "asAt": result.get("asAt"), "knownAt": result.get("knownAt"),
             "validation": result["validation"],
         }
 

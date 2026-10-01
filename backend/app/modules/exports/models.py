@@ -7,11 +7,12 @@ polls the job then downloads. Portable types (D-04).
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import (
     JSON,
     Boolean,
+    Date,
     DateTime,
     Enum,
     ForeignKey,
@@ -161,3 +162,31 @@ class StatutorySpecVersion(UUIDMixin, TimestampMixin, Base):
     __table_args__ = (
         Index("uq_spec_version", "pack_code", "academic_year", "version", unique=True),
     )
+
+
+class ReportReturnVersion(UUIDMixin, TenantMixin, Base):
+    """A return frozen as it was produced (effective dating, Phase 7 — HESA snapshot).
+
+    Written when a profile is signed off: the exact rows that were attested, with the date they
+    were taken as at and the moment the data was known at. Later data changes never alter it, so
+    the signed-off return can always be re-downloaded unchanged."""
+    __tablename__ = "report_return_version"
+    __table_args__ = (Index("uq_report_return_version", "profile_id", "version_no", unique=True),)
+
+    profile_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("report_profile.id", ondelete="CASCADE"), index=True
+    )
+    version_no: Mapped[int] = mapped_column(Integer)
+    academic_year: Mapped[str] = mapped_column(String(9))
+    as_at: Mapped[date | None] = mapped_column(Date, nullable=True)       # None = reporting-year end
+    known_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))   # data as recorded at this moment
+    reason: Mapped[str] = mapped_column(String(40), default="sign_off")
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    header: Mapped[list] = mapped_column(JSON, default=list)
+    rows: Mapped[list] = mapped_column(JSON, default=list)
+    row_count: Mapped[int] = mapped_column(Integer, default=0)
+    errors: Mapped[int] = mapped_column(Integer, default=0)
+    warnings: Mapped[int] = mapped_column(Integer, default=0)

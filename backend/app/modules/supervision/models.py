@@ -30,6 +30,8 @@ class SupervisorRelationship(UUIDMixin, TenantMixin, TimestampMixin, Base):
     )
     valid_from: Mapped[date] = mapped_column(Date)
     valid_to: Mapped[date | None] = mapped_column(Date, nullable=True)  # null = current
+    # Phase 7 — when valid_to was set, so a return can be rebuilt as it was known at a moment.
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Phase 4B.5 — why a relationship ended (audit-friendly), and the weighting of a
     # co-supervisor's contribution (percentage of supervisory load).
     end_reason: Mapped[str | None] = mapped_column(String(300), nullable=True)

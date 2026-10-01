@@ -52,6 +52,31 @@ def _covers(valid_from: date, valid_to: date | None, on: date) -> bool:
     return valid_from <= on and (valid_to is None or valid_to > on)
 
 
+def _shown(rows: list, include_superseded: bool) -> list[tuple]:
+    """(row, origin row) pairs to display from all of one fact's rows (Phase 7).
+
+    A period that ended is superseded by a closed copy, so the live row may be a closure: it is
+    shown with the recording details of the change that opened the period (who and when), not
+    of the later change that closed it. "Include corrected rows" adds rows that were corrected
+    or replaced the same day — never the open-ended versions that closures replaced."""
+    by_id = {r.id: r for r in rows}
+    pred_of = {r.superseded_by: r for r in rows if r.superseded_by is not None}
+
+    def origin_of(r):
+        seen = 0
+        while getattr(r, "closure", False) and r.id in pred_of and seen < 50:
+            r, seen = pred_of[r.id], seen + 1
+        return r
+
+    out = []
+    for r in rows:
+        if r.superseded_by is None:
+            out.append((r, origin_of(r)))
+        elif include_superseded and not getattr(by_id.get(r.superseded_by), "closure", False):
+            out.append((r, origin_of(r)))
+    return out
+
+
 class StudentTimeline:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -140,25 +165,29 @@ class StudentTimeline:
             (FeeStatusHistoryService, "fee_status", lambda r: (r.fee_status, r.fee_status)),
             (LocationHistoryService, "location", lambda r: (r.study_location, r.study_location)),
         ):
-            h = svc(self.session)
-            rows = await (h.all_rows(student_id) if include_superseded else h.live_rows(student_id))
-            for r in rows:
+            for r, o in _shown(await svc(self.session).all_rows(student_id), include_superseded):
                 label, value = fmt(r)
-                add(fact, label, value, r.valid_from, r.valid_to, recorded_at=r.recorded_at,
-                    recorded_by=r.recorded_by_user_id, origin=r.origin, reason=r.reason,
+                add(fact, label, value, r.valid_from, r.valid_to, recorded_at=o.recorded_at,
+                    recorded_by=o.recorded_by_user_id, origin=o.origin, reason=o.reason,
                     superseded=r.superseded_by is not None, row_id=r.id)
 
-        for r, enr, mod in await self._module_rows(student_id, include_superseded):
+        module_rows = await self._module_rows(student_id, True)
+        module_ctx = {r.id: (enr, mod) for r, enr, mod in module_rows}
+        for r, o in _shown([r for r, _, _ in module_rows], include_superseded):
+            enr, mod = module_ctx[r.id]
             add("module", f"{mod.code} {mod.title}: {_val(r.status)}", _val(r.status), r.valid_from, r.valid_to,
-                recorded_at=r.recorded_at, recorded_by=r.recorded_by_user_id, origin=r.origin,
-                reason=r.reason, superseded=r.superseded_by is not None, row_id=r.id,
+                recorded_at=o.recorded_at, recorded_by=o.recorded_by_user_id, origin=o.origin,
+                reason=o.reason, superseded=r.superseded_by is not None, row_id=r.id,
                 detail={"moduleEnrolmentId": str(enr.id), "moduleCode": mod.code,
                         "academicYear": enr.academic_year})
 
-        for r, f in await self._custom_rows(student_id, include_superseded):
+        custom_rows = await self._custom_rows(student_id, True)
+        custom_ctx = {r.id: f for r, f in custom_rows}
+        for r, o in _shown([r for r, _ in custom_rows], include_superseded):
+            f = custom_ctx[r.id]
             add("custom", f"{f.label}: {r.value}", r.value, r.valid_from, r.valid_to,
-                recorded_at=r.recorded_at, recorded_by=r.recorded_by_user_id, origin=r.origin,
-                reason=r.reason, superseded=r.superseded_by is not None, row_id=r.id,
+                recorded_at=o.recorded_at, recorded_by=o.recorded_by_user_id, origin=o.origin,
+                reason=o.reason, superseded=r.superseded_by is not None, row_id=r.id,
                 detail={"key": f.key, "label": f.label})
 
         for a, source in await self._funding(student_id):

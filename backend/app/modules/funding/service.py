@@ -126,6 +126,7 @@ class FundingService:
         # Close current, open new on the same day — one transaction (arch §8.9). Half-open
         # periods: the old one's valid_to is the first day the new one is in force.
         current.valid_to = d
+        current.ended_at = datetime.now(timezone.utc)
         current.status = FundingStatus.changed
         new = FundingArrangement(
             student_id=current.student_id,
@@ -165,6 +166,7 @@ class FundingService:
         for a in await self.repo.arrangements_for_student(student_id):
             if a.valid_to is None:
                 a.valid_to = max(today, a.valid_from)
+                a.ended_at = datetime.now(timezone.utc)
                 a.status = FundingStatus.ended
                 count += 1
         await self.session.flush()
@@ -176,6 +178,7 @@ class FundingService:
             d = effective_date(on, what="Ending funding")
             assert_not_before_start(a.valid_from, d, what="Ending this funding")
             a.valid_to = d
+            a.ended_at = datetime.now(timezone.utc)
             a.status = FundingStatus.ended
             # Cancel any instalments not yet paid — funding has stopped (arch §8.9).
             for p in await self.repo.payments_for_arrangement(a.id):

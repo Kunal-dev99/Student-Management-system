@@ -17,7 +17,7 @@ language: anything executable in configuration would be a security problem and a
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -191,6 +191,18 @@ def resolve(record: dict, path: str):
         if node is None:
             return None
     return node
+
+
+class _AsKnown:
+    """A funding / supervision row as it was known at a moment: the same row with ``valid_to``
+    replaced (Phase 7). Read-only, so the real row is never touched."""
+
+    def __init__(self, obj, *, valid_to):
+        self._obj = obj
+        self.valid_to = valid_to
+
+    def __getattr__(self, name):
+        return getattr(self._obj, name)
 
 
 class StatutoryEngine:
@@ -379,7 +391,10 @@ class StatutoryEngine:
         y = int(head)
         return date(y, 8, 1), date(y + 1, 7, 31)
 
-    async def build_records(self, academic_year: str | None = None) -> list[dict]:
+    async def build_records(
+        self, academic_year: str | None = None, *, as_at: date | None = None,
+        known_at: datetime | None = None,
+    ) -> list[dict]:
         """One flat dict per student — or, when an ``academic_year`` is supplied and the student
         transferred programme mid-year, one dict *per programme period* the student was on during
         that year. Each period's dict resolves ``programme`` from the programme in force for that
@@ -387,7 +402,38 @@ class StatutoryEngine:
         codes (with the entry/end dates clipped to the period).
 
         This is the *only* contract mappings depend on, so the domain model can evolve without
-        breaking every configured return."""
+        breaking every configured return.
+
+        Snapshot (effective dating, Phase 7 — HESA "as at" reporting):
+        - ``as_at``: the date the record's values are taken as at (default: the end of the
+          reporting year, or today if sooner). Values are those in force on that date.
+        - ``known_at``: build the return as the data was *recorded* at that moment. Anything
+          entered later — even if back-dated — is left out, so late changes don't bleed into a
+          signed-off return. Students enrolled later are left out too."""
+        if known_at is not None and known_at.tzinfo is None:
+            from datetime import timezone as _tz
+            known_at = known_at.replace(tzinfo=_tz.utc)
+
+        def _known(obj) -> bool:
+            created = getattr(obj, "created_at", None)
+            if known_at is None or created is None:
+                return True
+            if created.tzinfo is None:
+                from datetime import timezone as _tz
+                created = created.replace(tzinfo=_tz.utc)
+            return created <= known_at
+
+        def _ended_by_then(obj):
+            """valid_to as known at ``known_at`` (None if it was ended later)."""
+            if known_at is None or obj.valid_to is None:
+                return obj
+            ended = getattr(obj, "ended_at", None)
+            if ended is not None and ended.tzinfo is None:
+                from datetime import timezone as _tz
+                ended = ended.replace(tzinfo=_tz.utc)
+            if ended is not None and ended <= known_at:
+                return obj
+            return _AsKnown(obj, valid_to=None)
         from app.modules.funding.constants import FundingStatus
         from app.modules.funding.models import FundingArrangement, FundingSource
         from app.modules.person.models import Person
@@ -399,6 +445,7 @@ class StatutoryEngine:
             select(Student, Person).join(Person, Person.id == Student.person_id)
             .order_by(Student.student_ref)
         )).all()
+        rows = [(st, p) for st, p in rows if _known(st)]
         programmes = {p.id: p for p in (await self.session.execute(select(Programme))).scalars().all()}
         projects = {p.student_id: p for p in (await self.session.execute(select(ResearchProject))).scalars().unique().all()}
         sources = {f.id: f for f in (await self.session.execute(select(FundingSource))).scalars().all()}
@@ -412,12 +459,13 @@ class StatutoryEngine:
         for fa in (await self.session.execute(
             select(FundingArrangement).order_by(FundingArrangement.valid_from)
         )).scalars().all():
-            funding.setdefault(fa.student_id, []).append(fa)
+            if _known(fa):
+                funding.setdefault(fa.student_id, []).append(_ended_by_then(fa))
         # Supervision (Phase 4): every relationship, with supervisor names.
         from app.modules.supervision.models import SupervisorRelationship
-        sup_rows = (await self.session.execute(
+        sup_rows = [_ended_by_then(r) for r in (await self.session.execute(
             select(SupervisorRelationship).order_by(SupervisorRelationship.valid_from)
-        )).scalars().all()
+        )).scalars().all() if _known(r)]
         supervision: dict = {}
         for r in sup_rows:
             supervision.setdefault(r.student_id, []).append(r)
@@ -461,7 +509,7 @@ class StatutoryEngine:
             lo = win[0] if win else history_today()
             hi = (win[1] if win else history_today()) + timedelta(days=1)
             for vid, periods in (await CustomValueHistoryService(self.session).periods(
-                    list(tracked_values), lo, hi)).items():
+                    list(tracked_values), lo, hi, known_at=known_at)).items():
                 sid, k = tracked_values[vid]
                 custom_periods.setdefault(sid, {})[k] = periods
 
@@ -512,27 +560,37 @@ class StatutoryEngine:
 
         window = self._year_window(academic_year)
         now = history_today()
+        if known_at is not None:
+            now = min(now, known_at.date())
         ws, we = (window[0], window[1] + timedelta(days=1)) if window else (now, now + timedelta(days=1))
         year_days = (we - ws).days
         ids = [st.id for st, _ in rows]
-        hist_status = await StatusHistoryService(self.session).periods(ids, ws, we)
-        hist_prog = await ProgrammeHistoryService(self.session).periods(ids, ws, we)
-        hist_int = await IntensityHistoryService(self.session).periods(ids, ws, we)
+        hist_status = await StatusHistoryService(self.session).periods(ids, ws, we, known_at=known_at)
+        hist_prog = await ProgrammeHistoryService(self.session).periods(ids, ws, we, known_at=known_at)
+        hist_int = await IntensityHistoryService(self.session).periods(ids, ws, we, known_at=known_at)
         from app.modules.student_record.fact_history import FeeStatusHistoryService, LocationHistoryService
-        hist_fee = await FeeStatusHistoryService(self.session).periods(ids, ws, we)
-        hist_loc = await LocationHistoryService(self.session).periods(ids, ws, we)
+        hist_fee = await FeeStatusHistoryService(self.session).periods(ids, ws, we, known_at=known_at)
+        hist_loc = await LocationHistoryService(self.session).periods(ids, ws, we, known_at=known_at)
         from app.modules.taught.models import ModuleEnrolment, TaughtModule
         from app.modules.taught.module_history import ModuleStatusHistoryService, year_window
 
         taught_modules = {m.id: m for m in (await self.session.execute(select(TaughtModule))).scalars().all()}
         enrolments: dict = {}
         for e in (await self.session.execute(select(ModuleEnrolment))).scalars().all():
-            enrolments.setdefault(e.student_id, []).append(e)
+            if _known(e):
+                enrolments.setdefault(e.student_id, []).append(e)
         module_status = await ModuleStatusHistoryService(self.session).periods(
-            [e.id for es in enrolments.values() for e in es], ws, we,
+            [e.id for es in enrolments.values() for e in es], ws, we, known_at=known_at,
         )
         lifecycle = LifecycleService(self.session) if window else None
         one_day = timedelta(days=1)
+
+        def _slice_as_of(start_d: date, shown_end: date) -> date:
+            """A programme period's record is taken as at its own end — or the snapshot date if
+            that falls inside the period."""
+            if as_at is not None and start_d <= as_at <= shown_end:
+                return as_at
+            return min(shown_end, now)
 
         def _on(periods: list[dict], day: date):
             return next((p["value"] for p in periods
@@ -717,7 +775,7 @@ class StatutoryEngine:
                 # One record for the student (no transfer inside the window).
                 prog_id = (slices[0][3] if slices else None) or student.programme_id
                 prog = programmes.get(prog_id)
-                as_of = min(we - one_day, now)
+                as_of = as_at if as_at is not None else min(we - one_day, now)
                 records.append({
                     "student": {
                         "ref": student.student_ref,
@@ -744,7 +802,7 @@ class StatutoryEngine:
                 records.append({
                     "student": {
                         "ref": _period_ref(student.student_ref, prog_code, start_d),
-                        **_student_fields(min(shown_end, now), start_d, end_x),
+                        **_student_fields(_slice_as_of(start_d, shown_end), start_d, end_x),
                         "startDate": start_d,
                         "expectedEndDate": shown_end,
                         **common_student,
@@ -753,21 +811,25 @@ class StatutoryEngine:
                     "programme": {"name": prog.name if prog else None, "code": prog_code},
                     "research": common_research,
                     "award": common_award,
-                    "custom": _custom_for(student.id, min(shown_end, now)),
-                    **_period_fields(start_d, end_x, min(shown_end, now)),
+                    "custom": _custom_for(student.id, _slice_as_of(start_d, shown_end)),
+                    **_period_fields(start_d, end_x, _slice_as_of(start_d, shown_end)),
                 })
         return records
 
     # ---------------- generate + validate ----------------
 
-    async def generate(self, profile_id: uuid.UUID) -> dict:
-        """Produce the extract and its validation report, entirely from configuration."""
+    async def generate(
+        self, profile_id: uuid.UUID, *, as_at: date | None = None, known_at: datetime | None = None,
+    ) -> dict:
+        """Produce the extract and its validation report, entirely from configuration.
+        ``as_at`` / ``known_at`` take a snapshot (see ``build_records``)."""
         profile = await self.get_profile(profile_id)
         mappings = await self._mappings(profile_id)
         if not mappings:
             raise WorkflowError("This profile has no field mappings, so it cannot produce a return")
 
-        records = await self.build_records(academic_year=profile.academic_year)
+        records = await self.build_records(academic_year=profile.academic_year, as_at=as_at,
+                                           known_at=known_at)
         header = [m.target_field for m in mappings]
         rows, issues = [], []
 
@@ -873,6 +935,8 @@ class StatutoryEngine:
         warnings = sum(1 for i in issues if i["severity"] == "warning")
         return {
             "profile": self.profile_out(profile),
+            "asAt": as_at.isoformat() if as_at else None,
+            "knownAt": known_at.isoformat() if known_at else None,
             "header": header,
             "rows": rows,
             "rowCount": len(rows),
@@ -1351,6 +1415,7 @@ class StatutoryEngine:
 
     async def sign_off(
         self, profile_id: uuid.UUID, *, user_id: uuid.UUID, notes: str | None = None,
+        as_at: date | None = None,
     ) -> ReportProfile:
         """Attest the profile is complete for the return. Blocks if the spec is not satisfied
         or if the current cohort would produce validation errors."""
@@ -1369,18 +1434,70 @@ class StatutoryEngine:
                     f"Cannot sign off: {len(blockers)} mandatory field(s) unmapped: {shown}{more}"
                 )
             raise WorkflowError("Cannot sign off: profile has no field mappings")
-        gen = await self.generate(profile_id)
+        signed_at = datetime.now(timezone.utc)
+        gen = await self.generate(profile_id, as_at=as_at, known_at=signed_at)
         if not gen["validation"]["valid"]:
             raise WorkflowError(
                 f"Cannot sign off: {gen['validation']['errors']} validation error(s) in the current "
                 "cohort. Fix them, or reduce cohort scope, then retry."
             )
         profile.signed_off_by = user_id
-        profile.signed_off_at = datetime.now(timezone.utc)
+        profile.signed_off_at = signed_at
         profile.signed_off_notes = notes
+        # Phase 7 — freeze exactly what was attested, so later data changes can't alter it.
+        await self._store_version(profile, gen, as_at=as_at, known_at=signed_at, user_id=user_id)
         await self.session.commit()
         await self.session.refresh(profile)
         return profile
+
+    # ---------------- frozen returns (Phase 7) ----------------
+
+    async def _store_version(self, profile: ReportProfile, gen: dict, *, as_at: date | None,
+                             known_at: datetime, user_id: uuid.UUID | None,
+                             reason: str = "sign_off") -> None:
+        from sqlalchemy import func
+
+        from app.modules.exports.models import ReportReturnVersion
+
+        last = (await self.session.execute(
+            select(func.max(ReportReturnVersion.version_no))
+            .where(ReportReturnVersion.profile_id == profile.id)
+        )).scalar()
+        self.session.add(ReportReturnVersion(
+            profile_id=profile.id, version_no=(last or 0) + 1, academic_year=profile.academic_year,
+            as_at=as_at, known_at=known_at, reason=reason, created_by_user_id=user_id,
+            created_at=datetime.now(timezone.utc),
+            header=gen["header"], rows=gen["rows"], row_count=gen["rowCount"],
+            errors=gen["validation"]["errors"], warnings=gen["validation"]["warnings"],
+        ))
+
+    @staticmethod
+    def version_out(v) -> dict:
+        return {
+            "id": str(v.id), "profileId": str(v.profile_id), "versionNo": v.version_no,
+            "academicYear": v.academic_year, "asAt": v.as_at.isoformat() if v.as_at else None,
+            "knownAt": v.known_at.isoformat() if v.known_at else None, "reason": v.reason,
+            "createdAt": v.created_at.isoformat() if v.created_at else None,
+            "createdByUserId": str(v.created_by_user_id) if v.created_by_user_id else None,
+            "rowCount": v.row_count, "errors": v.errors, "warnings": v.warnings,
+        }
+
+    async def versions(self, profile_id: uuid.UUID) -> list:
+        from app.modules.exports.models import ReportReturnVersion
+
+        await self.get_profile(profile_id)
+        return list((await self.session.execute(
+            select(ReportReturnVersion).where(ReportReturnVersion.profile_id == profile_id)
+            .order_by(ReportReturnVersion.version_no.desc())
+        )).scalars().all())
+
+    async def get_version(self, profile_id: uuid.UUID, version_id: uuid.UUID):
+        from app.modules.exports.models import ReportReturnVersion
+
+        v = await self.session.get(ReportReturnVersion, version_id)
+        if v is None or v.profile_id != profile_id:
+            raise NotFoundError("Return version not found")
+        return v
 
     async def unsign(self, profile_id: uuid.UUID) -> ReportProfile:
         profile = await self.get_profile(profile_id)

@@ -109,6 +109,7 @@ class SupervisionService:
             d = effective_date(on, what="Ending supervision")
             assert_not_before_start(rel.valid_from, d, what="Ending this supervision")
             rel.valid_to = d
+            rel.ended_at = datetime.now(timezone.utc)
             rel.status = SupervisionStatus.ended
             rel.end_reason = reason
             if not commit:

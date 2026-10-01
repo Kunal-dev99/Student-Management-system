@@ -4,7 +4,8 @@ A fact (status, programme, study intensity) is a sequence of half-open periods
 ``[valid_from, valid_to)``. Two operations change it:
 
 ``change``   reality changed on a date (a suspension starts, a transfer takes effect). The period
-             covering that date is closed and a new one opens. A back-dated change runs only until
+             covering that date is closed (superseded by a closed copy, never edited in place) and a
+             new one opens. A back-dated change runs only until
              the next recorded change, so later history is never silently overwritten. A change on
              the same day a period started replaces that period (it never actually held).
 ``correct``  the *record* was wrong (wrong date, wrong value). The wrong row is kept but superseded
@@ -128,21 +129,34 @@ class FactHistoryService:
 
     async def periods(
         self, student_ids: list[uuid.UUID], window_start: date, window_end: date,
+        *, known_at=None,
     ) -> dict[uuid.UUID, list[dict]]:
         """Live periods overlapping ``[window_start, window_end)`` for many students in one query,
-        clipped to the window. ``to`` is exclusive; None means still open."""
+        clipped to the window. ``to`` is exclusive; None means still open.
+
+        ``known_at`` (a datetime) gives the periods as they were recorded at that moment instead of
+        now: rows recorded later are ignored, and a row superseded later counts as live (Phase 7)."""
         if not student_ids:
             return {}
         m = self.model
-        rows = await self.session.execute(
-            select(m)
-            .where(self._subject_col().in_(student_ids), m.superseded_by.is_(None),
-                   m.valid_from < window_end,
-                   or_(m.valid_to.is_(None), m.valid_to > window_start))
-            .order_by(self._subject_col(), m.valid_from)
-        )
+        q = (select(m)
+             .where(self._subject_col().in_(student_ids),
+                    m.valid_from < window_end,
+                    or_(m.valid_to.is_(None), m.valid_to > window_start))
+             .order_by(self._subject_col(), m.valid_from))
+        if known_at is None:
+            rows = (await self.session.execute(q.where(m.superseded_by.is_(None)))).scalars().all()
+        else:
+            candidates = (await self.session.execute(q.where(m.recorded_at <= known_at))).scalars().all()
+            sup_ids = {r.superseded_by for r in candidates if r.superseded_by is not None}
+            known_sup = set()
+            if sup_ids:
+                known_sup = set((await self.session.execute(
+                    select(m.id).where(m.id.in_(sup_ids), m.recorded_at <= known_at)
+                )).scalars().all())
+            rows = [r for r in candidates if r.superseded_by is None or r.superseded_by not in known_sup]
         out: dict[uuid.UUID, list[dict]] = {}
-        for r in rows.scalars().all():
+        for r in rows:
             out.setdefault(getattr(r, self.subject_attr), []).append({
                 "value": self._value(r), "from": max(r.valid_from, window_start),
                 "to": min(r.valid_to, window_end) if r.valid_to is not None else None,
@@ -155,10 +169,12 @@ class FactHistoryService:
     def _new_row(
         self, student: Student, value: Any, valid_from: date, valid_to: date | None, *,
         origin: str, reason: str | None, user_id: uuid.UUID | None, source_event_id: uuid.UUID | None,
+        closure: bool = False,
     ):
         row = self.model(
             id=uuid.uuid4(), valid_from=valid_from, valid_to=valid_to,
             origin=origin, reason=reason, recorded_by_user_id=user_id, source_event_id=source_event_id,
+            closure=closure,
         )
         setattr(row, self.subject_attr, student.id)
         setattr(row, self.value_attr, value)
@@ -234,11 +250,17 @@ class FactHistoryService:
             # A bounded change: the earlier value resumes when it ends.
             self._new_row(student, self._value(cover), effective_to, old_end, origin="change",
                           reason=cover.reason, user_id=user_id, source_event_id=cover.source_event_id)
-        await self.session.flush()   # insert first: a supersede points at the new row
         if cover.valid_from == d:
+            await self.session.flush()     # insert first: a supersede points at the new row
             cover.superseded_by = new.id   # same-day change: the earlier value never held
         else:
-            cover.valid_to = d             # the only in-place edit: closing a period
+            # Close the earlier period without editing it: a closed copy supersedes it, so what we
+            # knew before this change (an open period) stays reconstructable (Phase 7).
+            closed = self._new_row(student, self._value(cover), cover.valid_from, d,
+                                   origin=cover.origin, reason=cover.reason, user_id=user_id,
+                                   source_event_id=cover.source_event_id, closure=True)
+            await self.session.flush()
+            cover.superseded_by = closed.id
         await self.session.flush()
         return await self._finish(student, new)
 
@@ -366,6 +388,8 @@ class FactHistoryService:
             "recordedAt": row.recorded_at.isoformat() if row.recorded_at else None,
             "recordedByUserId": str(row.recorded_by_user_id) if row.recorded_by_user_id else None,
             "supersededBy": str(row.superseded_by) if row.superseded_by else None,
+            # Phase 7 — a closed copy written when the period ended (not a correction).
+            "closure": bool(getattr(row, "closure", False)),
         }
 
 

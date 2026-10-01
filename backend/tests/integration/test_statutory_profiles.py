@@ -464,3 +464,42 @@ async def test_signoff_refuses_when_current_cohort_has_validation_errors(ctx):
     r = await c.post(f"/api/v1/report-profiles/{p['id']}/sign-off", headers=h, json={})
     assert r.status_code == 422
     assert "validation error" in r.json()["error"]["message"].lower()
+
+
+@pytest.mark.asyncio
+async def test_signoff_freezes_the_return_as_it_was(ctx):
+    """Effective dating, Phase 7: the signed-off return is stored, so later data changes can't
+    alter what was attested — it re-downloads unchanged."""
+    c, h = ctx
+    p = await _profile(c, h)
+    await _fully_map_hesa(c, h, p["id"])
+    r = await c.post(f"/api/v1/report-profiles/{p['id']}/sign-off", headers=h,
+                     json={"notes": "Registry OK", "asAt": "2027-07-31"})
+    assert r.status_code == 200, r.text
+    versions = (await c.get(f"/api/v1/report-profiles/{p['id']}/versions", headers=h)).json()
+    assert len(versions) == 1
+    v = versions[0]
+    assert v["versionNo"] == 1 and v["asAt"] == "2027-07-31" and v["reason"] == "sign_off"
+    assert v["knownAt"] and v["rowCount"] == 2 and v["errors"] == 0
+    first = await c.get(f"/api/v1/report-profiles/{p['id']}/versions/{v['id']}/download", headers=h)
+    assert first.status_code == 200 and first.headers["content-type"].startswith("text/csv")
+    assert "_v1_" in first.headers["content-disposition"]
+
+    # A new student enrolled after sign-off doesn't appear in the frozen return.
+    from app.main import app as fastapi_app
+    override = fastapi_app.dependency_overrides[get_session]
+    async for s in override():
+        person = Person(given_name="Cy", family_name="Late", nationality="British")
+        s.add(person); await s.flush()
+        s.add(Student(person_id=person.id, student_ref="PGR-C", start_date=date(2026, 10, 1),
+                      expected_end_date=date(2029, 9, 30), study_mode=StudyMode.full_time,
+                      status=StudentStatus.active))
+        await s.commit()
+    again = await c.get(f"/api/v1/report-profiles/{p['id']}/versions/{v['id']}/download", headers=h)
+    assert again.text == first.text and "PGR-C" not in again.text
+    # ...while a fresh validation now includes it.
+    assert (await c.get(f"/api/v1/report-profiles/{p['id']}/validate", headers=h)).json()["rowCount"] == 3
+    # ...and building it "as known at" the sign-off moment reproduces the frozen row count.
+    known = (await c.get(f"/api/v1/report-profiles/{p['id']}/validate", headers=h,
+                         params={"knownAt": v["knownAt"]})).json()
+    assert known["rowCount"] == 2
