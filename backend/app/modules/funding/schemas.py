@@ -42,6 +42,9 @@ class ArrangementCreate(_Camel):
 
 
 class ChangeRequest(_Camel):
+    # Effective dating (Phase 4): the day the new arrangement takes over (default today;
+    # back-dating allowed, future dates not yet).
+    effective_date: date | None = None
     funding_type: FundingType
     funding_source_id: uuid.UUID | None = None
     stipend_amount: Decimal | None = None
@@ -51,6 +54,10 @@ class ChangeRequest(_Camel):
     funder_reference: str | None = None
     contribution_pct: int | None = None
     research_award_id: uuid.UUID | None = None
+
+
+class EndFundingRequest(_Camel):
+    effective_date: date | None = None   # default today; back-dating allowed
 
 
 class ArrangementOut(_Camel):

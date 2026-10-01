@@ -22,10 +22,20 @@ class AssignRequest(_Camel):
     supervisor_person_id: uuid.UUID
     role: SupervisorRole = SupervisorRole.primary
     weighting_pct: int | None = None
+    valid_from: date | None = None   # default today; back-dating allowed
 
 
 class EndRequest(_Camel):
     reason: str | None = None
+    effective_date: date | None = None   # default today; back-dating allowed
+
+
+class ReplaceRequest(_Camel):
+    """End one supervisor and start the next on the same day, in the same role."""
+    new_supervisor_person_id: uuid.UUID
+    effective_date: date | None = None
+    reason: str
+    weighting_pct: int | None = None
 
 
 class MeetingRequest(_Camel):

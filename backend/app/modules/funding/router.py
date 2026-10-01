@@ -19,6 +19,7 @@ from app.modules.funding.schemas import (
     ArrangementCreate,
     ArrangementOut,
     ChangeRequest,
+    EndFundingRequest,
     FundingSourceOut,
     MarkPaidRequest,
     PaymentOut,
@@ -112,10 +113,11 @@ async def change_funding(
 @funding_router.post("/{arrangement_id}/end", response_model=ArrangementOut, summary="End a funding arrangement")
 async def end_funding(
     arrangement_id: uuid.UUID,
+    body: EndFundingRequest | None = None,
     session: AsyncSession = Depends(get_session),
     _=Depends(require_permission("funding.change")),
 ) -> ArrangementOut:
-    a = await _svc(session).end(arrangement_id)
+    a = await _svc(session).end(arrangement_id, on=body.effective_date if body else None)
     names = await FundingRepository(session).source_names()
     return ArrangementOut.model_validate(await _svc(session)._arrangement_dict(a, names))
 

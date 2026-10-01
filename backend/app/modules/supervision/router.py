@@ -19,6 +19,7 @@ from app.modules.supervision.schemas import (
     AssignRequest,
     CaseloadItem,
     EndRequest,
+    ReplaceRequest,
     MeetingOut,
     MeetingRequest,
     SupervisorOut,
@@ -54,7 +55,8 @@ async def assign_supervisor(
     _=Depends(require_permission("student.write")),
 ) -> SupervisorOut:
     rel = await _svc(session).assign(
-        student_id, body.supervisor_person_id, body.role, weighting_pct=body.weighting_pct
+        student_id, body.supervisor_person_id, body.role, weighting_pct=body.weighting_pct,
+        valid_from=body.valid_from,
     )
     rows = await _svc(session).supervisors_for_student(student_id)
     match = next(r for r in rows if r["id"] == rel.id)
@@ -68,7 +70,26 @@ async def end_supervision(
     session: AsyncSession = Depends(get_session),
     _=Depends(require_permission("student.write")),
 ) -> SupervisorOut:
-    rel = await _svc(session).end(rel_id, body.reason if body else None)
+    rel = await _svc(session).end(
+        rel_id, body.reason if body else None, on=body.effective_date if body else None,
+    )
+    rows = await _svc(session).supervisors_for_student(rel.student_id)
+    match = next(r for r in rows if r["id"] == rel.id)
+    return SupervisorOut.model_validate(match)
+
+
+@sup_router.post("/{rel_id}/replace", response_model=SupervisorOut, status_code=201,
+                 summary="Change supervisor: end this one and start the next on the same day")
+async def replace_supervisor(
+    rel_id: uuid.UUID,
+    body: ReplaceRequest,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("student.write")),
+) -> SupervisorOut:
+    rel = await _svc(session).replace(
+        rel_id, body.new_supervisor_person_id, reason=body.reason, on=body.effective_date,
+        weighting_pct=body.weighting_pct,
+    )
     rows = await _svc(session).supervisors_for_student(rel.student_id)
     match = next(r for r in rows if r["id"] == rel.id)
     return SupervisorOut.model_validate(match)

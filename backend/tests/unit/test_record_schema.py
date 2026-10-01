@@ -35,7 +35,9 @@ SAMPLE_RECORD = {
     "research": {"topic": None, "group": None},
     "funding": {"type": None, "source": None, "amount": None,
                 "currency": None, "costCentre": None},
+    "supervision": {"primaryName": None, "supervisorCount": 0},
     "award": {"ref": None, "title": None},
+    "statusHistory": [], "modules": [], "fundingPeriods": [], "supervisors": [],
 }
 
 

@@ -406,11 +406,27 @@ class StatutoryEngine:
         routes: dict = {}
         for a in (await self.session.execute(select(Application))).scalars().unique().all():
             routes.setdefault(a.person_id, a.route.value if hasattr(a.route, "value") else a.route)
+        # Effective dating (Phase 4): every arrangement, so each record takes the one in force in
+        # its period — funding that ended during the year is no longer dropped from that year.
         funding: dict = {}
-        for fa in (await self.session.execute(select(FundingArrangement).where(
-            FundingArrangement.status == FundingStatus.active, FundingArrangement.valid_to.is_(None)
-        ))).scalars().all():
-            funding.setdefault(fa.student_id, fa)
+        for fa in (await self.session.execute(
+            select(FundingArrangement).order_by(FundingArrangement.valid_from)
+        )).scalars().all():
+            funding.setdefault(fa.student_id, []).append(fa)
+        # Supervision (Phase 4): every relationship, with supervisor names.
+        from app.modules.supervision.models import SupervisorRelationship
+        sup_rows = (await self.session.execute(
+            select(SupervisorRelationship).order_by(SupervisorRelationship.valid_from)
+        )).scalars().all()
+        supervision: dict = {}
+        for r in sup_rows:
+            supervision.setdefault(r.student_id, []).append(r)
+        sup_names: dict = {}
+        if sup_rows:
+            for p in (await self.session.execute(select(Person).where(
+                Person.id.in_({r.supervisor_person_id for r in sup_rows})
+            ))).scalars().all():
+                sup_names[p.id] = f"{p.given_name} {p.family_name}"
 
         # Admin-defined custom attributes (HESA gap capture): expose each student's value under the
         # `custom.<key>` path so a mapping can read it. Every key is present (None when unset) so the
@@ -475,6 +491,16 @@ class StatutoryEngine:
         hist_status = await StatusHistoryService(self.session).periods(ids, ws, we)
         hist_prog = await ProgrammeHistoryService(self.session).periods(ids, ws, we)
         hist_int = await IntensityHistoryService(self.session).periods(ids, ws, we)
+        from app.modules.taught.models import ModuleEnrolment, TaughtModule
+        from app.modules.taught.module_history import ModuleStatusHistoryService, year_window
+
+        taught_modules = {m.id: m for m in (await self.session.execute(select(TaughtModule))).scalars().all()}
+        enrolments: dict = {}
+        for e in (await self.session.execute(select(ModuleEnrolment))).scalars().all():
+            enrolments.setdefault(e.student_id, []).append(e)
+        module_status = await ModuleStatusHistoryService(self.session).periods(
+            [e.id for es in enrolments.values() for e in es], ws, we,
+        )
         lifecycle = LifecycleService(self.session) if window else None
         one_day = timedelta(days=1)
 
@@ -514,7 +540,6 @@ class StatutoryEngine:
 
         records = []
         for student, person in rows:
-            fa = funding.get(student.id)
             proj = projects.get(student.id)
             award = awards.get(proj.research_award_id) if proj and proj.research_award_id else None
             sp = hist_status.get(student.id, [])
@@ -575,13 +600,82 @@ class StatutoryEngine:
             }
             common_research = {"topic": proj.research_topic if proj else None,
                                "group": proj.research_group if proj else None}
-            common_funding = {
-                "type": fa.funding_type.value if fa else None,
-                "source": sources[fa.funding_source_id].name if fa and fa.funding_source_id in sources else None,
-                "amount": fa.stipend_amount if fa else None,
-                "currency": fa.currency if fa else None,
-                "costCentre": fa.cost_centre if fa else None,
-            }
+            arrangements = funding.get(student.id, [])
+            relationships = supervision.get(student.id, [])
+
+            def _period_fields(lo: date, hi: date, as_of: date) -> dict:
+                """What was in force for the record's period ``[lo, hi)`` (Phase 4): the funding
+                and supervision as at ``as_of``, plus child lists for HESA entity exports
+                (status changes, modules, funding periods, supervisors). Child-list dates are
+                inclusive like the rest of the record; ``validTo`` None = still in force at the
+                end of the period."""
+                def overlap(f, t):
+                    return f < hi and (t is None or t > lo)
+
+                def on(f, t):
+                    return f <= as_of and (t is None or t > as_of)
+
+                def last_day(t):
+                    return t - one_day if t is not None and t <= hi else None
+
+                covering = [a for a in arrangements if on(a.valid_from, a.valid_to)]
+                within = [a for a in arrangements if overlap(a.valid_from, a.valid_to)]
+                fa = (max(covering, key=lambda a: (a.contribution_pct or 100, a.valid_from)) if covering
+                      else (within[-1] if within else None))
+                sups_now = [r for r in relationships if on(r.valid_from, r.valid_to)]
+                primary = next((r for r in sups_now if _ev(r.role) == "primary"), None)
+
+                modules = []
+                for e in enrolments.get(student.id, []):
+                    e_from = e.start_date
+                    e_to = e.end_date + one_day if e.end_date else None
+                    if e_from is None:
+                        win = year_window(e.academic_year)
+                        if win is None:
+                            continue
+                        e_from, e_to = win[0], win[1] + one_day
+                    if not overlap(e_from, e_to):
+                        continue
+                    m = taught_modules.get(e.module_id)
+                    st = _on(module_status.get(e.id, []), as_of) or e.status
+                    modules.append({
+                        "code": m.code if m else None, "title": m.title if m else None,
+                        "credits": m.credits if m else None, "academicYear": e.academic_year,
+                        "startDate": e.start_date, "endDate": e.end_date, "status": _ev(st),
+                        "outcome": _ev(e.outcome), "mark": e.final_mark,
+                    })
+
+                return {
+                    "funding": {
+                        "type": _ev(fa.funding_type) if fa else None,
+                        "source": sources[fa.funding_source_id].name if fa and fa.funding_source_id in sources else None,
+                        "amount": fa.stipend_amount if fa else None,
+                        "currency": fa.currency if fa else None,
+                        "costCentre": fa.cost_centre if fa else None,
+                    },
+                    "supervision": {
+                        "primaryName": sup_names.get(primary.supervisor_person_id) if primary else None,
+                        "supervisorCount": len(sups_now),
+                    },
+                    "statusHistory": [
+                        {"status": _ev(p["value"]), "validFrom": max(p["from"], lo), "validTo": last_day(p["to"])}
+                        for p in sp if overlap(p["from"], p["to"])
+                    ],
+                    "modules": modules,
+                    "fundingPeriods": [
+                        {"type": _ev(a.funding_type),
+                         "source": sources[a.funding_source_id].name if a.funding_source_id in sources else None,
+                         "contributionPct": a.contribution_pct, "amount": a.stipend_amount,
+                         "validFrom": max(a.valid_from, lo), "validTo": last_day(a.valid_to)}
+                        for a in within
+                    ],
+                    "supervisors": [
+                        {"name": sup_names.get(r.supervisor_person_id), "role": _ev(r.role),
+                         "weightingPct": r.weighting_pct,
+                         "validFrom": max(r.valid_from, lo), "validTo": last_day(r.valid_to)}
+                        for r in relationships if overlap(r.valid_from, r.valid_to)
+                    ],
+                }
             common_award = {"ref": award.award_ref if award else None,
                             "title": award.title if award else None}
 
@@ -601,9 +695,9 @@ class StatutoryEngine:
                     "person": common_person,
                     "programme": {"name": prog.name if prog else None, "code": prog.code if prog else None},
                     "research": common_research,
-                    "funding": common_funding,
                     "award": common_award,
                     "custom": _custom_for(student.id),
+                    **_period_fields(ws, we, as_of),
                 })
                 continue
 
@@ -624,9 +718,9 @@ class StatutoryEngine:
                     "person": common_person,
                     "programme": {"name": prog.name if prog else None, "code": prog_code},
                     "research": common_research,
-                    "funding": common_funding,
                     "award": common_award,
                     "custom": _custom_for(student.id),
+                    **_period_fields(start_d, end_x, min(shown_end, now)),
                 })
         return records
 
