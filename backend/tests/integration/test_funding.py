@@ -20,7 +20,9 @@ from app.modules.person.models import Person
 from app.modules.student_record.constants import StudentStatus, StudyMode
 from app.modules.student_record.models import Student
 
-PERMS = ["student.read", "funding.read", "funding.change"]
+# student.history.correct: these tests date funding before the open reporting year, which needs it
+# (effective dating, Phase 5).
+PERMS = ["student.read", "funding.read", "funding.change", "student.history.correct"]
 
 
 @pytest_asyncio.fixture
