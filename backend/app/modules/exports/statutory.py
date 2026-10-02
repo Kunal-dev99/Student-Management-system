@@ -193,6 +193,10 @@ def resolve(record: dict, path: str):
     return node
 
 
+def _ev_static(v):
+    return v.value if hasattr(v, "value") else v
+
+
 class _AsKnown:
     """A funding / supervision row as it was known at a moment: the same row with ``valid_to``
     replaced (Phase 7). Read-only, so the real row is never touched."""
@@ -576,6 +580,31 @@ class StatutoryEngine:
         from app.modules.student_record.models import UnitOfAssessment
         uoa_codes = {u.id: u.code for u in (await self.session.execute(select(UnitOfAssessment))).scalars().all()}
         hist_uoa = await StudentUoaHistoryService(self.session).periods(ids, ws, we, known_at=known_at)
+        # Phase 10 — HESA Engagement: the expected end, fee eligibility and "primarily outside the
+        # UK" as held on each record's date, and the Leaver (when and why the engagement ended).
+        from app.modules.student_record.constants import TERMINAL_STATUSES
+        from app.modules.student_record.fact_history import (
+            ExpectedEndHistoryService, FeeEligibilityHistoryService, OutsideUkHistoryService,
+        )
+        from app.modules.student_record.models import StudentLifecycleEvent, StudentStatusHistory
+        hist_exp = await ExpectedEndHistoryService(self.session).periods(ids, ws, we, known_at=known_at)
+        hist_elig = await FeeEligibilityHistoryService(self.session).periods(ids, ws, we, known_at=known_at)
+        hist_ouk = await OutsideUkHistoryService(self.session).periods(ids, ws, we, known_at=known_at)
+        leavers: dict = {}   # student_id -> [(left_on, status, reason)]
+        if ids:
+            lq = (select(StudentStatusHistory, StudentLifecycleEvent.leaver_reason)
+                  .outerjoin(StudentLifecycleEvent,
+                             StudentLifecycleEvent.id == StudentStatusHistory.source_event_id)
+                  .where(StudentStatusHistory.student_id.in_(ids),
+                         StudentStatusHistory.superseded_by.is_(None),
+                         StudentStatusHistory.status.in_(list(TERMINAL_STATUSES)),
+                         StudentStatusHistory.valid_from < we))
+            if known_at is not None:
+                lq = lq.where(StudentStatusHistory.recorded_at <= known_at)
+            for row, why in (await self.session.execute(lq)).all():
+                st_value = _ev_static(row.status)
+                leavers.setdefault(row.student_id, []).append(
+                    (row.valid_from, st_value, why or ("completed" if st_value == "completed" else None)))
         sup_uoa = await PersonUoaHistoryService(self.session).periods(
             list({r.supervisor_person_id for r in sup_rows}), ws, we, known_at=known_at)
         from app.modules.taught.models import ModuleEnrolment, TaughtModule
@@ -654,6 +683,9 @@ class StatutoryEngine:
             fp = hist_fee.get(student.id, [])
             lp = hist_loc.get(student.id, [])
             up = hist_uoa.get(student.id, [])
+            ep = hist_exp.get(student.id, [])
+            eg = hist_elig.get(student.id, [])
+            ou = hist_ouk.get(student.id, [])
 
             # Programme periods inside the window: (start, display end, exclusive end, programme).
             # History periods are half-open; HESA end dates are inclusive, so a period that ends
@@ -735,6 +767,22 @@ class StatutoryEngine:
                 within = [a for a in arrangements if overlap(a.valid_from, a.valid_to)]
                 fa = (max(covering, key=lambda a: (a.contribution_pct or 100, a.valid_from)) if covering
                       else (within[-1] if within else None))
+                # Phase 10 — HESA Engagement (as at the record's date) and Leaver.
+                council = [a for a in covering if _ev(a.funding_type) == "research_council"]
+                left = [x for x in leavers.get(student.id, []) if lo <= x[0] <= as_of]
+                engagement = {
+                    "numhus": student.student_ref,
+                    "startDate": student.start_date,
+                    "expectedEndDate": (_on(ep, as_of) if ep else None) or student.expected_end_date,
+                    "feeEligibility": _on(eg, as_of),
+                    "primarilyOutsideUk": _on(ou, as_of),
+                    "studyIntention": student.study_intention,
+                    "incomingExchange": student.incoming_exchange,
+                    "researchCouncilStudent": bool(council) if covering else None,
+                    "studentshipRef": council[0].funder_reference if council else None,
+                }
+                leaver = ({"endDate": left[-1][0], "status": left[-1][1], "reason": left[-1][2]} if left
+                          else {"endDate": None, "status": None, "reason": None})
                 sups_now = [r for r in relationships if on(r.valid_from, r.valid_to)]
                 primary = next((r for r in sups_now if _ev(r.role) == "primary"), None)
 
@@ -789,6 +837,8 @@ class StatutoryEngine:
                     "modules": modules,
                     # Phase 8c — total module FTE in the period, for the HESA check that a
                     # student's FTE doesn't exceed the sum of their module FTEs (Demo 2 item 1.5).
+                    "engagement": engagement,
+                    "leaver": leaver,
                     "taught": {"moduleFteTotal": (
                         round(sum(x["ftePct"] for x in modules if x["ftePct"] is not None), 2)
                         if any(x["ftePct"] is not None for x in modules) else None

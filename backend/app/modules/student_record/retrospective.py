@@ -43,6 +43,9 @@ from app.modules.student_record.models import (
     StudentStatusHistory,
     StudentUoaHistory,
     PersonUoaHistory,
+    StudentExpectedEndHistory,
+    StudentFeeEligibilityHistory,
+    StudentOutsideUkHistory,
     UnitOfAssessment,
 )
 from app.modules.supervision.models import SupervisorRelationship
@@ -176,6 +179,9 @@ async def changes_since_signoff(session: AsyncSession, profile_id: uuid.UUID) ->
         (StudentFeeStatusHistory, "fee_status", lambda row: row.fee_status),
         (StudentLocationHistory, "location", lambda row: row.study_location),
         (StudentUoaHistory, "uoa", lambda row: uoa_codes.get(row.uoa_id)),
+        (StudentExpectedEndHistory, "expected_end", lambda row: row.expected_end_date.isoformat()),
+        (StudentFeeEligibilityHistory, "fee_eligibility", lambda row: row.fee_eligibility),
+        (StudentOutsideUkHistory, "outside_uk", lambda row: "yes" if row.primarily_outside_uk else "no"),
     ):
         rows = (await session.execute(
             select(model).where(_overlap_clause(model, r), model.recorded_at > r.signed_off_at,

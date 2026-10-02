@@ -73,6 +73,47 @@ class Programme(UUIDMixin, TenantMixin, TimestampMixin, Base):
     grading_policy: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
 
+class StudentExpectedEndHistory(UUIDMixin, TenantMixin, HistoryMixin, Base):
+    """The expected end date as it was held over time (Phase 10; HESA ENGEXPECTEDENDDATE).
+
+    Each period says "from this day, we expected the student to finish on X": extensions,
+    suspensions, intensity and programme changes move it. ``student.expected_end_date`` caches
+    today's value; a return reports the one held on its date."""
+    __tablename__ = "student_expected_end_history"
+    __table_args__ = (Index("ix_student_expected_end_history_student_from", "student_id", "valid_from"),)
+
+    student_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("student.id", ondelete="CASCADE"), index=True)
+    expected_end_date: Mapped[date] = mapped_column(Date)
+    source_event_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("student_lifecycle_event.id", ondelete="SET NULL"), nullable=True
+    )
+
+
+class StudentFeeEligibilityHistory(UUIDMixin, TenantMixin, HistoryMixin, Base):
+    """Fee eligibility over time (Phase 10; HESA FEEELIG). ``student.fee_eligibility`` caches today's."""
+    __tablename__ = "student_fee_eligibility_history"
+    __table_args__ = (Index("ix_student_fee_eligibility_history_student_from", "student_id", "valid_from"),)
+
+    student_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("student.id", ondelete="CASCADE"), index=True)
+    fee_eligibility: Mapped[str] = mapped_column(String(30))
+    source_event_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("student_lifecycle_event.id", ondelete="SET NULL"), nullable=True
+    )
+
+
+class StudentOutsideUkHistory(UUIDMixin, TenantMixin, HistoryMixin, Base):
+    """Whether the student studies primarily outside the UK, over time (Phase 10; HESA
+    ENGPRINONUK). ``student.primarily_outside_uk`` caches today's."""
+    __tablename__ = "student_outside_uk_history"
+    __table_args__ = (Index("ix_student_outside_uk_history_student_from", "student_id", "valid_from"),)
+
+    student_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("student.id", ondelete="CASCADE"), index=True)
+    primarily_outside_uk: Mapped[bool] = mapped_column(Boolean)
+    source_event_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("student_lifecycle_event.id", ondelete="SET NULL"), nullable=True
+    )
+
+
 class UnitOfAssessment(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """A research unit of assessment (e.g. REF UOA 1 "Clinical Medicine") — Phase 9.
 
@@ -188,6 +229,12 @@ class Student(UUIDMixin, TenantMixin, TimestampMixin, Base):
     # value covering today from its history table; only the history services write them.
     fee_status: Mapped[str | None] = mapped_column(String(30), nullable=True)
     study_location: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    # Effective dating, Phase 10 — HESA Engagement fields. The dated ones cache today's period of
+    # their history table; the plain ones are fixed for the engagement.
+    fee_eligibility: Mapped[str | None] = mapped_column(String(30), nullable=True)      # dated
+    primarily_outside_uk: Mapped[bool | None] = mapped_column(Boolean, nullable=True)   # dated
+    study_intention: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    incoming_exchange: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     # Effective dating, Phase 9 — the student's unit of assessment today (cache of StudentUoaHistory).
     uoa_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("unit_of_assessment.id", ondelete="SET NULL"), nullable=True
@@ -245,6 +292,9 @@ class StudentLifecycleEvent(UUIDMixin, TenantMixin, TimestampMixin, Base):
     # so an institution can extend the vocabulary in configuration rather than a code change; the
     # schema layer constrains the values that pass through the API today.
     leave_category: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # Effective dating, Phase 10 — why the engagement ended (HESA Leaver), for a withdrawal or
+    # termination. One of LEAVER_REASONS; mapped to the HESA code by a return transform.
+    leaver_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
     # Exactly how many days this event added to the expected end date (audit of the arithmetic).
     days_applied: Mapped[int | None] = mapped_column(Integer, nullable=True)
     requested_by_user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)

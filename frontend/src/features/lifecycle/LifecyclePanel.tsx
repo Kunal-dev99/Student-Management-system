@@ -31,7 +31,7 @@ import {
   useRejectLifecycleEvent, useRequestLifecycleEvent, useStudentIntensity, useIntensityImpactPreview,
   LEAVE_CATEGORIES,
   type LeaveCategory,
-  type LifecycleEvent, type LifecycleEventStatus, type LifecycleEventType, type StudyMode,
+  type LifecycleEvent, type LifecycleEventStatus, type LifecycleEventType, type StudyMode, LEAVER_REASONS,
 } from './api'
 
 const EVENT_LABELS: Record<LifecycleEventType, string> = {
@@ -163,6 +163,8 @@ function RequestDialog({ studentId, student }: { studentId: string; student?: St
   const [intensityPct, setIntensityPct] = useState('')
   const [newProgrammeId, setNewProgrammeId] = useState('')
   const [leaveCategory, setLeaveCategory] = useState<LeaveCategory | ''>('')
+  // Phase 10 — HESA Leaver reason for a withdrawal / termination.
+  const [leaverReason, setLeaverReason] = useState('')
   const [reason, setReason] = useState('')
 
   // Programme picker for the transfer variant. Only fetched once the dialog opens so we
@@ -176,7 +178,7 @@ function RequestDialog({ studentId, student }: { studentId: string; student?: St
   const reset = () => {
     setEventType('suspension'); setStartDate(''); setEndDate('')
     setExtensionDays(''); setNewMode('part_time'); setIntensityPct('')
-    setNewProgrammeId(''); setLeaveCategory(''); setReason('')
+    setNewProgrammeId(''); setLeaveCategory(''); setLeaverReason(''); setReason('')
   }
 
   // Default an effective date to today the first time the user picks a dated type.
@@ -222,6 +224,8 @@ function RequestDialog({ studentId, student }: { studentId: string; student?: St
         intensityPct: eventType === 'intensity_change' ? Number(intensityPct) : undefined,
         newProgrammeId: eventType === 'programme_change' ? newProgrammeId : undefined,
         leaveCategory: eventType === 'suspension' && leaveCategory ? leaveCategory : undefined,
+        leaverReason: (eventType === 'withdrawal' || eventType === 'termination') && leaverReason
+          ? leaverReason : undefined,
       })
       toast({
         title: 'Request submitted',
@@ -415,6 +419,20 @@ function RequestDialog({ studentId, student }: { studentId: string; student?: St
                 {STATUS_EVENT_HELP[eventType]} The status changes from this date once approved;
                 a future date takes effect on the day.
               </p>
+            </div>
+          )}
+
+          {(eventType === 'withdrawal' || eventType === 'termination') && (
+            <div className="space-y-1.5">
+              <Label>Reason for leaving (HESA)</Label>
+              <Select value={leaverReason || '__none'} onValueChange={(v) => setLeaverReason(v === '__none' ? '' : v)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none">Not recorded yet</SelectItem>
+                  {LEAVER_REASONS.map((r) => <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <p className="text-helper">Reported as the Leaver reason on the HESA return.</p>
             </div>
           )}
 

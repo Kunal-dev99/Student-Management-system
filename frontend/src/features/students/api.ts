@@ -46,6 +46,11 @@ export interface Student {
   /** Phase 9 — today's unit of assessment (id, and "code name" on the detail endpoint). */
   uoaId?: string | null
   uoa?: string | null
+  /** Phase 10 — HESA Engagement fields (today's value for the dated ones). */
+  feeEligibility?: string | null
+  primarilyOutsideUk?: boolean | null
+  studyIntention?: string | null
+  incomingExchange?: boolean | null
 }
 
 export type ProgrammeType = 'research' | 'taught'
