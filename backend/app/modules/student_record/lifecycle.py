@@ -93,6 +93,7 @@ class LifecycleService:
             "intensityPct": ev.intensity_pct,
             "reason": ev.reason,
             "leaveCategory": ev.leave_category,
+            "leaverReason": ev.leaver_reason,
             "daysApplied": ev.days_applied,
             "decisionNote": ev.decision_note,
             "decidedAt": ev.decided_at.isoformat() if ev.decided_at else None,
@@ -116,6 +117,7 @@ class LifecycleService:
         intensity_pct: int | None = None,
         new_programme_id: uuid.UUID | None = None,
         leave_category: str | None = None,
+        leaver_reason: str | None = None,
         requested_by_user_id: uuid.UUID | None = None,
     ) -> StudentLifecycleEvent:
         """Record a request. Changes nothing about the student until it is approved."""
@@ -194,6 +196,11 @@ class LifecycleService:
             ),
             # leave_category is only meaningful for a suspension — silently drop it on other types
             # so a stray field on the request doesn't mislabel a mode change as "medical".
+            # Phase 10 — HESA Leaver reason, only on an event that ends the engagement.
+            leaver_reason=(
+                leaver_reason if event_type in (LifecycleEventType.withdrawal,
+                                                LifecycleEventType.termination) else None
+            ),
             leave_category=(
                 leave_category if event_type is LifecycleEventType.suspension else None
             ),
@@ -827,6 +834,9 @@ class LifecycleService:
         previous_end = student.expected_end_date
         if new_prog.duration_months:
             student.expected_end_date = _add_months(effective, new_prog.duration_months)
+            from app.modules.student_record.fact_history import ExpectedEndHistoryService
+            await ExpectedEndHistoryService(self.session).sync(
+                student, reason=f"Programme change to {new_prog.code}", source_event_id=event.id)
         # If the new programme has no configured duration, leave expected_end_date unchanged so
         # the return still has a date to show; the warning below flags it.
         elif student.expected_end_date is None:
@@ -941,6 +951,9 @@ class LifecycleService:
         previous = student.expected_end_date
         student.expected_end_date = student.original_expected_end_date + timedelta(days=total_days)
         shift = (student.expected_end_date - previous).days if previous else 0
+        # Phase 10 — the expected end is dated (HESA ENGEXPECTEDENDDATE as held on a date).
+        from app.modules.student_record.fact_history import ExpectedEndHistoryService
+        await ExpectedEndHistoryService(self.session).sync(student, reason="Recalculated from approved changes")
 
         shifted = 0
         if shift:

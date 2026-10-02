@@ -7,8 +7,8 @@ import { useQuery } from '@tanstack/react-query'
 import { api } from '@/shared/api/client'
 
 export type HistoryFact =
-  | 'status' | 'programme' | 'intensity' | 'fee_status' | 'location' | 'uoa' | 'module' | 'funding' | 'supervision'
-  | 'custom' | 'supervisor_uoa'
+  | 'status' | 'programme' | 'intensity' | 'expected_end' | 'fee_status' | 'fee_eligibility' | 'location'
+  | 'outside_uk' | 'uoa' | 'module' | 'funding' | 'supervision' | 'custom' | 'supervisor_uoa'
 
 export interface SignedReturn {
   profileId: string
@@ -61,6 +61,10 @@ export interface StudentAsOf {
   studyLocation: string | null
   /** Phase 9 — unit of assessment on that date ("code name"). */
   uoa: string | null
+  /** Phase 10 — Engagement facts as held on that date. */
+  expectedEndDate: string | null
+  feeEligibility: string | null
+  primarilyOutsideUk: boolean | null
   /** Custom attributes that keep dated history, as on that date. */
   custom: { key: string; label: string; value: string }[]
   modules: { moduleEnrolmentId: string; code: string; title: string; academicYear: string; status: string }[]

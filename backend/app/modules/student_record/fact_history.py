@@ -45,6 +45,9 @@ from app.modules.student_record.models import (
     StudentStatusHistory,
     StudentUoaHistory,
     PersonUoaHistory,
+    StudentExpectedEndHistory,
+    StudentFeeEligibilityHistory,
+    StudentOutsideUkHistory,
 )
 from app.modules.person.models import Person
 
@@ -630,12 +633,106 @@ class PersonUoaHistoryService(_UoaChecks, OptionalFactHistoryService):
         person.uoa_id = value
 
 
+class ExpectedEndHistoryService(OptionalFactHistoryService):
+    """The expected end date as held over time (Phase 10; HESA ENGEXPECTEDENDDATE).
+
+    A period means "from this day, we expected the student to finish on X". Extensions,
+    suspensions, intensity and programme changes recompute ``student.expected_end_date``; ``sync``
+    then records the new expectation from the day it changed."""
+    model = StudentExpectedEndHistory
+    value_attr = "expected_end_date"
+    label = "expected end date"
+    out_key = "expectedEndDate"
+
+    def initial_value(self, student: Student):
+        return student.expected_end_date
+
+    def cache_matches(self, student: Student, value) -> bool:
+        return student.expected_end_date == value
+
+    def apply_cache(self, student: Student, value) -> None:
+        student.expected_end_date = value
+
+    async def sync(self, student: Student, *, user_id: uuid.UUID | None = None,
+                   reason: str | None = None, source_event_id: uuid.UUID | None = None):
+        """Record ``student.expected_end_date`` if it differs from what history holds for today.
+        The change is dated today (or the start date, for a student who hasn't started)."""
+        value = student.expected_end_date
+        if value is None:
+            return None
+        rows = await self.live_rows(student.id)
+        on = today()
+        if student.start_date is not None and on < student.start_date:
+            on = student.start_date
+        held = next((r for r in rows if _covers(r, on)), None)
+        if held is not None and held.expected_end_date == value:
+            return held
+        return await self.change(student, value, effective_from=on, reason=reason, user_id=user_id,
+                                 source_event_id=source_event_id)
+
+
+# Fee eligibility values (HESA FEEELIG categories; mapped to codes by a return transform).
+FEE_ELIGIBILITIES = ("eligible", "not_eligible", "not_required")
+
+
+class FeeEligibilityHistoryService(OptionalFactHistoryService):
+    """Fee eligibility over time (Phase 10; HESA FEEELIG)."""
+    model = StudentFeeEligibilityHistory
+    value_attr = "fee_eligibility"
+    label = "fee eligibility"
+    out_key = "feeEligibility"
+
+    def initial_value(self, student: Student):
+        return student.fee_eligibility
+
+    def cache_matches(self, student: Student, value) -> bool:
+        return student.fee_eligibility == value
+
+    def apply_cache(self, student: Student, value) -> None:
+        student.fee_eligibility = value
+
+    @staticmethod
+    def validate(value) -> str:
+        v = str(value or "").strip().lower()
+        if v not in FEE_ELIGIBILITIES:
+            raise WorkflowError(f"Fee eligibility must be one of: {', '.join(FEE_ELIGIBILITIES)}")
+        return v
+
+
+class OutsideUkHistoryService(OptionalFactHistoryService):
+    """Whether the student studies primarily outside the UK, over time (Phase 10; HESA ENGPRINONUK)."""
+    model = StudentOutsideUkHistory
+    value_attr = "primarily_outside_uk"
+    label = "study primarily outside the UK"
+    out_key = "primarilyOutsideUk"
+
+    def initial_value(self, student: Student):
+        return student.primarily_outside_uk
+
+    def cache_matches(self, student: Student, value) -> bool:
+        return student.primarily_outside_uk == value
+
+    def apply_cache(self, student: Student, value) -> None:
+        student.primarily_outside_uk = value
+
+    @staticmethod
+    def validate(value) -> bool:
+        v = str(value).strip().lower()
+        if v in ("true", "yes", "y", "1"):
+            return True
+        if v in ("false", "no", "n", "0"):
+            return False
+        raise WorkflowError("Say yes or no")
+
+
 # Facts every student carries; the optional ones stay empty until a value is recorded.
 FACT_SERVICES = (StatusHistoryService, ProgrammeHistoryService, IntensityHistoryService,
-                 FeeStatusHistoryService, LocationHistoryService, StudentUoaHistoryService)
+                 FeeStatusHistoryService, LocationHistoryService, StudentUoaHistoryService,
+                 ExpectedEndHistoryService, FeeEligibilityHistoryService, OutsideUkHistoryService)
 # Dated student facts set directly (not through a lifecycle event), by API name.
 DIRECT_FACTS = {"fee-status": FeeStatusHistoryService, "study-location": LocationHistoryService,
-                "uoa": StudentUoaHistoryService}
+                "uoa": StudentUoaHistoryService, "fee-eligibility": FeeEligibilityHistoryService,
+                "outside-uk": OutsideUkHistoryService}
 
 
 async def initialise_all(session: AsyncSession, student: Student, *, valid_from: date | None = None,

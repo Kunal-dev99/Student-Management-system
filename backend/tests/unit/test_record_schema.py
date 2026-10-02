@@ -37,6 +37,10 @@ SAMPLE_RECORD = {
                 "currency": None, "costCentre": None},
     "supervision": {"primaryName": None, "supervisorCount": 0, "primaryUoa": None},
     "taught": {"moduleFteTotal": None},
+    "engagement": {"numhus": "PGR-1", "startDate": None, "expectedEndDate": None, "feeEligibility": None,
+                   "primarilyOutsideUk": None, "studyIntention": None, "incomingExchange": None,
+                   "researchCouncilStudent": None, "studentshipRef": None},
+    "leaver": {"endDate": None, "status": None, "reason": None},
     "award": {"ref": None, "title": None},
     "statusHistory": [], "modules": [], "fundingPeriods": [], "supervisors": [],
 }

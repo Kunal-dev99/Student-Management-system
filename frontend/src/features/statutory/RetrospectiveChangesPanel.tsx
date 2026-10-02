@@ -17,6 +17,7 @@ const FACT_LABEL: Record<string, string> = {
   status: 'Status', programme: 'Programme', intensity: 'Intensity',
   fee_status: 'Fee status', location: 'Location', custom: 'Custom attribute',
   uoa: 'Unit of assessment', supervisor_uoa: 'Supervisor UOA',
+  expected_end: 'Expected end', fee_eligibility: 'Fee eligibility', outside_uk: 'Outside the UK',
   module: 'Module', funding: 'Funding', supervision: 'Supervision',
 }
 

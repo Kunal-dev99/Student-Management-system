@@ -286,7 +286,9 @@ export default function StudentDetailPage() {
           </PageSection>
           {P.datedHistory && (
             <DatedFactsSection studentId={id} feeStatus={s?.feeStatus} studyLocation={s?.studyLocation}
-              uoa={s?.uoa} uoaId={s?.uoaId} />
+              uoa={s?.uoa} uoaId={s?.uoaId}
+              feeEligibility={s?.feeEligibility} primarilyOutsideUk={s?.primarilyOutsideUk}
+              studyIntention={s?.studyIntention} incomingExchange={s?.incomingExchange} />
           )}
           {P.person && (
             <PageSection icon={User} title="Person" accent="accent">

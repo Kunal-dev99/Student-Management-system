@@ -190,6 +190,8 @@ class AdmissionsService:
                 months = int(months * PART_TIME_FACTOR)
             student.expected_end_date = _add_months(student.start_date, months)
             student.original_expected_end_date = student.expected_end_date
+            from app.modules.student_record.fact_history import ExpectedEndHistoryService
+            await ExpectedEndHistoryService(self.session).initialise(student, valid_from=student.start_date)
         # 2) Preserve the identity thread: end applicant, open student (same person).
         await PersonService(PersonRepository(self.session)).transition_identity(
             application.person_id,

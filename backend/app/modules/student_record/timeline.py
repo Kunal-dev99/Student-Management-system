@@ -25,6 +25,9 @@ from app.modules.student_record.fact_history import (
     FeeStatusHistoryService,
     IntensityHistoryService,
     StudentUoaHistoryService,
+    ExpectedEndHistoryService,
+    FeeEligibilityHistoryService,
+    OutsideUkHistoryService,
     LocationHistoryService,
     ProgrammeHistoryService,
     StatusHistoryService,
@@ -41,8 +44,8 @@ from app.modules.student_record.retrospective import affected, signed_off_return
 from app.modules.supervision.models import SupervisorRelationship
 from app.modules.taught.models import ModuleEnrolment, ModuleEnrolmentStatusHistory, TaughtModule
 
-FACTS = ("status", "programme", "intensity", "fee_status", "location", "uoa", "module", "funding",
-         "supervision", "custom")
+FACTS = ("status", "programme", "intensity", "expected_end", "fee_status", "fee_eligibility", "location",
+         "outside_uk", "uoa", "module", "funding", "supervision", "custom")
 
 
 def _val(v):
@@ -173,6 +176,13 @@ class StudentTimeline:
             (FeeStatusHistoryService, "fee_status", lambda r: (r.fee_status, r.fee_status)),
             (LocationHistoryService, "location", lambda r: (r.study_location, r.study_location)),
             (StudentUoaHistoryService, "uoa", lambda r: (uoa_names.get(r.uoa_id) or "—", str(r.uoa_id))),
+            # Phase 10 — HESA Engagement facts.
+            (ExpectedEndHistoryService, "expected_end",
+             lambda r: (f"expected to end {r.expected_end_date.isoformat()}", r.expected_end_date.isoformat())),
+            (FeeEligibilityHistoryService, "fee_eligibility", lambda r: (r.fee_eligibility, r.fee_eligibility)),
+            (OutsideUkHistoryService, "outside_uk",
+             lambda r: ("primarily outside the UK" if r.primarily_outside_uk else "primarily in the UK",
+                        r.primarily_outside_uk)),
         ):
             for r, o in _shown(await svc(self.session).all_rows(student_id), include_superseded):
                 label, value = fmt(r)
@@ -242,6 +252,9 @@ class StudentTimeline:
         fee = await FeeStatusHistoryService(self.session).value_at(student_id, on)
         loc = await LocationHistoryService(self.session).value_at(student_id, on)
         uoa = await StudentUoaHistoryService(self.session).value_at(student_id, on)
+        exp = await ExpectedEndHistoryService(self.session).value_at(student_id, on)
+        elig = await FeeEligibilityHistoryService(self.session).value_at(student_id, on)
+        ouk = await OutsideUkHistoryService(self.session).value_at(student_id, on)
         custom = [
             {"key": f.key, "label": f.label, "value": r.value}
             for r, f in await self._custom_rows(student_id, False) if _covers(r.valid_from, r.valid_to, on)
@@ -280,6 +293,10 @@ class StudentTimeline:
             "feeStatus": fee.fee_status if fee else None,
             "studyLocation": loc.study_location if loc else None,
             "uoa": (await self._uoa_names()).get(uoa.uoa_id) if uoa else None,
+            # Phase 10 — Engagement facts as held on that day.
+            "expectedEndDate": exp.expected_end_date.isoformat() if exp else None,
+            "feeEligibility": elig.fee_eligibility if elig else None,
+            "primarilyOutsideUk": ouk.primarily_outside_uk if ouk else None,
             "custom": custom,
             "modules": modules, "funding": funding, "supervisors": supervisors,
         }

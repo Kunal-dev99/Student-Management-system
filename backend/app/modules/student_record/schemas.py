@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic.alias_generators import to_camel
 
 from app.modules.funding.schemas import ArrangementCreate
@@ -50,6 +50,11 @@ class StudentOut(_Camel):
     # Effective dating, Phase 6 — today's value of the optional dated facts (None = not recorded).
     fee_status: str | None = None
     study_location: str | None = None
+    # Phase 10 — HESA Engagement fields (today's value for the dated ones).
+    fee_eligibility: str | None = None
+    primarily_outside_uk: bool | None = None
+    study_intention: str | None = None
+    incoming_exchange: bool | None = None
     # Phase 8b — the programme version the student is pinned to (e.g. "v1"); detail endpoint only.
     programme_version: str | None = None
     # Phase 9 — today's unit of assessment (id, and "code name" on the detail endpoint).
@@ -58,6 +63,13 @@ class StudentOut(_Camel):
 
 
 LEAVE_CATEGORIES = {"medical", "personal", "academic", "other"}
+
+# Phase 10 — why an engagement ended (HESA Leaver). Our own vocabulary; a return transform maps it
+# to the HESA reason code. "completed" is set by graduation, the rest on a withdrawal / termination.
+LEAVER_REASONS = {
+    "completed", "academic_failure", "transferred", "health", "death", "financial",
+    "personal", "employment", "exclusion", "written_off", "other",
+}
 
 
 class IntensityPreviewRequest(_Camel):
@@ -78,6 +90,18 @@ class LifecycleEventRequest(_Camel):
     # Suspension only — medical / personal / academic / other. Optional (an admin can capture the
     # category on request or leave it to be filled in later). Ignored for non-suspension events.
     leave_category: str | None = None
+    # Withdrawal / termination only — why the engagement ended (HESA Leaver). Ignored otherwise.
+    leaver_reason: str | None = None
+
+    @field_validator("leaver_reason")
+    @classmethod
+    def _validate_leaver_reason(cls, v: str | None) -> str | None:
+        if v is None or v == "":
+            return None
+        v = v.strip().lower()
+        if v not in LEAVER_REASONS - {"completed"}:
+            raise ValueError(f"leaver_reason must be one of {sorted(LEAVER_REASONS - {'completed'})}")
+        return v
 
     @field_validator("leave_category")
     @classmethod
@@ -141,6 +165,7 @@ class LifecycleEventOut(_Camel):
     effective_date: str | None = None
     reason: str
     leave_category: str | None = None
+    leaver_reason: str | None = None   # Phase 10 — HESA Leaver reason (withdrawal / termination)
     days_applied: int | None = None
     decision_note: str | None = None
     decided_at: str | None = None
@@ -155,6 +180,9 @@ class StudentUpdate(_Camel):
     study_mode: StudyMode | None = None
     expected_end_date: date | None = None
     research_area_id: uuid.UUID | None = None
+    # Phase 10 — HESA Engagement fields fixed for the engagement.
+    study_intention: str | None = Field(None, max_length=40)
+    incoming_exchange: bool | None = None
 
 
 class ProgrammeOut(_Camel):

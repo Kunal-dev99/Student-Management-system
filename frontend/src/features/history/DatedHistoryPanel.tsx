@@ -23,7 +23,10 @@ const FACT_LABEL: Record<HistoryFact, string> = {
   status: 'Status',
   programme: 'Programme',
   intensity: 'Study intensity',
+  expected_end: 'Expected end',
   fee_status: 'Fee status',
+  fee_eligibility: 'Fee eligibility',
+  outside_uk: 'Outside the UK',
   location: 'Location',
   uoa: 'Unit of assessment',
   module: 'Module',
@@ -37,7 +40,10 @@ const FACT_TONE: Record<HistoryFact, 'secondary' | 'info' | 'success' | 'warning
   status: 'info',
   programme: 'success',
   intensity: 'secondary',
+  expected_end: 'info',
   fee_status: 'outline',
+  fee_eligibility: 'outline',
+  outside_uk: 'outline',
   location: 'outline',
   uoa: 'outline',
   module: 'outline',
@@ -115,6 +121,18 @@ function AsOfView({ studentId }: { studentId: string }) {
             <div>
               <p className="text-label">Unit of assessment</p>
               <p className="text-sm mt-0.5">{a.uoa ?? '—'}</p>
+            </div>
+            <div>
+              <p className="text-label">Expected end (as held then)</p>
+              <p className="text-sm mt-0.5 num">{a.expectedEndDate ?? '—'}</p>
+            </div>
+            <div>
+              <p className="text-label">Fee eligibility</p>
+              <p className="text-sm mt-0.5">{a.feeEligibility ? pretty(a.feeEligibility) : '—'}</p>
+            </div>
+            <div>
+              <p className="text-label">Primarily outside the UK</p>
+              <p className="text-sm mt-0.5">{a.primarilyOutsideUk == null ? '—' : a.primarilyOutsideUk ? 'Yes' : 'No'}</p>
             </div>
             {a.custom.length > 0 && (
               <div className="col-span-2">

@@ -513,6 +513,7 @@ async def request_lifecycle_event(
         intensity_pct=body.intensity_pct,
         new_programme_id=body.new_programme_id,
         leave_category=body.leave_category,
+        leaver_reason=body.leaver_reason,
         requested_by_user_id=principal.user_id,
     )
     return LifecycleEventOut.model_validate(svc.out(event))

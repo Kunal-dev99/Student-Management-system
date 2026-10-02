@@ -42,6 +42,8 @@ export interface LifecycleEvent {
   reason: string | null
   /** Suspension only — medical / personal / academic / other. Null on non-suspensions. */
   leaveCategory: LeaveCategory | null
+  /** Phase 10 — withdrawal / termination: why the engagement ended (HESA Leaver). */
+  leaverReason?: string | null
   daysApplied: number | null
   decisionNote: string | null
   decidedAt: string | null
@@ -142,7 +144,24 @@ export interface LifecycleEventRequest {
   newProgrammeId?: string
   /** Suspension only — medical / personal / academic / other. Silently dropped on other types. */
   leaveCategory?: LeaveCategory
+  /** Withdrawal / termination only — why the engagement ended (HESA Leaver). */
+  leaverReason?: string
 }
+
+/** Phase 10 — HESA Leaver reasons a withdrawal or termination can carry ("completed" is set by
+ *  graduation). Mapped to the HESA code by a return transform. */
+export const LEAVER_REASONS: { value: string; label: string }[] = [
+  { value: 'academic_failure', label: 'Academic failure' },
+  { value: 'transferred', label: 'Transferred to another provider' },
+  { value: 'health', label: 'Health reasons' },
+  { value: 'death', label: 'Death' },
+  { value: 'financial', label: 'Financial reasons' },
+  { value: 'personal', label: 'Other personal reasons' },
+  { value: 'employment', label: 'Gone into employment' },
+  { value: 'exclusion', label: 'Exclusion' },
+  { value: 'written_off', label: 'Written off after lapse of time' },
+  { value: 'other', label: 'Other' },
+]
 
 export const useLifecycleEvents = (studentId: string) =>
   useQuery({

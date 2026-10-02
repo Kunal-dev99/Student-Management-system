@@ -85,6 +85,10 @@ class StudentService:
         student = await self.get_student(student_id)
         for key, value in patch.items():
             setattr(student, key, value)
+        if "expected_end_date" in patch:
+            # Phase 10 — the expected end is dated; record the new expectation from today.
+            from app.modules.student_record.fact_history import ExpectedEndHistoryService
+            await ExpectedEndHistoryService(self.repo.session).sync(student, reason="Edited directly")
         await self.repo.session.commit()
         await self.repo.session.refresh(student)
         return student
