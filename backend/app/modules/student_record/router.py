@@ -35,6 +35,7 @@ from app.modules.student_record.lifecycle import LifecycleService
 from app.modules.student_record.schemas import (
     EnrolRequest,
     FactChangeRequest,
+    ProgrammeVersionRequest,
     IntensityPreviewRequest,
     LifecycleDecision,
     LifecycleEventOut,
@@ -63,6 +64,41 @@ lifecycle_router = APIRouter(prefix="/lifecycle-events", tags=["student"])
 
 def _svc(session: AsyncSession) -> StudentService:
     return StudentService(StudentRepository(session))
+
+
+@programmes_router.get("/{programme_id}/versions",
+                       summary="A programme's dated versions and how many students are on each (Phase 8b)")
+async def programme_versions(
+    programme_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("student.read")),
+) -> dict:
+    from app.modules.student_record.programme_versions import ProgrammeVersionService
+
+    return await ProgrammeVersionService(session).overview(programme_id)
+
+
+@programmes_router.post("/{programme_id}/versions", status_code=201,
+                        summary="A new programme version from a date (current students keep theirs)")
+async def new_programme_version(
+    programme_id: uuid.UUID,
+    body: ProgrammeVersionRequest,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_permission("admin.configure")),
+) -> dict:
+    from app.modules.student_record.models import Programme
+    from app.modules.student_record.programme_versions import ProgrammeVersionService
+
+    programme = await session.get(Programme, programme_id)
+    if programme is None:
+        raise NotFoundError("Programme not found")
+    svc = ProgrammeVersionService(session)
+    await svc.new_version(programme, effective_from=body.effective_from,
+                          changes=body.model_dump(include={"taught_total_credits", "duration_months",
+                                                           "grading_policy"}),
+                          note=body.note, user_id=principal.user_id)
+    await session.commit()
+    return await svc.overview(programme_id)
 
 
 @programmes_router.get("", response_model=list[ProgrammeOut], summary="List programmes")
@@ -372,6 +408,14 @@ async def get_student(
     student = await svc.get_student(student_id, allowed_ids=allowed)
     # Direct-enrol vs funnel — drives the journey tracker's Applicant stage (ICR G2).
     student.from_application = await svc.person_has_application(student.person_id)
+    # Phase 8b — the programme version the student is on (CMA).
+    from app.modules.student_record.programme_versions import ProgrammeVersionService, label
+    student.programme_version = label(await ProgrammeVersionService(session).pin_for(student))
+    # Phase 9 — today's unit of assessment, readable.
+    if student.uoa_id is not None:
+        from app.modules.student_record.models import UnitOfAssessment
+        u = await session.get(UnitOfAssessment, student.uoa_id)
+        student.uoa = f"{u.code} {u.name}" if u else None
     return StudentOut.model_validate(student)
 
 
@@ -588,7 +632,7 @@ async def change_student_fact(
     if student is None:
         raise NotFoundError("Student not found")
     svc = svc_cls(session)
-    row = await svc.change(student, svc.validate(body.value), effective_from=on,
+    row = await svc.change(student, await svc.normalise(body.value), effective_from=on,
                            reason=(body.reason or "").strip() or None, user_id=principal.user_id)
     await session.commit()
     return {"row": svc.out(row), "current": getattr(student, svc.value_attr)}

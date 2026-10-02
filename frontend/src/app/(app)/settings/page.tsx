@@ -10,7 +10,7 @@
  */
 
 import { useEffect, useState } from 'react'
-import { Bell, Compass, FileSpreadsheet, GraduationCap, ListChecks, ShieldAlert, SlidersHorizontal, Sparkles, Users } from 'lucide-react'
+import { Bell, Compass, FileSpreadsheet, GraduationCap, Landmark, ListChecks, ShieldAlert, SlidersHorizontal, Sparkles, Users } from 'lucide-react'
 import { PageHeader } from '@/components/common/PageHeader'
 import { PageSection } from '@/components/common/PageSection'
 import { Button } from '@/components/ui/button'
@@ -30,6 +30,7 @@ import { InstitutionPolicyTab } from '@/features/settings/InstitutionPolicyTab'
 import { UsersRolesTab } from '@/features/settings/UsersRolesTab'
 import { DataHygieneTab } from '@/features/settings/DataHygieneTab'
 import { ProgrammesTab } from '@/features/settings/ProgrammesTab'
+import { UoaAdminTab } from '@/features/uoa/UoaComponents'
 import { ImportTemplateTab } from '@/features/settings/ImportTemplateTab'
 
 /* ------------------------------------------------------------------ *
@@ -224,6 +225,7 @@ export default function SettingsPage() {
             {canConfigurePlatform && <TabsTrigger value="navigation"><Compass className="h-4 w-4 mr-1.5" /> Navigation</TabsTrigger>}
             {admin && <TabsTrigger value="policy"><SlidersHorizontal className="h-4 w-4 mr-1.5" /> Institution policy</TabsTrigger>}
             {admin && <TabsTrigger value="programmes"><GraduationCap className="h-4 w-4 mr-1.5" /> Programmes</TabsTrigger>}
+            {admin && <TabsTrigger value="uoa"><Landmark className="h-4 w-4 mr-1.5" /> Units of assessment</TabsTrigger>}
             {admin && <TabsTrigger value="import"><FileSpreadsheet className="h-4 w-4 mr-1.5" /> Cohort import</TabsTrigger>}
             {admin && <TabsTrigger value="users"><Users className="h-4 w-4 mr-1.5" /> Users &amp; roles</TabsTrigger>}
             {admin && <TabsTrigger value="hygiene"><Sparkles className="h-4 w-4 mr-1.5" /> Data hygiene</TabsTrigger>}
@@ -247,6 +249,11 @@ export default function SettingsPage() {
           {admin && (
             <TabsContent value="programmes" className="mt-4">
               <ProgrammesTab />
+            </TabsContent>
+          )}
+          {admin && (
+            <TabsContent value="uoa" className="mt-4">
+              <UoaAdminTab />
             </TabsContent>
           )}
           {admin && (

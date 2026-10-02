@@ -156,6 +156,9 @@ export function TaughtRecordPanel({ studentId, programmeId }: { studentId: strin
                       onClick={() => setExpanded((s) => ({ ...s, [e.id]: !s[e.id] }))}>
                       {isOpen ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />}
                       <span className="text-sm font-medium truncate">{e.moduleCode} — {e.moduleTitle}</span>
+                      {e.moduleVersion && (
+                        <span className="text-xs text-muted-foreground" title="The module version this student is on">{e.moduleVersion}</span>
+                      )}
                       {mod && <Badge variant="outline">L{mod.level}{mod.isCore ? ' · core' : ' · optional'}</Badge>}
                       <span className="text-helper num whitespace-nowrap">{e.credits ?? 0} cr · {e.academicYear}</span>
                       {e.startDate && (

@@ -24,6 +24,7 @@ from app.modules.student_record.fact_history import (
     CustomValueHistoryService,
     FeeStatusHistoryService,
     IntensityHistoryService,
+    StudentUoaHistoryService,
     LocationHistoryService,
     ProgrammeHistoryService,
     StatusHistoryService,
@@ -40,7 +41,7 @@ from app.modules.student_record.retrospective import affected, signed_off_return
 from app.modules.supervision.models import SupervisorRelationship
 from app.modules.taught.models import ModuleEnrolment, ModuleEnrolmentStatusHistory, TaughtModule
 
-FACTS = ("status", "programme", "intensity", "fee_status", "location", "module", "funding",
+FACTS = ("status", "programme", "intensity", "fee_status", "location", "uoa", "module", "funding",
          "supervision", "custom")
 
 
@@ -127,6 +128,12 @@ class StudentTimeline:
             q = q.where(h.superseded_by.is_(None))
         return (await self.session.execute(q)).all()
 
+    async def _uoa_names(self) -> dict:
+        from app.modules.student_record.models import UnitOfAssessment
+
+        return {u.id: f"{u.code} {u.name}" for u in
+                (await self.session.execute(select(UnitOfAssessment))).scalars().all()}
+
     # ---------------- history ----------------
 
     async def history(self, student_id: uuid.UUID, *, include_superseded: bool = False) -> dict:
@@ -134,6 +141,7 @@ class StudentTimeline:
         returns = await signed_off_returns(self.session)
         programme_names = {pid: name for pid, name in (await self.session.execute(
             select(Programme.id, Programme.name))).all()}
+        uoa_names = await self._uoa_names()
         entries: list[dict] = []
         users: set[uuid.UUID] = set()
 
@@ -164,6 +172,7 @@ class StudentTimeline:
                         r.intensity_pct)),
             (FeeStatusHistoryService, "fee_status", lambda r: (r.fee_status, r.fee_status)),
             (LocationHistoryService, "location", lambda r: (r.study_location, r.study_location)),
+            (StudentUoaHistoryService, "uoa", lambda r: (uoa_names.get(r.uoa_id) or "—", str(r.uoa_id))),
         ):
             for r, o in _shown(await svc(self.session).all_rows(student_id), include_superseded):
                 label, value = fmt(r)
@@ -232,6 +241,7 @@ class StudentTimeline:
         inten = await IntensityHistoryService(self.session).value_at(student_id, on)
         fee = await FeeStatusHistoryService(self.session).value_at(student_id, on)
         loc = await LocationHistoryService(self.session).value_at(student_id, on)
+        uoa = await StudentUoaHistoryService(self.session).value_at(student_id, on)
         custom = [
             {"key": f.key, "label": f.label, "value": r.value}
             for r, f in await self._custom_rows(student_id, False) if _covers(r.valid_from, r.valid_to, on)
@@ -269,6 +279,7 @@ class StudentTimeline:
             "studyMode": mode_for_intensity(inten.intensity_pct).value if inten else None,
             "feeStatus": fee.fee_status if fee else None,
             "studyLocation": loc.study_location if loc else None,
+            "uoa": (await self._uoa_names()).get(uoa.uoa_id) if uoa else None,
             "custom": custom,
             "modules": modules, "funding": funding, "supervisors": supervisors,
         }

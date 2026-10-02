@@ -109,6 +109,9 @@ class StudentService:
         new_code = patch.get("code")
         if new_code and new_code != prog.code and await self.repo.get_programme_by_code(new_code):
             raise ConflictError(f"A programme with code '{new_code}' already exists")
+        # Phase 8b — credits / duration / grading belong to today's programme version (CMA).
+        from app.modules.student_record.programme_versions import ProgrammeVersionService
+        await ProgrammeVersionService(self.repo.session).guard_rules(prog, patch)
         for key, value in patch.items():
             setattr(prog, key, value)
         await self.repo.session.commit()

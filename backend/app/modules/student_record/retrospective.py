@@ -41,6 +41,9 @@ from app.modules.student_record.models import (
     StudentLocationHistory,
     StudentProgrammeHistory,
     StudentStatusHistory,
+    StudentUoaHistory,
+    PersonUoaHistory,
+    UnitOfAssessment,
 )
 from app.modules.supervision.models import SupervisorRelationship
 from app.modules.taught.models import ModuleEnrolment, ModuleEnrolmentStatusHistory, TaughtModule
@@ -153,6 +156,7 @@ async def changes_since_signoff(session: AsyncSession, profile_id: uuid.UUID) ->
     changes: list[dict] = []
     programme_names = {pid: name for pid, name in (await session.execute(
         select(Programme.id, Programme.name))).all()}
+    uoa_codes = {u.id: u.code for u in (await session.execute(select(UnitOfAssessment))).scalars().all()}
 
     def add(student_id, fact, value, row, recorded_at, recorded_by=None):
         changes.append({
@@ -171,6 +175,7 @@ async def changes_since_signoff(session: AsyncSession, profile_id: uuid.UUID) ->
         (StudentIntensityHistory, "intensity", lambda row: f"{row.intensity_pct}%"),
         (StudentFeeStatusHistory, "fee_status", lambda row: row.fee_status),
         (StudentLocationHistory, "location", lambda row: row.study_location),
+        (StudentUoaHistory, "uoa", lambda row: uoa_codes.get(row.uoa_id)),
     ):
         rows = (await session.execute(
             select(model).where(_overlap_clause(model, r), model.recorded_at > r.signed_off_at,
@@ -208,7 +213,22 @@ async def changes_since_signoff(session: AsyncSession, profile_id: uuid.UUID) ->
     for row in rows:
         add(row.student_id, "funding", _val(row.funding_type), row, row.updated_at)
 
+    # Phase 9 — a supervisor's UOA changed after sign-off: it reaches every student they
+    # supervised while the new UOA applied (Alistair's "UOA changed at the last minute").
+    pu = PersonUoaHistory
     rel = SupervisorRelationship
+    for row in (await session.execute(
+        select(pu).where(_overlap_clause(pu, r), pu.recorded_at > r.signed_off_at,
+                         pu.origin != "backfill", pu.closure.is_(False))
+    )).scalars().all():
+        for sup in (await session.execute(
+            select(rel).where(rel.supervisor_person_id == row.person_id,
+                              rel.valid_from < (row.valid_to or r.window_end),
+                              or_(rel.valid_to.is_(None), rel.valid_to > row.valid_from))
+        )).scalars().all():
+            add(sup.student_id, "supervisor_uoa", f"{_val(sup.role)} supervisor: {uoa_codes.get(row.uoa_id)}",
+                row, row.recorded_at, row.recorded_by_user_id)
+
     rows = (await session.execute(
         select(rel, Person.given_name, Person.family_name)
         .join(Person, Person.id == rel.supervisor_person_id)

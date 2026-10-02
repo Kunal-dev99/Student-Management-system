@@ -52,6 +52,8 @@ class TaughtModule(UUIDMixin, TenantMixin, TimestampMixin, Base):
     title: Mapped[str] = mapped_column(String(300))
     credits: Mapped[int] = mapped_column(Integer, default=0)
     term: Mapped[str | None] = mapped_column(String(60), nullable=True)  # e.g. "Autumn 2026"
+    # Phase 8c — module FTE % of today's version (cache); None = derived from credits.
+    fte_pct: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), nullable=True)
     # ICR G1 (full model) — FHEQ level (7 = master's), core vs optional, and the module lead.
     level: Mapped[int] = mapped_column(Integer, default=7)
     is_core: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -62,6 +64,56 @@ class TaughtModule(UUIDMixin, TenantMixin, TimestampMixin, Base):
     assessments: Mapped[list["ModuleAssessment"]] = relationship(
         back_populates="module", lazy="selectin", cascade="all, delete-orphan"
     )
+
+
+class ModuleVersion(UUIDMixin, TenantMixin, TimestampMixin, Base):
+    """What a module teaches, in force over a period (effective dating, Phase 8 — CMA).
+
+    A module is the identity (code); a version holds what was sold to students (title, credits,
+    level, term) for ``[valid_from, valid_to)``. A version that students have enrolled on is never
+    edited: a change creates a new version from a date, and the old cohort stays on theirs.
+    ``taught_module`` keeps the values of the version in force today, as a cache.
+    """
+    __tablename__ = "module_version"
+    __table_args__ = (
+        UniqueConstraint("module_id", "version_no", name="uq_module_version_no"),
+        Index("ix_module_version_module_from", "module_id", "valid_from"),
+    )
+
+    module_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("taught_module.id", ondelete="CASCADE"), index=True
+    )
+    version_no: Mapped[int] = mapped_column(Integer)
+    title: Mapped[str] = mapped_column(String(300))
+    credits: Mapped[int] = mapped_column(Integer, default=0)
+    level: Mapped[int] = mapped_column(Integer, default=7)
+    term: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    # Phase 8c — the share of a full-time year this module is (HESA module FTE). None = derived
+    # from credits ÷ the home programme's total credits (see catalogue.effective_fte).
+    fte_pct: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), nullable=True)
+    valid_from: Mapped[date] = mapped_column(Date)
+    valid_to: Mapped[date | None] = mapped_column(Date, nullable=True)   # exclusive; None = open
+    change_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
+
+class ModuleRun(UUIDMixin, TenantMixin, TimestampMixin, Base):
+    """A module version taught in an academic year (Phase 8). Enrolments belong to a run, so a
+    student's credits and marks always come from the version they actually took — and repeating a
+    module in a later year is a new enrolment on that year's run."""
+    __tablename__ = "module_run"
+    __table_args__ = (
+        UniqueConstraint("module_version_id", "academic_year", name="uq_module_run_version_year"),
+    )
+
+    module_version_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("module_version.id", ondelete="CASCADE"), index=True
+    )
+    academic_year: Mapped[str] = mapped_column(String(20))
+    start_date: Mapped[date | None] = mapped_column(Date, nullable=True)   # inclusive
+    end_date: Mapped[date | None] = mapped_column(Date, nullable=True)     # inclusive
 
 
 class ModuleOffering(UUIDMixin, TenantMixin, TimestampMixin, Base):
@@ -95,6 +147,11 @@ class ModuleEnrolment(UUIDMixin, TenantMixin, TimestampMixin, Base):
         ForeignKey("taught_module.id", ondelete="CASCADE"), index=True
     )
     academic_year: Mapped[str] = mapped_column(String(20))  # e.g. "2026/27"
+    # Phase 8 — the run (module version in that year) the student is on. Credits, title and level
+    # for this enrolment come from that version, not from whatever the module says today.
+    module_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("module_run.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     # Effective dating, Phase 3 — the student's own dates on this module (HESA ModuleInstance
     # MODINSTSTARTDATE / MODINSTENDDATE; both inclusive). They can differ from the cohort's (a late
     # joiner); a withdrawal or interruption ends the module on that date. ``status`` is the cached

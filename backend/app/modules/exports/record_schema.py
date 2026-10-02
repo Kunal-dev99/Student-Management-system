@@ -66,6 +66,8 @@ RECORD_SCHEMA: list[RecordGroup] = [
                              "Map to the HESA code with a value transform."),
             RecordField("student.studyLocation", "Student · location of study (dated)", "code",
                         hint="The location code in force at the end of the period."),
+            RecordField("student.uoa", "Student · unit of assessment (dated)", "code",
+                        hint="The student's UOA code in force at the end of the period (Phase 9)."),
             RecordField("student.husid", "Student · HUSID (generated)", "string",
                         hint="13-digit HESA UID computed from the institution code + entry year + sequence + Luhn.",
                         nullable=False),
@@ -90,6 +92,8 @@ RECORD_SCHEMA: list[RecordGroup] = [
         fields=[
             RecordField("programme.name", "Programme · name", "string"),
             RecordField("programme.code", "Programme · code", "string"),
+            RecordField("programme.version", "Programme · version the student is on", "string",
+                        hint="e.g. v1 — the programme version the student was pinned to when they started (CMA)."),
         ],
     ),
     RecordGroup(
@@ -123,6 +127,18 @@ RECORD_SCHEMA: list[RecordGroup] = [
             RecordField("supervision.primaryName", "Supervision · primary supervisor", "string"),
             RecordField("supervision.supervisorCount", "Supervision · number of supervisors", "number",
                         nullable=False),
+            RecordField("supervision.primaryUoa", "Supervision · primary supervisor's unit of assessment",
+                        "code", hint="UOA code on the record's date (Phase 9)."),
+        ],
+    ),
+    RecordGroup(
+        root="taught",
+        label="Taught modules",
+        description="Totals over the modules the student took in the record's period (Phase 8c).",
+        fields=[
+            RecordField("taught.moduleFteTotal", "Taught · total module FTE % in the period", "number",
+                        hint="Sum of the module FTEs of the versions taken (set, or credits ÷ programme "
+                             "credits). HESA checks the student's FTE doesn't exceed it."),
         ],
     ),
     RecordGroup(
@@ -145,12 +161,12 @@ CHILD_LISTS: list[dict] = [
     {"name": "statusHistory", "label": "Status changes in the period", "hesa": "SessionStatus",
      "fields": ["status", "validFrom", "validTo"]},
     {"name": "modules", "label": "Modules in the period", "hesa": "ModuleInstance",
-     "fields": ["code", "title", "credits", "academicYear", "startDate", "endDate", "status",
-                "outcome", "mark"]},
+     "fields": ["code", "title", "credits", "version", "ftePct", "academicYear", "startDate", "endDate",
+                "status", "outcome", "mark"]},
     {"name": "fundingPeriods", "label": "Funding arrangements in the period", "hesa": None,
      "fields": ["type", "source", "contributionPct", "amount", "validFrom", "validTo"]},
     {"name": "supervisors", "label": "Supervisors in the period", "hesa": None,
-     "fields": ["name", "role", "weightingPct", "validFrom", "validTo"]},
+     "fields": ["name", "role", "weightingPct", "uoa", "validFrom", "validTo"]},
 ]
 
 

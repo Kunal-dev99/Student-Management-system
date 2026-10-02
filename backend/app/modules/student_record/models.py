@@ -73,6 +73,91 @@ class Programme(UUIDMixin, TenantMixin, TimestampMixin, Base):
     grading_policy: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
 
+class UnitOfAssessment(UUIDMixin, TenantMixin, TimestampMixin, Base):
+    """A research unit of assessment (e.g. REF UOA 1 "Clinical Medicine") — Phase 9.
+
+    Students and staff (supervisors) are attached to one over time; the links are dated so a
+    return can say which UOA applied on a date, and a late change is caught after sign-off."""
+    __tablename__ = "unit_of_assessment"
+    __table_args__ = (UniqueConstraint("tenant_id", "code", name="uq_uoa_tenant_code"),)
+
+    code: Mapped[str] = mapped_column(String(20))
+    name: Mapped[str] = mapped_column(String(200))
+    panel: Mapped[str | None] = mapped_column(String(20), nullable=True)   # e.g. "A"
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class StudentUoaHistory(UUIDMixin, TenantMixin, HistoryMixin, Base):
+    """A student's unit of assessment over time (Phase 9). ``student.uoa_id`` caches today's."""
+    __tablename__ = "student_uoa_history"
+    __table_args__ = (Index("ix_student_uoa_history_student_from", "student_id", "valid_from"),)
+
+    student_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("student.id", ondelete="CASCADE"), index=True)
+    uoa_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("unit_of_assessment.id", ondelete="RESTRICT"), index=True)
+    source_event_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("student_lifecycle_event.id", ondelete="SET NULL"), nullable=True
+    )
+
+
+class PersonUoaHistory(UUIDMixin, TenantMixin, HistoryMixin, Base):
+    """A person's (supervisor's / staff member's) unit of assessment over time (Phase 9).
+    ``person.uoa_id`` caches today's."""
+    __tablename__ = "person_uoa_history"
+    __table_args__ = (Index("ix_person_uoa_history_person_from", "person_id", "valid_from"),)
+
+    person_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("person.id", ondelete="CASCADE"), index=True)
+    uoa_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("unit_of_assessment.id", ondelete="RESTRICT"), index=True)
+    source_event_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("student_lifecycle_event.id", ondelete="SET NULL"), nullable=True
+    )
+
+
+class ProgrammeVersion(UUIDMixin, TenantMixin, TimestampMixin, Base):
+    """What a programme promised a cohort, in force over a period (effective dating, Phase 8b — CMA).
+
+    A cohort stays on the version it enrolled on (``StudentProgrammePin``); a new cohort can be
+    taught a new version. A version holds the rules (total credits, duration, grading policy) and
+    the module structure (which modules, core or optional) as they stood. A version students are
+    pinned to only gains modules: removing one, making a core module optional, or changing the
+    rules needs a new version from a date. ``programme`` caches today's version's rules.
+    """
+    __tablename__ = "programme_version"
+    __table_args__ = (
+        UniqueConstraint("programme_id", "version_no", name="uq_programme_version_no"),
+        Index("ix_programme_version_programme_from", "programme_id", "valid_from"),
+    )
+
+    programme_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("programme.id", ondelete="CASCADE"), index=True)
+    version_no: Mapped[int] = mapped_column(Integer)
+    valid_from: Mapped[date] = mapped_column(Date)
+    valid_to: Mapped[date | None] = mapped_column(Date, nullable=True)   # exclusive; None = open
+    taught_total_credits: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    duration_months: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    grading_policy: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # [{"moduleId": str, "code": str, "isCore": bool}] — the module structure of this version.
+    structure: Mapped[list] = mapped_column(JSON, default=list)
+    change_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
+
+class StudentProgrammePin(UUIDMixin, TenantMixin, TimestampMixin, Base):
+    """The programme version a student is on for a programme (Phase 8b — the CMA promise). Set when
+    they start on that programme (enrolment or transfer) and never moved by later versions."""
+    __tablename__ = "student_programme_pin"
+    __table_args__ = (
+        UniqueConstraint("student_id", "programme_id", name="uq_student_programme_pin"),
+    )
+
+    student_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("student.id", ondelete="CASCADE"), index=True)
+    programme_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("programme.id", ondelete="CASCADE"), index=True)
+    programme_version_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("programme_version.id", ondelete="RESTRICT"), index=True
+    )
+    pinned_on: Mapped[date] = mapped_column(Date)
+
+
 class Student(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "student"
 
@@ -103,6 +188,10 @@ class Student(UUIDMixin, TenantMixin, TimestampMixin, Base):
     # value covering today from its history table; only the history services write them.
     fee_status: Mapped[str | None] = mapped_column(String(30), nullable=True)
     study_location: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    # Effective dating, Phase 9 — the student's unit of assessment today (cache of StudentUoaHistory).
+    uoa_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("unit_of_assessment.id", ondelete="SET NULL"), nullable=True
+    )
 
     project: Mapped["ResearchProject | None"] = relationship(
         back_populates="student", lazy="selectin", uselist=False, cascade="all, delete-orphan"

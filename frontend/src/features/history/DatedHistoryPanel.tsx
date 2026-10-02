@@ -25,10 +25,12 @@ const FACT_LABEL: Record<HistoryFact, string> = {
   intensity: 'Study intensity',
   fee_status: 'Fee status',
   location: 'Location',
+  uoa: 'Unit of assessment',
   module: 'Module',
   funding: 'Funding',
   supervision: 'Supervision',
   custom: 'Custom attribute',
+  supervisor_uoa: 'Supervisor UOA',
 }
 
 const FACT_TONE: Record<HistoryFact, 'secondary' | 'info' | 'success' | 'warning' | 'outline'> = {
@@ -37,10 +39,12 @@ const FACT_TONE: Record<HistoryFact, 'secondary' | 'info' | 'success' | 'warning
   intensity: 'secondary',
   fee_status: 'outline',
   location: 'outline',
+  uoa: 'outline',
   module: 'outline',
   funding: 'warning',
   supervision: 'secondary',
   custom: 'outline',
+  supervisor_uoa: 'outline',
 }
 
 const ORIGIN_LABEL: Record<string, string> = {
@@ -107,6 +111,10 @@ function AsOfView({ studentId }: { studentId: string }) {
             <div>
               <p className="text-label">Location of study</p>
               <p className="text-sm mt-0.5">{a.studyLocation ?? '—'}</p>
+            </div>
+            <div>
+              <p className="text-label">Unit of assessment</p>
+              <p className="text-sm mt-0.5">{a.uoa ?? '—'}</p>
             </div>
             {a.custom.length > 0 && (
               <div className="col-span-2">

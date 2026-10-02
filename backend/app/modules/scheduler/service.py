@@ -50,6 +50,11 @@ class SchedulerService:
 
         changed = await refresh_all_due(self.session)
         changed += await ModuleStatusHistoryService(self.session).refresh_due()
+        # Phase 8 — a module's cached title / credits follow the version in force today.
+        from app.modules.taught.catalogue import ModuleCatalogueService
+        changed += await ModuleCatalogueService(self.session).refresh_due()
+        from app.modules.student_record.programme_versions import ProgrammeVersionService
+        changed += await ProgrammeVersionService(self.session).refresh_due()
         if changed:
             await self.session.commit()
         return changed

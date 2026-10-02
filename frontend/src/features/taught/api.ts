@@ -57,6 +57,8 @@ export interface Enrolment {
   moduleCode: string | null
   moduleTitle: string | null
   credits: number | null
+  /** Phase 8 — the module version the student is on, e.g. "v2". */
+  moduleVersion?: string | null
   academicYear: string
   status: ModuleEnrolmentStatus
   /** The student's own dates on the module (inclusive; HESA ModuleInstance start / end). */

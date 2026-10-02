@@ -769,6 +769,9 @@ class LifecycleService:
             student, new_prog.id, effective_from=effective, reason=event.reason,
             user_id=event.approved_by_user_id, source_event_id=event.id,
         )
+        # Phase 8b — on the new programme the student joins the version in force on that date.
+        from app.modules.student_record.programme_versions import ProgrammeVersionService
+        await ProgrammeVersionService(self.session).ensure_pin(student, new_prog.id, on=effective)
 
         # 2) Cancel undecided milestones from the old schedule (decided = historical fact).
         cancelled = 0

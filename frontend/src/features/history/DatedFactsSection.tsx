@@ -18,8 +18,9 @@ import { api } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthContext'
 import { EffectiveDateField } from './EffectiveDate'
 import { todayIso } from './api'
+import { useUoas } from '@/features/uoa/api'
 
-type FactKey = 'fee-status' | 'study-location'
+type FactKey = 'fee-status' | 'study-location' | 'uoa'
 
 const FEE_STATUSES = ['home', 'overseas', 'channel_islands', 'unknown'] as const
 
@@ -36,10 +37,17 @@ function useRecordFact(studentId: string, fact: FactKey) {
 }
 
 function FactRow({
-  studentId, fact, label, current, canEdit,
-}: { studentId: string; fact: FactKey; label: string; current: string | null | undefined; canEdit: boolean }) {
+  studentId, fact, label, current, currentValue, canEdit,
+}: {
+  studentId: string; fact: FactKey; label: string; current: string | null | undefined
+  /** The stored value when it differs from what is shown (the UOA id behind "1 Clinical Medicine"). */
+  currentValue?: string | null
+  canEdit: boolean
+}) {
   const { toast } = useToast()
   const record = useRecordFact(studentId, fact)
+  const uoas = useUoas()
+  const stored = currentValue !== undefined ? currentValue : current
   const [open, setOpen] = useState(false)
   const [value, setValue] = useState('')
   const [date, setDate] = useState(todayIso())
@@ -56,7 +64,7 @@ function FactRow({
         </div>
         {canEdit && (
           <Button size="sm" variant="ghost" onClick={() => {
-            setOpen(!open); setValue(current ?? ''); setDate(todayIso()); setReason('')
+            setOpen(!open); setValue(stored ?? ''); setDate(todayIso()); setReason('')
           }}>{current ? 'Change' : 'Record'}</Button>
         )}
       </div>
@@ -64,7 +72,16 @@ function FactRow({
         <div className="flex flex-wrap items-end gap-2 mt-2 bg-surface-2 rounded-md p-2">
           <div className="flex flex-col gap-1">
             <span className="text-label">New value</span>
-            {fact === 'fee-status' ? (
+            {fact === 'uoa' ? (
+              <Select value={value} onValueChange={setValue}>
+                <SelectTrigger className="h-8 w-60"><SelectValue placeholder="Choose…" /></SelectTrigger>
+                <SelectContent>
+                  {(uoas.data ?? []).filter((u) => u.isActive).map((u) => (
+                    <SelectItem key={u.id} value={u.id}>{u.code} {u.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : fact === 'fee-status' ? (
               <Select value={value} onValueChange={setValue}>
                 <SelectTrigger className="h-8 w-44"><SelectValue placeholder="Choose…" /></SelectTrigger>
                 <SelectContent>
@@ -82,7 +99,7 @@ function FactRow({
             <Input id={`${fact}-reason`} className="h-8 w-56" placeholder="Optional"
               value={reason} onChange={(e) => setReason(e.target.value)} />
           </div>
-          <Button size="sm" disabled={record.isPending || !value.trim() || value === current}
+          <Button size="sm" disabled={record.isPending || !value.trim() || value === stored}
             onClick={async () => {
               try {
                 await record.mutateAsync({ value: value.trim(), effectiveDate: date || undefined, reason: reason.trim() || undefined })
@@ -100,16 +117,21 @@ function FactRow({
 }
 
 export function DatedFactsSection({
-  studentId, feeStatus, studyLocation,
-}: { studentId: string; feeStatus?: string | null; studyLocation?: string | null }) {
+  studentId, feeStatus, studyLocation, uoa, uoaId,
+}: {
+  studentId: string; feeStatus?: string | null; studyLocation?: string | null
+  uoa?: string | null; uoaId?: string | null
+}) {
   const { hasPermission } = useAuth()
   const canEdit = hasPermission('student.write')
   return (
-    <PageSection icon={CalendarClock} title="Fee status and location"
+    <PageSection icon={CalendarClock} title="Fee status, location and UOA"
       description="Dated: a change is recorded from the day it took effect; earlier values stay in Dated history.">
       <div className="space-y-2">
         <FactRow studentId={studentId} fact="fee-status" label="Fee status" current={feeStatus} canEdit={canEdit} />
         <FactRow studentId={studentId} fact="study-location" label="Location of study" current={studyLocation} canEdit={canEdit} />
+        <FactRow studentId={studentId} fact="uoa" label="Unit of assessment" current={uoa}
+          currentValue={uoaId ?? null} canEdit={canEdit} />
       </div>
     </PageSection>
   )
