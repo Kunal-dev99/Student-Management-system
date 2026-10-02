@@ -50,6 +50,11 @@ class StudentOut(_Camel):
     # Effective dating, Phase 6 — today's value of the optional dated facts (None = not recorded).
     fee_status: str | None = None
     study_location: str | None = None
+    # Phase 8b — the programme version the student is pinned to (e.g. "v1"); detail endpoint only.
+    programme_version: str | None = None
+    # Phase 9 — today's unit of assessment (id, and "code name" on the detail endpoint).
+    uoa_id: uuid.UUID | None = None
+    uoa: str | None = None
 
 
 LEAVE_CATEGORIES = {"medical", "personal", "academic", "other"}
@@ -93,6 +98,15 @@ class LifecycleDecision(_Camel):
 
 class ReturnRequest(_Camel):
     returned_on: date | None = None
+
+
+class ProgrammeVersionRequest(_Camel):
+    """Phase 8b — a new programme version from a date (current students keep theirs)."""
+    effective_from: date
+    taught_total_credits: int | None = None
+    duration_months: int | None = None
+    grading_policy: dict | None = None
+    note: str
 
 
 class FactChangeRequest(_Camel):

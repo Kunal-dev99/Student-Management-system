@@ -5,7 +5,7 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
 from app.modules.taught.constants import (
@@ -30,6 +30,8 @@ class ModuleCreate(_Camel):
     level: int = 7
     is_core: bool = True
     convenor_person_id: uuid.UUID | None = None
+    # Phase 8c — module FTE % (share of a full-time year); blank = derived from credits.
+    fte_pct: Decimal | None = Field(None, ge=0, le=100)
 
 
 class ModuleUpdate(_Camel):
@@ -40,6 +42,18 @@ class ModuleUpdate(_Camel):
     level: int | None = None
     is_core: bool | None = None
     convenor_person_id: uuid.UUID | None = None
+    fte_pct: Decimal | None = Field(None, ge=0, le=100)
+
+
+class ModuleVersionRequest(_Camel):
+    """Phase 8 — a new version of a module from a date (CMA: enrolled students keep theirs)."""
+    effective_from: date
+    title: str | None = None
+    credits: int | None = None
+    level: int | None = None
+    term: str | None = None
+    fte_pct: Decimal | None = Field(None, ge=0, le=100)
+    note: str
 
 
 class AssessmentCreate(_Camel):
@@ -76,6 +90,8 @@ class ModuleOut(_Camel):
     level: int = 7
     is_core: bool = True
     convenor_person_id: uuid.UUID | None = None
+    # Phase 8c — module FTE % of today's version (None = derived from credits).
+    fte_pct: Decimal | None = None
     # Shared/elective modules: True when this module is offered here but belongs to another
     # programme (home_programme_name names it). Home modules are is_elective=False.
     is_elective: bool = False
@@ -165,6 +181,7 @@ class EnrolmentOut(_Camel):
     module_code: str | None = None
     module_title: str | None = None
     credits: int | None = None
+    module_version: str | None = None   # Phase 8 — e.g. "v2": the version the student is on
     academic_year: str
     status: ModuleEnrolmentStatus
     start_date: date | None = None

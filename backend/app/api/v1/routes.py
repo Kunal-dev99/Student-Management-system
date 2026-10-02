@@ -23,6 +23,7 @@ from app.modules.recruitment.f3_router import (
 from app.modules.student_record.router import router as student_router
 from app.modules.student_record.router import programmes_router
 from app.modules.student_record.router import lifecycle_router
+from app.modules.student_record.uoa_router import person_uoa_router, uoa_router
 from app.modules.supervision.router import student_scoped as supervision_student_router
 from app.modules.supervision.router import sup_router
 from app.modules.supervision.w2_router import (
@@ -123,6 +124,8 @@ api_router.include_router(f3_public_ref_router)
 api_router.include_router(student_router)
 api_router.include_router(programmes_router)
 api_router.include_router(lifecycle_router)
+api_router.include_router(uoa_router)
+api_router.include_router(person_uoa_router)
 
 # Supervision
 api_router.include_router(supervision_student_router)

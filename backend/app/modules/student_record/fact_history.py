@@ -43,7 +43,10 @@ from app.modules.student_record.models import (
     StudentLocationHistory,
     StudentProgrammeHistory,
     StudentStatusHistory,
+    StudentUoaHistory,
+    PersonUoaHistory,
 )
+from app.modules.person.models import Person
 
 
 def today() -> date:
@@ -452,6 +455,10 @@ class OptionalFactHistoryService(FactHistoryService):
     """A fact that may not be recorded yet (Phase 6). No history until the first value is given;
     the first value opens it from its own date (a gap before it just means "not recorded")."""
 
+    async def normalise(self, value):
+        """Check and normalise a value from the API (subclasses define ``validate``)."""
+        return self.validate(value)
+
     async def initialise(self, student, *, valid_from=None, value=None, origin="initial",
                          reason=None, user_id=None):
         if value is None and self.initial_value(student) is None:
@@ -557,11 +564,78 @@ class CustomValueHistoryService(OptionalFactHistoryService):
         cv.value = value
 
 
+class _UoaChecks:
+    """Shared by the student and person UOA services (Phase 9): the value is a UOA id that must
+    exist and be active."""
+
+    @staticmethod
+    def validate(value) -> uuid.UUID:
+        try:
+            return uuid.UUID(str(value))
+        except (ValueError, TypeError):
+            raise WorkflowError("Choose a unit of assessment") from None
+
+    async def normalise(self, value) -> uuid.UUID:
+        from app.modules.student_record.models import UnitOfAssessment
+
+        uoa_id = self.validate(value)
+        uoa = await self.session.get(UnitOfAssessment, uoa_id)
+        if uoa is None:
+            raise NotFoundError("Unit of assessment not found")
+        if not uoa.is_active:
+            raise WorkflowError(f"UOA {uoa.code} is no longer in use")
+        return uoa_id
+
+
+class StudentUoaHistoryService(_UoaChecks, OptionalFactHistoryService):
+    """A student's unit of assessment over time; ``student.uoa_id`` caches today's (Phase 9)."""
+    model = StudentUoaHistory
+    value_attr = "uoa_id"
+    label = "unit of assessment"
+    out_key = "uoaId"
+
+    def initial_value(self, student: Student):
+        return student.uoa_id
+
+    def cache_matches(self, student: Student, value) -> bool:
+        return student.uoa_id == value
+
+    def apply_cache(self, student: Student, value) -> None:
+        student.uoa_id = value
+
+
+class PersonUoaHistoryService(_UoaChecks, OptionalFactHistoryService):
+    """A person's (supervisor's) unit of assessment over time; ``person.uoa_id`` caches today's.
+    The subject is the person, so one change applies to every student they supervise (Phase 9)."""
+    model = PersonUoaHistory
+    value_attr = "uoa_id"
+    label = "unit of assessment"
+    out_key = "uoaId"
+    subject_model = Person
+    subject_attr = "person_id"
+    subject_out_key = "personId"
+    subject_label = "person"
+
+    @staticmethod
+    def _start(subject) -> date | None:
+        return None
+
+    def initial_value(self, person):
+        return person.uoa_id
+
+    def cache_matches(self, person, value) -> bool:
+        return person.uoa_id == value
+
+    def apply_cache(self, person, value) -> None:
+        person.uoa_id = value
+
+
 # Facts every student carries; the optional ones stay empty until a value is recorded.
 FACT_SERVICES = (StatusHistoryService, ProgrammeHistoryService, IntensityHistoryService,
-                 FeeStatusHistoryService, LocationHistoryService)
+                 FeeStatusHistoryService, LocationHistoryService, StudentUoaHistoryService)
 # Dated student facts set directly (not through a lifecycle event), by API name.
-DIRECT_FACTS = {"fee-status": FeeStatusHistoryService, "study-location": LocationHistoryService}
+DIRECT_FACTS = {"fee-status": FeeStatusHistoryService, "study-location": LocationHistoryService,
+                "uoa": StudentUoaHistoryService}
 
 
 async def initialise_all(session: AsyncSession, student: Student, *, valid_from: date | None = None,
@@ -569,7 +643,11 @@ async def initialise_all(session: AsyncSession, student: Student, *, valid_from:
     """Open every fact's history for a new student."""
     for svc in FACT_SERVICES:
         await svc(session).initialise(student, valid_from=valid_from, origin=origin, reason=reason)
+    # Phase 8b — the student is pinned to the programme version in force when they start (CMA).
+    from app.modules.student_record.programme_versions import ProgrammeVersionService
+    await ProgrammeVersionService(session).ensure_pin(student, on=valid_from or student.start_date)
 
 
 async def refresh_all_due(session: AsyncSession) -> int:
-    return sum([await svc(session).refresh_due() for svc in (*FACT_SERVICES, CustomValueHistoryService)])
+    return sum([await svc(session).refresh_due()
+                for svc in (*FACT_SERVICES, CustomValueHistoryService, PersonUoaHistoryService)])

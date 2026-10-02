@@ -41,6 +41,11 @@ export interface Student {
   /** Effective dating, Phase 6 — today's value of the dated facts (null = not recorded). */
   feeStatus?: string | null
   studyLocation?: string | null
+  /** Phase 8b — the programme version the student is pinned to (detail endpoint only). */
+  programmeVersion?: string | null
+  /** Phase 9 — today's unit of assessment (id, and "code name" on the detail endpoint). */
+  uoaId?: string | null
+  uoa?: string | null
 }
 
 export type ProgrammeType = 'research' | 'taught'

@@ -277,6 +277,7 @@ export default function StudentDetailPage() {
                   </p>
                 </div>
                 <Field label="Study mode" value={s?.studyMode.replace(/_/g, ' ')} />
+                <Field label="Programme version" value={s?.programmeVersion ?? undefined} />
                 <Field label="Start date" value={s?.startDate} />
                 <Field label="Expected end" value={s?.expectedEndDate} />
                 <Field label="Research topic" value={s?.project?.researchTopic} />
@@ -284,7 +285,8 @@ export default function StudentDetailPage() {
             )}
           </PageSection>
           {P.datedHistory && (
-            <DatedFactsSection studentId={id} feeStatus={s?.feeStatus} studyLocation={s?.studyLocation} />
+            <DatedFactsSection studentId={id} feeStatus={s?.feeStatus} studyLocation={s?.studyLocation}
+              uoa={s?.uoa} uoaId={s?.uoaId} />
           )}
           {P.person && (
             <PageSection icon={User} title="Person" accent="accent">

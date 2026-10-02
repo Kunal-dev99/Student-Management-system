@@ -8,7 +8,7 @@
  * the "Enrol cohort on core modules" action applies them to the existing group in one go.
  */
 import { useState } from 'react'
-import { BookOpen, Plus, Users } from 'lucide-react'
+import { BookOpen, GitBranch, Plus, Users } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -22,6 +22,7 @@ import {
   useAddAssessment, useCreateModule, useEnrolCohort, useProgrammeModules,
   type AssessmentType,
 } from '@/features/taught/api'
+import { ModuleVersionsPanel } from '@/features/taught/ModuleVersions'
 
 const ASSESSMENT_TYPES: AssessmentType[] = ['essay', 'exam', 'coursework', 'presentation', 'dissertation']
 
@@ -36,6 +37,8 @@ export function ProgrammeModulesEditor({ programmeId }: { programmeId: string })
   const [mod, setMod] = useState({ code: '', title: '', credits: '', level: '7', isCore: true })
   const [asmt, setAsmt] = useState<Record<string, { title: string; assessmentType: AssessmentType; weightPct: string; passMark: string; resitCap: string }>>({})
   const [year, setYear] = useState('')
+  // Phase 8a — which module has its versions panel open.
+  const [versionsFor, setVersionsFor] = useState<string | null>(null)
 
   return (
     <div>
@@ -99,7 +102,13 @@ export function ProgrammeModulesEditor({ programmeId }: { programmeId: string })
                     <span className="font-medium">{m.code} — {m.title}</span>
                     <span className="text-helper num">{m.credits} cr</span>
                     <Badge variant="outline">L{m.level}{m.isCore ? ' · core' : ' · optional'}</Badge>
+                    <Button size="sm" variant="ghost" className="h-6 ml-auto px-2 text-xs"
+                      aria-expanded={versionsFor === m.id}
+                      onClick={() => setVersionsFor(versionsFor === m.id ? null : m.id)}>
+                      <GitBranch className="h-3 w-3 mr-1" /> {versionsFor === m.id ? 'Hide versions' : 'Versions'}
+                    </Button>
                   </div>
+                  {versionsFor === m.id && <ModuleVersionsPanel moduleId={m.id} programmeId={programmeId} />}
                   <div className="mt-1 pl-2 text-helper">
                     {m.assessments.length > 0
                       ? m.assessments.map((x) => `${x.title} (${x.assessmentType}, ${Number(x.weightPct).toFixed(0)}%, pass ${Number(x.passMark).toFixed(0)}${x.resitCap ? `, cap ${Number(x.resitCap).toFixed(0)}` : ''})`).join(' · ')

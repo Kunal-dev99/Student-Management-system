@@ -40,7 +40,9 @@ from app.modules.taught.module_history import (
     assert_dates_allowed,
     default_dates,
 )
+from app.modules.taught.catalogue import ModuleCatalogueService, academic_year_start, label
 from app.modules.taught.repository import TaughtRepository
+from app.modules.student_record.programme_versions import ProgrammeVersionService
 from app.modules.taught.schemas import (
     AssessmentCreate,
     DissertationUpsert,
@@ -134,6 +136,7 @@ class TaughtService:
             "id": m.id, "programme_id": m.programme_id, "code": m.code, "title": m.title,
             "credits": m.credits, "term": m.term,
             "level": m.level, "is_core": m.is_core, "convenor_person_id": m.convenor_person_id,
+            "fte_pct": m.fte_pct,
             # Shared/elective modules: an elective is offered here but "belongs" to another
             # programme (its home). Home modules carry is_elective=False.
             "is_elective": is_elective, "home_programme_name": home_programme_name,
@@ -185,6 +188,8 @@ class TaughtService:
         if await self.repo.get_offering(programme_id, module_id) is not None:
             raise ConflictError("That module is already offered here as an elective")
         self.repo.add(ModuleOffering(programme_id=programme_id, module_id=module_id))
+        await self.session.flush()
+        await ProgrammeVersionService(self.session).sync_structure(programme_id)
         await self.session.commit()
         return {"programme_id": programme_id, "module_id": module_id, "linked": True}
 
@@ -204,6 +209,8 @@ class TaughtService:
             if await self.repo.get_offering(programme_id, m.id) is not None:
                 continue
             self.repo.add(ModuleOffering(programme_id=programme_id, module_id=m.id))
+            await self.session.flush()
+            await ProgrammeVersionService(self.session).sync_structure(programme_id)
             linked += 1
         if linked:
             await self.session.commit()
@@ -215,6 +222,10 @@ class TaughtService:
         if offering is None:
             raise NotFoundError("That module is not offered here as an elective")
         await self.session.delete(offering)
+        await self.session.flush()
+        # Removing a module from a programme version students are on is refused (CMA) — this
+        # raises before anything is committed.
+        await ProgrammeVersionService(self.session).sync_structure(programme_id)
         await self.session.commit()
         return {"programme_id": programme_id, "module_id": module_id, "unlinked": True}
 
@@ -224,6 +235,10 @@ class TaughtService:
             raise NotFoundError("Programme not found")
         m = TaughtModule(programme_id=programme_id, **data.model_dump())
         self.repo.add(m)
+        await self.session.flush()
+        # Phase 8 — what the module teaches lives on a dated version (v1 from this academic year).
+        await ModuleCatalogueService(self.session).initialise(m, valid_from=academic_year_start())
+        await ProgrammeVersionService(self.session).sync_structure(programme_id)
         await self.session.commit()
         m = await self.repo.get_module(m.id)
         return self._module_out(m)
@@ -232,8 +247,18 @@ class TaughtService:
         m = await self.repo.get_module(module_id)
         if m is None:
             raise NotFoundError("Module not found")
-        for field, value in data.model_dump(exclude_unset=True).items():
-            setattr(m, field, value)
+        changes = data.model_dump(exclude_unset=True)
+        # Phase 8 — title / credits / level / term belong to the version in force today, and can
+        # only be edited while nobody is enrolled on it (CMA); otherwise create a new version.
+        from app.modules.taught.catalogue import VERSIONED_FIELDS
+        await ModuleCatalogueService(self.session).edit_current(
+            m, {k: v for k, v in changes.items() if k in VERSIONED_FIELDS})
+        for field, value in changes.items():
+            if field not in VERSIONED_FIELDS:
+                setattr(m, field, value)
+        if "is_core" in changes:
+            await self.session.flush()
+            await ProgrammeVersionService(self.session).sync_structure(m.programme_id)
         await self.session.commit()
         m = await self.repo.get_module(module_id)
         return self._module_out(m)
@@ -263,8 +288,10 @@ class TaughtService:
             start = data.start_date or start
             end = data.end_date or end
             await assert_dates_allowed(self.session, student, module, start, end)
+        run = await ModuleCatalogueService(self.session).run_for(module, data.academic_year)
         e = ModuleEnrolment(
             student_id=student_id, module_id=data.module_id, academic_year=data.academic_year,
+            module_run_id=run.id,
             status=ModuleEnrolmentStatus.enrolled, start_date=start, end_date=end,
         )
         self.repo.add(e)
@@ -299,16 +326,24 @@ class TaughtService:
         if programme is None or programme.programme_type != ProgrammeType.taught:
             return 0
         year = academic_year or self._academic_year_for(getattr(student, "start_date", None))
-        modules = await self.repo.modules_for_programme(student.programme_id)
+        # Phase 8b — the modules of the programme version the student is pinned to (CMA): a
+        # later structure change doesn't reach an existing cohort.
+        version = await ProgrammeVersionService(self.session).ensure_pin(student)
+        if version is not None:
+            wanted = [x for x in version.structure if x.get("isCore") or not only_core]
+            modules = [m for m in [await self.repo.get_module(uuid.UUID(x["moduleId"])) for x in wanted]
+                       if m is not None]
+        else:
+            modules = [m for m in await self.repo.modules_for_programme(student.programme_id)
+                       if m.is_core or not only_core]
         created = 0
         for m in modules:
-            if only_core and not m.is_core:
-                continue
             if await self.repo.existing_enrolment(student.id, m.id, year):
                 continue
             start, end = await default_dates(self.session, student, m, year)
+            run = await ModuleCatalogueService(self.session).run_for(m, year)
             e = ModuleEnrolment(
-                student_id=student.id, module_id=m.id, academic_year=year,
+                student_id=student.id, module_id=m.id, academic_year=year, module_run_id=run.id,
                 status=ModuleEnrolmentStatus.enrolled, start_date=start, end_date=end,
             )
             self.repo.add(e)
@@ -528,12 +563,13 @@ class TaughtService:
             (eff[a.id].mark is None) or (eff[a.id].mark >= a.pass_mark)
             for a in module.assessments if a.id in eff
         )
+        credits = await self._credits(enrolment, module)
         if enrolment.condoned:
             enrolment.outcome = ModuleOutcome.condoned
-            enrolment.credits_awarded = module.credits or 0
+            enrolment.credits_awarded = credits
         elif mark >= module_pass and component_ok:
             enrolment.outcome = ModuleOutcome.passed
-            enrolment.credits_awarded = module.credits or 0
+            enrolment.credits_awarded = credits
         else:
             enrolment.outcome = ModuleOutcome.failed
             enrolment.credits_awarded = 0
@@ -585,14 +621,24 @@ class TaughtService:
             return None
         return _q(acc / total_w)
 
+    async def _version(self, e: ModuleEnrolment):
+        """The module version this enrolment is on (Phase 8), or None for an unlinked enrolment."""
+        return await ModuleCatalogueService(self.session).version_for_enrolment(e)
+
+    async def _credits(self, e: ModuleEnrolment, module: TaughtModule) -> int:
+        v = await self._version(e)
+        return (v.credits if v is not None else module.credits) or 0
+
     async def _enrolment_out(self, e: ModuleEnrolment) -> dict:
         module = await self.repo.get_module(e.module_id)
         mark = self._module_mark(module, e) if module else None
+        v = await self._version(e)
         return {
             "id": e.id, "student_id": e.student_id, "module_id": e.module_id,
             "module_code": module.code if module else None,
-            "module_title": module.title if module else None,
-            "credits": module.credits if module else None,
+            "module_title": (v.title if v else module.title) if module else None,
+            "credits": (v.credits if v else module.credits) if module else None,
+            "module_version": label(v),
             "academic_year": e.academic_year, "status": e.status,
             "start_date": e.start_date, "end_date": e.end_date,
             "module_mark": mark,
@@ -659,6 +705,13 @@ class TaughtService:
         if programme is None or programme.programme_type != ProgrammeType.taught:
             raise WorkflowError("Classification only applies to a taught programme")
 
+        # Phase 8b — the rules of the programme version the student is pinned to (CMA).
+        version = await ProgrammeVersionService(self.session).ensure_pin(student)
+        if version is not None:
+            from types import SimpleNamespace
+            programme = SimpleNamespace(
+                programme_type=programme.programme_type, grading_policy=version.grading_policy,
+                taught_total_credits=version.taught_total_credits)
         policy = _merged_policy(programme)
         enrolments = await self.repo.enrolments_for_student(student_id)
         components: list[tuple[Decimal, Decimal]] = []  # (mark, credit weight)
@@ -671,14 +724,16 @@ class TaughtService:
             mark = self._module_mark(module, e)
             if mark is None:
                 continue
-            weight = Decimal(module.credits) if module.credits else Decimal("1")
+            # Phase 8 — the credits of the version the student took, not today's.
+            credits = await self._credits(e, module)
+            weight = Decimal(credits) if credits else Decimal("1")
             components.append((mark, weight))
-            module_credit_sum += module.credits or 0
+            module_credit_sum += credits
             # Credits come from the stored module result (a pass or a condoned fail), not a raw
             # mark comparison — so board condonement is honoured.
             credits_achieved += (e.credits_awarded
                                  if e.credits_awarded is not None
-                                 else (module.credits or 0 if mark >= Decimal(str(policy["passMark"])) else 0))
+                                 else (credits if mark >= Decimal(str(policy["passMark"])) else 0))
 
         dissertation = await self.repo.get_dissertation(student_id)
         if dissertation is not None and dissertation.mark is not None:

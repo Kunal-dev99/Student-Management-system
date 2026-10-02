@@ -27,6 +27,9 @@ class Person(UUIDMixin, TenantMixin, TimestampMixin, Base):
     date_of_birth: Mapped[date | None] = mapped_column(Date, nullable=True)
     email: Mapped[str | None] = mapped_column(String(320), unique=True, nullable=True, index=True)
     nationality: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # Effective dating, Phase 9 — the person's unit of assessment today (cache of PersonUoaHistory;
+    # FK added by migration, kept as a plain column here to avoid a model-import cycle).
+    uoa_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
 
     # F2 — set when the person has been pseudonymised via GDPR erasure. Presence is a hard read
     # signal for the notifier and everywhere else: never contact, never surface identifying info.

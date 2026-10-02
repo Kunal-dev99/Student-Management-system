@@ -28,6 +28,7 @@ import {
   type ProgrammeDetail, type ProgrammeType, type GradingPolicy,
 } from '@/features/programmes/api'
 import { ProgrammeModulesEditor } from '@/features/taught/ProgrammeModulesEditor'
+import { ProgrammeVersionsPanel } from '@/features/programmes/ProgrammeVersionsPanel'
 
 /** The numeric grading-policy fields (everything except the array-valued resitCapLadder). */
 type NumericPolicyKey = Exclude<keyof GradingPolicy, 'resitCapLadder'>
@@ -217,6 +218,7 @@ function ProgrammeEditor({ programme, onPatch }: {
         {taught && <TabsTrigger value="modules">Modules</TabsTrigger>}
         {taught && <TabsTrigger value="grading">Grading &amp; resit</TabsTrigger>}
         <TabsTrigger value="milestones">Milestone template</TabsTrigger>
+        <TabsTrigger value="versions">Versions</TabsTrigger>
       </TabsList>
 
       <TabsContent value="details" className="mt-0">
@@ -247,6 +249,10 @@ function ProgrammeEditor({ programme, onPatch }: {
           <GradingPolicyEditor programme={programme} onPatch={onPatch} />
         </TabsContent>
       )}
+
+      <TabsContent value="versions" className="mt-0">
+        <ProgrammeVersionsPanel programmeId={programme.id} taught={taught} />
+      </TabsContent>
 
       <TabsContent value="milestones" className="mt-0">
         <div className="card-elevated overflow-hidden">

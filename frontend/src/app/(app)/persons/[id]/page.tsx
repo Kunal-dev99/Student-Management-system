@@ -11,6 +11,7 @@ import { usePerson, usePersonTimeline } from '@/features/persons/api'
 import { IdentitiesSection } from '@/features/persons/IdentitiesSection'
 import { ContactsSection } from '@/features/persons/ContactsSection'
 import { GdprSection } from '@/features/persons/GdprSection'
+import { PersonUoaSection } from '@/features/uoa/UoaComponents'
 
 function Field({ label, value }: { label: string; value: string | null | undefined }) {
   return (
@@ -56,6 +57,9 @@ export default function PersonDetailPage() {
         </PageSection>
 
         <IdentitiesSection personId={id} />
+
+        {/* Effective dating, Phase 9 — the person's (supervisor's) dated unit of assessment. */}
+        <PersonUoaSection personId={id} />
 
         <PageSection icon={PhoneCall} title="Contacts" accent="accent"
           description="Extra channels beyond the primary email. Do-not-contact is honoured by the notifier.">

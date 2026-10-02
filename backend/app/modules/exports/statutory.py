@@ -571,10 +571,28 @@ class StatutoryEngine:
         from app.modules.student_record.fact_history import FeeStatusHistoryService, LocationHistoryService
         hist_fee = await FeeStatusHistoryService(self.session).periods(ids, ws, we, known_at=known_at)
         hist_loc = await LocationHistoryService(self.session).periods(ids, ws, we, known_at=known_at)
+        # Phase 9 — units of assessment: the student's own, and each supervisor's, by period.
+        from app.modules.student_record.fact_history import PersonUoaHistoryService, StudentUoaHistoryService
+        from app.modules.student_record.models import UnitOfAssessment
+        uoa_codes = {u.id: u.code for u in (await self.session.execute(select(UnitOfAssessment))).scalars().all()}
+        hist_uoa = await StudentUoaHistoryService(self.session).periods(ids, ws, we, known_at=known_at)
+        sup_uoa = await PersonUoaHistoryService(self.session).periods(
+            list({r.supervisor_person_id for r in sup_rows}), ws, we, known_at=known_at)
         from app.modules.taught.models import ModuleEnrolment, TaughtModule
         from app.modules.taught.module_history import ModuleStatusHistoryService, year_window
 
         taught_modules = {m.id: m for m in (await self.session.execute(select(TaughtModule))).scalars().all()}
+        from app.modules.taught.catalogue import effective_fte
+        from app.modules.taught.models import ModuleRun, ModuleVersion
+        # Phase 8b — the programme version each student is on, per programme (CMA).
+        from app.modules.student_record.models import ProgrammeVersion, StudentProgrammePin
+        pins = {(sid, pid): f"v{n}" for sid, pid, n in (await self.session.execute(
+            select(StudentProgrammePin.student_id, StudentProgrammePin.programme_id, ProgrammeVersion.version_no)
+            .join(ProgrammeVersion, ProgrammeVersion.id == StudentProgrammePin.programme_version_id)
+        )).all()}
+        run_versions = {run_id: v for run_id, v in (await self.session.execute(
+            select(ModuleRun.id, ModuleVersion).join(ModuleVersion, ModuleVersion.id == ModuleRun.module_version_id)
+        )).all()}
         enrolments: dict = {}
         for e in (await self.session.execute(select(ModuleEnrolment))).scalars().all():
             if _known(e):
@@ -635,6 +653,7 @@ class StatutoryEngine:
             ip = hist_int.get(student.id, [])
             fp = hist_fee.get(student.id, [])
             lp = hist_loc.get(student.id, [])
+            up = hist_uoa.get(student.id, [])
 
             # Programme periods inside the window: (start, display end, exclusive end, programme).
             # History periods are half-open; HESA end dates are inclusive, so a period that ends
@@ -672,7 +691,9 @@ class StatutoryEngine:
                 return {"status": _ev(status), "mode": _ev(mode), "intensityPct": intensity,
                         "fteLoad": _load(ip, sp, lo, hi),
                         # Phase 6 — optional dated facts; None = not recorded on that date.
-                        "feeStatus": _on(fp, as_of), "studyLocation": _on(lp, as_of)}
+                        "feeStatus": _on(fp, as_of), "studyLocation": _on(lp, as_of),
+                        # Phase 9 — the student's unit of assessment on that date (code).
+                        "uoa": uoa_codes.get(_on(up, as_of))}
 
             common_student = {
                 "originalExpectedEndDate": student.original_expected_end_date,
@@ -729,10 +750,19 @@ class StatutoryEngine:
                     if not overlap(e_from, e_to):
                         continue
                     m = taught_modules.get(e.module_id)
+                    # Phase 8 — what the student took: the version of their run, not today's.
+                    v = run_versions.get(e.module_run_id) if e.module_run_id else None
                     st = _on(module_status.get(e.id, []), as_of) or e.status
+                    # Phase 8c — module FTE (HESA): the version's own, or derived from credits.
+                    home = programmes.get(m.programme_id) if m else None
+                    fte = effective_fte(v if v is not None else m, home.taught_total_credits if home else None)
                     modules.append({
-                        "code": m.code if m else None, "title": m.title if m else None,
-                        "credits": m.credits if m else None, "academicYear": e.academic_year,
+                        "code": m.code if m else None,
+                        "title": v.title if v else (m.title if m else None),
+                        "credits": v.credits if v else (m.credits if m else None),
+                        "version": f"v{v.version_no}" if v else None,
+                        "ftePct": float(fte) if fte is not None else None,
+                        "academicYear": e.academic_year,
                         "startDate": e.start_date, "endDate": e.end_date, "status": _ev(st),
                         "outcome": _ev(e.outcome), "mark": e.final_mark,
                     })
@@ -748,12 +778,21 @@ class StatutoryEngine:
                     "supervision": {
                         "primaryName": sup_names.get(primary.supervisor_person_id) if primary else None,
                         "supervisorCount": len(sups_now),
+                        # Phase 9 — the primary supervisor's unit of assessment on that date.
+                        "primaryUoa": uoa_codes.get(_on(sup_uoa.get(primary.supervisor_person_id, []), as_of))
+                        if primary else None,
                     },
                     "statusHistory": [
                         {"status": _ev(p["value"]), "validFrom": max(p["from"], lo), "validTo": last_day(p["to"])}
                         for p in sp if overlap(p["from"], p["to"])
                     ],
                     "modules": modules,
+                    # Phase 8c — total module FTE in the period, for the HESA check that a
+                    # student's FTE doesn't exceed the sum of their module FTEs (Demo 2 item 1.5).
+                    "taught": {"moduleFteTotal": (
+                        round(sum(x["ftePct"] for x in modules if x["ftePct"] is not None), 2)
+                        if any(x["ftePct"] is not None for x in modules) else None
+                    )},
                     "fundingPeriods": [
                         {"type": _ev(a.funding_type),
                          "source": sources[a.funding_source_id].name if a.funding_source_id in sources else None,
@@ -764,6 +803,8 @@ class StatutoryEngine:
                     "supervisors": [
                         {"name": sup_names.get(r.supervisor_person_id), "role": _ev(r.role),
                          "weightingPct": r.weighting_pct,
+                         "uoa": uoa_codes.get(_on(sup_uoa.get(r.supervisor_person_id, []),
+                                                  min(as_of, last_day(r.valid_to) or as_of))),
                          "validFrom": max(r.valid_from, lo), "validTo": last_day(r.valid_to)}
                         for r in relationships if overlap(r.valid_from, r.valid_to)
                     ],
@@ -785,7 +826,8 @@ class StatutoryEngine:
                         **common_student,
                     },
                     "person": common_person,
-                    "programme": {"name": prog.name if prog else None, "code": prog.code if prog else None},
+                    "programme": {"name": prog.name if prog else None, "code": prog.code if prog else None,
+                                  "version": pins.get((student.id, prog_id))},
                     "research": common_research,
                     "award": common_award,
                     "custom": _custom_for(student.id, as_of),
@@ -808,7 +850,8 @@ class StatutoryEngine:
                         **common_student,
                     },
                     "person": common_person,
-                    "programme": {"name": prog.name if prog else None, "code": prog_code},
+                    "programme": {"name": prog.name if prog else None, "code": prog_code,
+                                  "version": pins.get((student.id, prog_id))},
                     "research": common_research,
                     "award": common_award,
                     "custom": _custom_for(student.id, _slice_as_of(start_d, shown_end)),

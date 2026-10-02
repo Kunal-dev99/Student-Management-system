@@ -18,7 +18,9 @@ from app.core.principal import Principal
 from app.db.session import get_session
 from app.modules.student_record.router import scoped_ids
 from app.modules.taught.repository import TaughtRepository
+from app.core.errors import NotFoundError
 from app.modules.taught.schemas import (
+    ModuleVersionRequest,
     AssessmentCreate,
     AssessmentOut,
     AwardOut,
@@ -104,6 +106,40 @@ async def update_module(
     _=Depends(require_permission("admin.configure")),
 ) -> ModuleOut:
     return ModuleOut.model_validate(await _svc(session).update_module(module_id, body))
+
+
+@module_router.get("/{module_id}/catalogue",
+                   summary="A module's dated versions and yearly runs (Phase 8)")
+async def module_catalogue(
+    module_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("taught.read")),
+) -> dict:
+    from app.modules.taught.catalogue import ModuleCatalogueService
+
+    return await ModuleCatalogueService(session).catalogue(module_id)
+
+
+@module_router.post("/{module_id}/versions", status_code=201,
+                    summary="A new version of the module from a date (enrolled students keep theirs)")
+async def new_module_version(
+    module_id: uuid.UUID,
+    body: ModuleVersionRequest,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_permission("taught.change")),
+) -> dict:
+    from app.modules.taught.catalogue import ModuleCatalogueService
+    from app.modules.taught.models import TaughtModule
+
+    module = await session.get(TaughtModule, module_id)
+    if module is None:
+        raise NotFoundError("Module not found")
+    svc = ModuleCatalogueService(session)
+    v = await svc.new_version(module, effective_from=body.effective_from,
+                              changes=body.model_dump(include={"title", "credits", "level", "term", "fte_pct"}),
+                              note=body.note, user_id=principal.user_id)
+    await session.commit()
+    return svc.version_out(v, full_time_credits=await svc.full_time_credits(module))
 
 
 @module_router.post("/{module_id}/assessments", response_model=AssessmentOut, status_code=201, summary="Add an assessment to a module")
