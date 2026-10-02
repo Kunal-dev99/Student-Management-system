@@ -15,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.rank import rank as ai_rank
+from app.core.tenant_context import get_current_tenant
 from app.ai.types import Candidate, RankResult
 from app.modules.funding.constants import FundingStatus
 from app.modules.funding.models import FundingArrangement
@@ -47,7 +48,9 @@ class WeeklyQueue:
     candidates: list[QueueRow]
 
 
-_CANDIDATE_CACHE: dict[str, tuple[float, list[QueueRow]]] = {}
+# Keyed by (tenant, day): the process serves every institution, so a key without the tenant
+# hands one institution's students to the next caller (found by the T2 leak sweep).
+_CANDIDATE_CACHE: dict[tuple[str, str], tuple[float, list[QueueRow]]] = {}
 _CACHE_TTL_SECONDS = 30.0
 
 
@@ -60,7 +63,7 @@ async def build_candidates(session: AsyncSession, today: date | None = None) -> 
     up real changes within a supervisor's session.
     """
     today = today or date.today()
-    cache_key = today.isoformat()
+    cache_key = (str(get_current_tenant()), today.isoformat())
     hit = _CANDIDATE_CACHE.get(cache_key)
     if hit is not None and (time.monotonic() - hit[0]) < _CACHE_TTL_SECONDS:
         return hit[1]

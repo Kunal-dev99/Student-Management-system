@@ -19,3 +19,14 @@ async def client() -> AsyncClient:
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
+
+
+@pytest.fixture(autouse=True)
+def _fresh_review_cache():
+    # The weekly review queue caches candidates in-process for 30s; one test's data must not
+    # answer the next test's request.
+    from app.modules.reviews.service import _CANDIDATE_CACHE
+
+    _CANDIDATE_CACHE.clear()
+    yield
+    _CANDIDATE_CACHE.clear()

@@ -64,7 +64,36 @@ The owner role is already fail-closed for the API (it never sets the bypass). Ru
 3. Sign in through a tenant subdomain (e.g. `icr.localhost` in dev): `pgr_app` cannot use the
    bare-host login bypass.
 
+## Leak tests (T2)
+
+What "protected" means is written down once, in `app/db/tenant_guard.py`: a tenant table has RLS
+enabled and forced, `tenant_id NOT NULL`, and exactly the two policies above. Every other table
+must be listed in `GLOBAL_TABLES` with the reason it is safe to share. That list is the review
+point for any new global table.
+
+| Test | Guards against |
+|---|---|
+| `tests/unit/test_tenant_tables_declared.py` | A new model without `tenant_id` that isn't listed as global. Runs in every build, no database. |
+| `tests/integration/test_tenant_guard.py` | A table missing forced RLS, a policy, or `NOT NULL`; an extra policy; an undeclared table. Also proves each of those is caught, that no tenant means no rows and refused writes, and that a tenant never carries over on a reused connection. |
+| `tests/integration/test_tenant_leak_api.py` | Any GET endpoint returning another tenant's record ids or emails. It calls every endpoint as one institution, with every permission, in both directions. |
+| `tests/integration/test_tenant_rls_isolation.py` | The policy pair itself, on a scratch table. |
+
+They need the database at the latest migration and data in two tenants, so run them on a copy:
+
+```bash
+python scripts/run_tenant_leak_tests.py
+```
+
+This copies the database, migrates the copy, runs the four files and drops it. Stop the API
+first, because Postgres won't copy a database with open connections. On the normal suite, with a
+database not yet at T1, these tests skip.
+
+**Found by the sweep:** the weekly review queue cached candidates by date only, so one
+institution was served another's students for up to 30 seconds. It is now keyed by tenant and
+date. In-process caches of tenant data must always include the tenant in the key.
+
 ## Not yet done
 
-- Flip `tenant_id` to `NOT NULL` once every path is confirmed to stamp it.
-- Optionally extend RLS to `users` / `composer_run` (scoped columns, RLS currently off).
+- Accepting a HESA advisory updates the shared specification for every institution
+  (`statutory_spec_version` is global). Decide whether that stays a platform-admin action.
+- T3: tenant reporting views; T4: leak paths outside the database (files, exports, jobs).

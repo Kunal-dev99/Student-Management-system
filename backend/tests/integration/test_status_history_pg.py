@@ -24,7 +24,10 @@ async def engine():
     url = get_settings().database_url
     if not url.startswith("postgresql"):
         pytest.skip("PostgreSQL-only guarantees; skipped on other dialects")
-    eng = create_async_engine(url, poolclass=NullPool)
+    # These are whole-database consistency checks, so they read every tenant: since T1 that
+    # needs the owner's explicit bypass, or fail-closed RLS shows them no rows at all.
+    eng = create_async_engine(url, poolclass=NullPool,
+                              connect_args={"server_settings": {"app.bypass_tenant": "on"}})
     try:
         async with eng.connect() as conn:
             exists = await conn.scalar(text("SELECT to_regclass('public.student_status_history')"))
