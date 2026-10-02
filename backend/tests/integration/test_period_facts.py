@@ -192,7 +192,8 @@ async def test_return_reads_funding_supervision_and_child_lists(ctx, clock):
         "type": "research_council", "source": "MRC", "contributionPct": 100, "amount": None,
         "validFrom": START, "validTo": date(2027, 2, 28)}]
     # Supervision as at the end of the year, plus both supervisors in the period.
-    assert rec["supervision"] == {"primaryName": "Bob Brook", "supervisorCount": 1}
+    assert rec["supervision"] == {"primaryName": "Bob Brook", "supervisorCount": 1,
+                                  "primaryUoa": None}   # Phase 9: no UOA recorded here
     assert [(x["name"], x["validFrom"], x["validTo"]) for x in rec["supervisors"]] == [
         ("Alice Arden", START, date(2026, 12, 31)), ("Bob Brook", date(2027, 1, 1), None)]
     # SessionStatus-style changes, with inclusive dates.
