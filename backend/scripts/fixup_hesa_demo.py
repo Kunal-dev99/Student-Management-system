@@ -28,6 +28,7 @@ from datetime import date, datetime, timedelta, timezone
 from sqlalchemy import select
 
 from app.core.database import SessionFactory
+from app.core.tenant_context import system_scope  # T1: cross-tenant tool
 from app.db import registry as _registry  # noqa: F401 — force full mapper registration
 from app.modules.exports.models import ReportProfile, StatutorySpecVersion
 from app.modules.exports.specs import HESA_STUDENT_2026
@@ -277,7 +278,7 @@ async def cleanse_spec_versions(session) -> int:
 
 
 async def main() -> None:
-    async with SessionFactory() as s:
+    async with system_scope(), SessionFactory() as s:
         persons_touched = await backfill_persons(s)
         apps_created = await ensure_applications(s)
         projs_created = await ensure_research_projects(s)

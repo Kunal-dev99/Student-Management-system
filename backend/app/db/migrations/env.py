@@ -62,6 +62,10 @@ def run_migrations_offline() -> None:
 def do_run_migrations(connection) -> None:
     context.configure(connection=connection, target_metadata=target_metadata, compare_type=True)
     with context.begin_transaction():
+        if connection.dialect.name == "postgresql":
+            # T1 — RLS is fail-closed; migrations (backfills, checks) work across every tenant,
+            # so this connection opts in to the owner's explicit bypass for its whole session.
+            connection.exec_driver_sql("SELECT set_config('app.bypass_tenant', 'on', false)")
         context.run_migrations()
 
 

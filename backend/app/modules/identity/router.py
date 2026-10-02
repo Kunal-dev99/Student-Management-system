@@ -1,7 +1,9 @@
 """Identity HTTP endpoints (arch §11.5 — identity and auth)."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from contextlib import asynccontextmanager
+
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import get_current_principal
@@ -26,21 +28,44 @@ def _service(session: AsyncSession) -> IdentityService:
     return IdentityService(IdentityRepository(session))
 
 
+@asynccontextmanager
+async def _pre_auth_scope(request: Request):
+    """T1 — sign-in runs before we know the user's tenant, and RLS is fail-closed.
+
+    On a tenant subdomain (production: icr.<base-domain>) the lookup is scoped to that tenant,
+    so an email from another tenant is simply "not found". On a bare host (dev localhost) there
+    is no tenant to scope to, so this one lookup uses the explicit owner bypass — which the
+    restricted app role (pgr_app) cannot use, so with pgr_app sign in through a subdomain."""
+    from app.core.tenant_context import set_current_tenant, system_scope
+    from app.core.tenant_resolver import resolve_tenant_id_for_host
+
+    host_tid = await resolve_tenant_id_for_host(request.headers.get("host", ""))
+    if host_tid is not None:
+        set_current_tenant(host_tid)
+        yield
+    else:
+        async with system_scope():
+            yield
+
+
 @auth_router.post("/login", response_model=TokenPair, summary="Password grant")
-async def login(body: LoginRequest, session: AsyncSession = Depends(get_session)) -> TokenPair:
-    access, refresh, _ = await _service(session).authenticate(body.email, body.password)
+async def login(body: LoginRequest, request: Request, session: AsyncSession = Depends(get_session)) -> TokenPair:
+    async with _pre_auth_scope(request):
+        access, refresh, _ = await _service(session).authenticate(body.email, body.password)
     return TokenPair(access_token=access, refresh_token=refresh)
 
 
 @auth_router.post("/refresh", response_model=TokenPair, summary="Exchange refresh for access")
-async def refresh(body: RefreshRequest, session: AsyncSession = Depends(get_session)) -> TokenPair:
-    access, new_refresh = await _service(session).refresh(body.refresh_token)
+async def refresh(body: RefreshRequest, request: Request, session: AsyncSession = Depends(get_session)) -> TokenPair:
+    async with _pre_auth_scope(request):
+        access, new_refresh = await _service(session).refresh(body.refresh_token)
     return TokenPair(access_token=access, refresh_token=new_refresh)
 
 
 @auth_router.post("/logout", summary="Revoke the presented refresh token")
-async def logout(body: RefreshRequest, session: AsyncSession = Depends(get_session)) -> dict:
-    await _service(session).logout(body.refresh_token)
+async def logout(body: RefreshRequest, request: Request, session: AsyncSession = Depends(get_session)) -> dict:
+    async with _pre_auth_scope(request):
+        await _service(session).logout(body.refresh_token)
     return {"data": {"loggedOut": True}}
 
 
@@ -55,18 +80,20 @@ async def logout_all(
 
 @auth_router.post("/password-reset/request", summary="Request a password-reset email")
 async def password_reset_request(
-    body: PasswordResetRequest, session: AsyncSession = Depends(get_session)
+    body: PasswordResetRequest, request: Request, session: AsyncSession = Depends(get_session)
 ) -> dict:
-    await _service(session).request_password_reset(body.email)
+    async with _pre_auth_scope(request):
+        await _service(session).request_password_reset(body.email)
     # Always 200 — never reveal whether the email is registered.
     return {"data": {"requested": True}}
 
 
 @auth_router.post("/password-reset/confirm", summary="Set a new password using a reset token")
 async def password_reset_confirm(
-    body: PasswordResetConfirm, session: AsyncSession = Depends(get_session)
+    body: PasswordResetConfirm, request: Request, session: AsyncSession = Depends(get_session)
 ) -> dict:
-    await _service(session).confirm_password_reset(body.token, body.new_password)
+    async with _pre_auth_scope(request):
+        await _service(session).confirm_password_reset(body.token, body.new_password)
     return {"data": {"reset": True}}
 
 

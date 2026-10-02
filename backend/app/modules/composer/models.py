@@ -14,15 +14,18 @@ import uuid
 from sqlalchemy import JSON, Boolean, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.core.tenant_context import resolve_tenant_for_write
 from app.db.base import Base, TimestampMixin, UUIDMixin
 
 
 class ComposerRun(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "composer_run"
 
-    # MT-1 — nullable while the tenant column is still spreading across the domain.
-    tenant_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("tenant.id", ondelete="RESTRICT"), nullable=True, index=True
+    # T1 — compulsory and stamped with the acting tenant, like every TenantMixin table; RLS
+    # (fail-closed) now covers this table too.
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tenant.id", ondelete="RESTRICT"), nullable=False, index=True,
+        default=resolve_tenant_for_write,
     )
     user_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), index=True

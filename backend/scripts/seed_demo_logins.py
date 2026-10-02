@@ -16,6 +16,7 @@ import sys
 from sqlalchemy import select, text
 
 from app.core.database import SessionFactory
+from app.core.tenant_context import system_scope  # T1: cross-tenant tool
 from app.core.security import hash_password
 from app.modules.identity.models import Role, User
 from app.modules.person.models import Person
@@ -47,7 +48,7 @@ ACCOUNTS = [
 
 
 async def main() -> None:
-    async with SessionFactory() as s:
+    async with system_scope(), SessionFactory() as s:
         roles = {r.name: r for r in (await s.execute(select(Role))).scalars().all()}
         missing = {n for _e, _p, rs, _h, _d in ACCOUNTS for n in rs} - set(roles)
         if missing:

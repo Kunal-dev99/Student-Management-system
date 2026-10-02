@@ -31,6 +31,61 @@ def get_current_tenant() -> uuid.UUID | None:
     return _current_tenant.get()
 
 
+# T1 — explicit cross-tenant bypass. Postgres RLS is fail-closed: with no tenant set, a query
+# sees no rows. Code that genuinely works across tenants (migrations, seeds, the worker's
+# tenant loop, the dev login lookup on a bare host) opts in here, and only the database owner
+# role honours it — the app role (pgr_app) and reporting roles never can.
+_bypass: ContextVar[bool] = ContextVar("tenant_bypass", default=False)
+
+
+def is_tenant_bypass() -> bool:
+    return _bypass.get()
+
+
+class system_scope:
+    """``with system_scope():`` / ``async with system_scope():`` — run cross-tenant code.
+
+    Keep it as narrow as possible: wrap the one lookup or the tool's entry point, never a
+    whole request. Every session started inside it sets ``app.bypass_tenant`` for its
+    transaction (see ``core.database``)."""
+
+    def __enter__(self):
+        self._token = _bypass.set(True)
+        return self
+
+    def __exit__(self, *exc):
+        _bypass.reset(self._token)
+        return False
+
+    async def __aenter__(self):
+        return self.__enter__()
+
+    async def __aexit__(self, *exc):
+        return self.__exit__(*exc)
+
+
+class tenant_scope:
+    """``async with tenant_scope(tid):`` — act as one tenant (e.g. the worker's per-tenant loop).
+    Restores the previous tenant on exit."""
+
+    def __init__(self, tenant_id: uuid.UUID | None) -> None:
+        self.tenant_id = tenant_id
+
+    def __enter__(self):
+        self._token = _current_tenant.set(self.tenant_id)
+        return self
+
+    def __exit__(self, *exc):
+        _current_tenant.reset(self._token)
+        return False
+
+    async def __aenter__(self):
+        return self.__enter__()
+
+    async def __aexit__(self, *exc):
+        return self.__exit__(*exc)
+
+
 def resolve_tenant_for_write() -> uuid.UUID:
     """Tenant to stamp on a new row: the acting tenant, or the default deployment.
 

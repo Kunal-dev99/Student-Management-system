@@ -19,6 +19,7 @@ from decimal import Decimal
 from sqlalchemy import select
 
 from app.core.database import SessionFactory
+from app.core.tenant_context import system_scope  # T1: cross-tenant tool
 # Register every mapper before use — cross-module foreign keys (funding to
 # research_award, project to research_opportunity) only resolve once all model
 # modules are imported, exactly as the Alembic env does.
@@ -78,7 +79,7 @@ async def get_or_create_person(s, given, family, email) -> Person:
 
 
 async def main() -> None:
-    async with SessionFactory() as s:
+    async with system_scope(), SessionFactory() as s:
         progs = {p.code: p for p in (await s.execute(
             select(Programme).where(Programme.code.in_(["ICR-PHD", "ICR-MDRES"]))
         )).scalars().all()}

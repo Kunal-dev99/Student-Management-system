@@ -17,6 +17,7 @@ import asyncio
 from sqlalchemy import select, delete
 
 from app.core.database import SessionFactory
+from app.core.tenant_context import system_scope  # T1: cross-tenant tool
 from app.core.storage import get_object_store
 from app.db import registry as _registry  # noqa: F401
 from app.modules.completion.models import Award, Completion
@@ -33,7 +34,7 @@ OLD_REF_PREFIX = "BULK-"
 
 async def main() -> None:
     store = get_object_store()
-    async with SessionFactory() as s:
+    async with system_scope(), SessionFactory() as s:
         students = (await s.execute(
             select(Student).where(Student.student_ref.like(f"{OLD_REF_PREFIX}%"))
         )).scalars().all()

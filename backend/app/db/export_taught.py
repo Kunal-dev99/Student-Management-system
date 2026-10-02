@@ -18,6 +18,7 @@ from sqlalchemy import select
 
 from app.db import registry as _registry  # noqa: F401
 from app.core.database import SessionFactory
+from app.core.tenant_context import system_scope  # T1: cross-tenant tool
 from app.modules.person.models import Person
 from app.modules.student_record.models import Programme, Student
 from app.modules.taught.models import ModuleAssessment, ModuleEnrolment, TaughtModule
@@ -41,7 +42,7 @@ def _ev(v):
 
 
 async def main(codes: list[str]) -> None:
-    async with SessionFactory() as s:
+    async with system_scope(), SessionFactory() as s:
         programmes = []
         for code in codes:
             prog = (await s.execute(select(Programme).where(Programme.code == code))).scalar_one_or_none()

@@ -105,6 +105,8 @@ async def _resolve_tenant(conn, ident: str) -> tuple[uuid.UUID, str]:
 async def cmd_stats(ident: str) -> None:
     async with engine.connect() as conn:
         tid, sub = await _resolve_tenant(conn, ident)
+        # T1: RLS is fail-closed — act as exactly this tenant on this connection.
+        await conn.execute(text("SELECT set_config('app.current_tenant', :i, false)").bindparams(i=str(tid)))
         tables = await _tenant_tables(conn)
         print(f"tenant {sub} ({tid})")
         total = 0
@@ -119,6 +121,8 @@ async def cmd_stats(ident: str) -> None:
 async def cmd_export(ident: str, out: str) -> None:
     async with engine.connect() as conn:
         tid, sub = await _resolve_tenant(conn, ident)
+        # T1: RLS is fail-closed — act as exactly this tenant on this connection.
+        await conn.execute(text("SELECT set_config('app.current_tenant', :i, false)").bindparams(i=str(tid)))
         tables = await _tenant_tables(conn)
         outdir = Path(out) / f"tenant_{sub}_{_utcnow():%Y%m%dT%H%M%SZ}"
         outdir.mkdir(parents=True, exist_ok=True)
@@ -142,6 +146,8 @@ async def cmd_export(ident: str, out: str) -> None:
 async def cmd_delete(ident: str, commit: bool) -> None:
     async with engine.begin() as conn:  # one transaction; rolls back unless we reach the end
         tid, sub = await _resolve_tenant(conn, ident)
+        # T1: RLS is fail-closed — act as exactly this tenant on this connection.
+        await conn.execute(text("SELECT set_config('app.current_tenant', :i, false)").bindparams(i=str(tid)))
         tables = await _tenant_tables(conn)
         order = await _delete_order(conn, tables)
 
