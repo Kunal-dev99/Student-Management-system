@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 
 from app.core.database import SessionFactory
+from app.core.tenant_context import system_scope  # T1: cross-tenant tool
 from app.modules.tenant.models import Tenant
 
 ICR_SUBDOMAIN = "icr"
@@ -33,7 +34,7 @@ ICR_BRANDING = {
 
 
 async def main() -> None:
-    async with SessionFactory() as s:
+    async with system_scope(), SessionFactory() as s:
         existing = (
             await s.execute(select(Tenant).where(Tenant.subdomain == ICR_SUBDOMAIN))
         ).scalar_one_or_none()

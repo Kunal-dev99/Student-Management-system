@@ -20,6 +20,7 @@ from sqlalchemy import select
 from app.db import registry as _registry  # noqa: F401
 
 from app.core.database import SessionFactory
+from app.core.tenant_context import system_scope  # T1: cross-tenant tool
 from app.core.security import hash_password
 from app.modules.admissions.models import Offer
 from app.modules.identity.constants import EXCLUSIVE_PERMISSIONS, PERMISSIONS, ROLES
@@ -331,7 +332,7 @@ async def _seed_workflow(session):
 
 
 async def main() -> None:
-    async with SessionFactory() as session:
+    async with system_scope(), SessionFactory() as session:
         await _seed_rbac(session)
         await _seed_admin(session)
         await _seed_persons(session)

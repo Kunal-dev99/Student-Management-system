@@ -26,6 +26,7 @@ from decimal import Decimal
 from sqlalchemy import select
 
 from app.core.database import SessionFactory
+from app.core.tenant_context import system_scope  # T1: cross-tenant tool
 
 # Import every model module so SQLAlchemy can resolve cross-module foreign keys
 # (e.g. research_demand.raised_by_user_id → users.id).
@@ -96,7 +97,7 @@ async def purge(prefix: str) -> int:
     """
     from sqlalchemy import delete
 
-    async with SessionFactory() as s:
+    async with system_scope(), SessionFactory() as s:
         students = list((await s.execute(
             select(Student).where(Student.student_ref.like(f"{prefix}-%"))
         )).scalars().all())
@@ -123,7 +124,7 @@ async def main(n_students: int, seed: int, prefix: str, clean: bool) -> None:
         removed = await purge(prefix)
         print(f"Removed {removed} previously generated student(s) with prefix {prefix}.")
 
-    async with SessionFactory() as s:
+    async with system_scope(), SessionFactory() as s:
         # --- reference data -------------------------------------------------------------
         dept = (await s.execute(select(Department).limit(1))).scalar_one_or_none()
         if dept is None:

@@ -47,20 +47,41 @@ def drop_tenant_columns(tables: tuple[str, ...] | list[str]) -> None:
         op.drop_column(table, "tenant_id")
 
 
+# T1 — fail-closed layout (replaces the "bypass when unset" predicate above for every table):
+#   tenant_isolation         TO PUBLIC  — row's tenant = the acting tenant. Nothing else. Every
+#                                         role gets this: no tenant set means no rows.
+#   tenant_isolation_system  TO <owner> — explicit opt-in bypass (app.bypass_tenant = 'on'), set
+#                                         only by migrations/seeds/the worker via system_scope().
+# Permissive policies are OR'ed for the roles they apply to, so the owner sees "tenant match OR
+# bypass" and every other role (pgr_app, reporting roles) sees "tenant match" only.
+FAIL_CLOSED = "tenant_id = NULLIF(current_setting('app.current_tenant', true), '')::uuid"
+SYSTEM_BYPASS = "current_setting('app.bypass_tenant', true) = 'on'"
+
+
+def apply_policies(table: str, owner: str | None = None) -> None:
+    """Install the fail-closed policy pair on ``table`` (idempotent; replaces older layouts)."""
+    for name in ("tenant_isolation", "tenant_isolation_app", "tenant_isolation_system"):
+        op.execute(f"DROP POLICY IF EXISTS {name} ON {table}")
+    op.execute(f"CREATE POLICY tenant_isolation ON {table} USING ({FAIL_CLOSED}) WITH CHECK ({FAIL_CLOSED})")
+    owner_sql = owner or "CURRENT_USER"
+    op.execute(
+        f"CREATE POLICY tenant_isolation_system ON {table} TO {owner_sql} "
+        f"USING ({SYSTEM_BYPASS}) WITH CHECK ({SYSTEM_BYPASS})"
+    )
+
+
 def enable_rls(tables: tuple[str, ...] | list[str]) -> None:
-    """ENABLE + FORCE RLS (app connects as owner) with the shared isolation policy."""
+    """ENABLE + FORCE RLS (the app may connect as owner) with the fail-closed policy pair."""
     for table in tables:
         op.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
         op.execute(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY")
-        op.execute(
-            f"CREATE POLICY tenant_isolation ON {table} "
-            f"USING ({_PREDICATE}) WITH CHECK ({_PREDICATE})"
-        )
+        apply_policies(table)
 
 
 def disable_rls(tables: tuple[str, ...] | list[str]) -> None:
     for table in reversed(list(tables)):
-        op.execute(f"DROP POLICY IF EXISTS tenant_isolation ON {table}")
+        for name in ("tenant_isolation", "tenant_isolation_app", "tenant_isolation_system"):
+            op.execute(f"DROP POLICY IF EXISTS {name} ON {table}")
         op.execute(f"ALTER TABLE {table} NO FORCE ROW LEVEL SECURITY")
         op.execute(f"ALTER TABLE {table} DISABLE ROW LEVEL SECURITY")
 

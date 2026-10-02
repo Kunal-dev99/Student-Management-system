@@ -49,7 +49,7 @@ async def main() -> None:
 
             # Act as this tenant for everything below (ORM stamping + RLS WITH CHECK).
             set_current_tenant(tenant.id)
-            await s.execute(text("SELECT set_config('app.current_tenant', :i, false)").bindparams(i=str(tenant.id)))
+            # (T1: every transaction publishes the context tenant to Postgres automatically.)
 
             svc = StudentService(StudentRepository(s))
             prog = await svc.create_programme(ProgrammeCreate(
@@ -71,8 +71,6 @@ async def main() -> None:
                 )
             print(f"  {sub}: tenant + programme {code} + {len(students)} students")
 
-            # Reset the session GUC so the pooled connection doesn't carry this tenant.
-            await s.execute(text("SELECT set_config('app.current_tenant', '', false)"))
             set_current_tenant(None)
 
 

@@ -35,6 +35,7 @@ from datetime import date, timedelta
 from sqlalchemy import select
 
 from app.core.database import SessionFactory
+from app.core.tenant_context import system_scope  # T1: cross-tenant tool
 from app.db import registry as _registry  # noqa: F401
 from app.modules.funding.constants import PaymentFrequency, PaymentStatus
 from app.modules.funding.models import FundingArrangement, StipendPayment
@@ -51,7 +52,7 @@ FREQUENCIES = [PaymentFrequency.monthly, PaymentFrequency.quarterly]
 
 
 async def main() -> None:
-    async with SessionFactory() as session:
+    async with system_scope(), SessionFactory() as session:
         funding_svc = FundingService(FundingRepository(session))
         integration_svc = IntegrationService(IntegrationRepository(session))
 

@@ -12,6 +12,7 @@ import asyncio
 from sqlalchemy import select
 
 from app.core.database import SessionFactory
+from app.core.tenant_context import system_scope  # T1: cross-tenant tool
 from app.modules.exports.models import ReportProfile
 from app.modules.exports.statutory import StatutoryEngine
 
@@ -38,7 +39,7 @@ FIELDS = [
 
 
 async def main() -> None:
-    async with SessionFactory() as s:
+    async with system_scope(), SessionFactory() as s:
         engine = StatutoryEngine(s)
         existing = (await s.execute(
             select(ReportProfile).where(ReportProfile.code == CODE, ReportProfile.academic_year == YEAR)

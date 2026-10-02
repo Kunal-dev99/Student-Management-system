@@ -3,11 +3,9 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 
-from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import AppSessionFactory, ReadSessionFactory
-from app.core.tenant_context import get_current_tenant
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
@@ -30,14 +28,7 @@ async def get_read_session() -> AsyncGenerator[AsyncSession, None]:
     when its transaction begins — that fires at query time, by which point the request's
     permission dependency has resolved and the tenant ContextVar is set.
     """
+    # T1: the tenant (and any bypass) is published on every session's transaction by the
+    # global listener in core.database, so this session needs nothing extra.
     async with ReadSessionFactory() as session:
-
-        @event.listens_for(session.sync_session, "after_begin")
-        def _apply_tenant(_sess, _trans, connection):  # noqa: ANN001 (sync SA event)
-            tid = get_current_tenant()
-            if tid is not None and connection.dialect.name == "postgresql":
-                connection.execute(
-                    text("SELECT set_config('app.current_tenant', :t, true)").bindparams(t=str(tid))
-                )
-
         yield session

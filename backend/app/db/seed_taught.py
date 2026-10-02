@@ -23,6 +23,7 @@ from sqlalchemy import select
 from app.db import registry as _registry  # noqa: F401
 
 from app.core.database import SessionFactory
+from app.core.tenant_context import system_scope  # T1: cross-tenant tool
 from app.modules.person.models import Person
 from app.modules.student_record.constants import ProgrammeType, StudentStatus, StudyMode
 from app.modules.student_record.models import Programme, Student
@@ -163,7 +164,7 @@ async def _enrol(session, student_id, module_id, e: dict) -> None:
 
 async def main() -> None:
     doc = json.loads(DATA.read_text(encoding="utf-8"))
-    async with SessionFactory() as session:
+    async with system_scope(), SessionFactory() as session:
         summary = []
         for p in doc["programmes"]:
             prog = await _programme(session, p)

@@ -18,6 +18,7 @@ import asyncio
 from sqlalchemy import select
 
 from app.core.database import SessionFactory
+from app.core.tenant_context import system_scope  # T1: cross-tenant tool
 from app.modules.funding.models import FundingSource
 from app.modules.progression.models import MilestoneDefinition
 from app.modules.student_record.models import Department, Programme
@@ -96,7 +97,7 @@ FUNDERS = [
 
 
 async def main() -> None:
-    async with SessionFactory() as s:
+    async with system_scope(), SessionFactory() as s:
         dept = (await s.execute(select(Department).where(Department.code == DEPT[0]))).scalars().first()
         if dept is None:
             dept = Department(code=DEPT[0], name=DEPT[1])

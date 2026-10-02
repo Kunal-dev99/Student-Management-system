@@ -28,6 +28,7 @@ from decimal import Decimal
 from sqlalchemy import select
 
 from app.core.database import SessionFactory
+from app.core.tenant_context import system_scope  # T1: cross-tenant tool
 from app.db import registry as _registry  # noqa: F401
 from app.modules.person.models import Person
 from app.modules.progression.models import MilestoneDefinition
@@ -194,7 +195,7 @@ async def _seed_students(s, prog: Programme) -> None:
 
 
 async def main() -> None:
-    async with SessionFactory() as s:
+    async with system_scope(), SessionFactory() as s:
         prog = await _get_or_create_programme(s)
         await _ensure_modules(s, prog)
         await _seed_students(s, prog)

@@ -50,12 +50,10 @@ class Role(UUIDMixin, TimestampMixin, Base):
 
 class User(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "users"
-    # MT-1 — nullable during Phase 1 (skeleton). Backfilled to the default tenant
-    # by mt1_tenant_skeleton migration; will become NOT NULL in Phase 2.
-    # MT-4: stamp new users with the acting tenant (falls back to the default deployment),
-    # so a user created after MT-1 always carries a tenant and never bypasses RLS.
-    tenant_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("tenant.id", ondelete="RESTRICT"), nullable=True, index=True,
+    # MT-4: stamp new users with the acting tenant (falls back to the default deployment).
+    # T1: compulsory (NOT NULL) — a user always belongs to exactly one tenant.
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tenant.id", ondelete="RESTRICT"), nullable=False, index=True,
         default=resolve_tenant_for_write,
     )
     person_id: Mapped[uuid.UUID | None] = mapped_column(

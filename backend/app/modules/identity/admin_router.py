@@ -74,8 +74,12 @@ async def list_roles(
     from app.modules.identity.models import user_role
 
     roles = (await session.execute(select(Role).order_by(Role.name))).scalars().unique().all()
+    # user_role has no tenant column: count through users (tenant-scoped by RLS) so the
+    # numbers are this tenant's users only, not every tenant's.
     counts = dict((await session.execute(
-        select(user_role.c.role_id, func.count()).group_by(user_role.c.role_id)
+        select(user_role.c.role_id, func.count())
+        .join(User, User.id == user_role.c.user_id)
+        .group_by(user_role.c.role_id)
     )).all())
     out = []
     for r in roles:

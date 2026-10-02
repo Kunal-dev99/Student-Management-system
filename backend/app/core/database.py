@@ -62,3 +62,28 @@ AppSessionFactory = async_sessionmaker(
 )
 
 USING_APP_ROLE = bool(_settings.app_database_url)
+
+
+# T1 — every ORM session publishes the acting tenant (and any explicit cross-tenant bypass) to
+# Postgres at the start of each transaction, transaction-local, so RLS sees it. This covers
+# sessions a request opens itself (streaming AI features, audit/telemetry writes) as well as the
+# request session — no code path has to remember to set it. RLS is fail-closed: no tenant and no
+# bypass means no rows.
+def _publish_tenant(session, transaction, connection) -> None:  # noqa: ANN001 (SA event)
+    if connection.dialect.name != "postgresql":
+        return
+    from sqlalchemy import text as _text
+
+    from app.core.tenant_context import get_current_tenant, is_tenant_bypass
+
+    tid = get_current_tenant()
+    connection.execute(
+        _text("SELECT set_config('app.current_tenant', :t, true), set_config('app.bypass_tenant', :b, true)")
+        .bindparams(t=str(tid) if tid is not None else "", b="on" if is_tenant_bypass() else "")
+    )
+
+
+from sqlalchemy import event as _event  # noqa: E402
+from sqlalchemy.orm import Session as _Session  # noqa: E402
+
+_event.listen(_Session, "after_begin", _publish_tenant)

@@ -23,6 +23,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import SessionFactory
+from app.core.tenant_context import system_scope  # T1: cross-tenant tool
 from app.modules.funding.constants import FundingStatus
 from app.modules.funding.models import FundingArrangement
 from app.modules.student_record.models import ResearchProject, Student
@@ -54,7 +55,7 @@ async def run(apply: bool) -> dict:
     linked = created = uncertain = 0
     uncertain_refs: list[str] = []
 
-    async with SessionFactory() as session:
+    async with system_scope(), SessionFactory() as session:
         students = (await session.execute(select(Student))).scalars().all()
         for student in students:
             existing = await _linked_project_for(session, student.id)
