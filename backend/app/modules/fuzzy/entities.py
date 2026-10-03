@@ -23,7 +23,7 @@ from app.modules.student_record.models import Student
 
 
 try:
-    from rapidfuzz import fuzz  # type: ignore
+    from rapidfuzz import fuzz, utils  # type: ignore
     _HAVE_RAPIDFUZZ = True
 except ImportError:                # pragma: no cover — CI installs rapidfuzz
     _HAVE_RAPIDFUZZ = False
@@ -45,7 +45,9 @@ def _ratio(query: str, candidate: str) -> float:
     if not candidate:
         return 0.0
     if _HAVE_RAPIDFUZZ:
-        return fuzz.token_set_ratio(query, candidate) / 100.0
+        # Lowercase and strip punctuation first (rapidfuzz 3 doesn't by default), so "Alice's"
+        # matches "Alice" the same way the fallback below does.
+        return fuzz.token_set_ratio(query, candidate, processor=utils.default_process) / 100.0
     # Deterministic fallback: substring gives 1.0, else Jaccard on tokens.
     q_tokens = set(query.lower().split())
     c_tokens = set(candidate.lower().split())

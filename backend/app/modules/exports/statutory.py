@@ -877,7 +877,8 @@ class StatutoryEngine:
                     },
                     "person": common_person,
                     "programme": {"name": prog.name if prog else None, "code": prog.code if prog else None,
-                                  "version": pins.get((student.id, prog_id))},
+                                  "version": pins.get((student.id, prog_id)),
+                                  "type": _ev(prog.programme_type) if prog else None},
                     "research": common_research,
                     "award": common_award,
                     "custom": _custom_for(student.id, as_of),
@@ -901,7 +902,8 @@ class StatutoryEngine:
                     },
                     "person": common_person,
                     "programme": {"name": prog.name if prog else None, "code": prog_code,
-                                  "version": pins.get((student.id, prog_id))},
+                                  "version": pins.get((student.id, prog_id)),
+                                  "type": _ev(prog.programme_type) if prog else None},
                     "research": common_research,
                     "award": common_award,
                     "custom": _custom_for(student.id, _slice_as_of(start_d, shown_end)),
@@ -931,6 +933,8 @@ class StatutoryEngine:
 
         from app.modules.exports.spec_resolver import resolve_rules
         spec_rules = await resolve_rules(self.session, profile.code, profile.academic_year)
+        from app.modules.student_record import fte_check
+        fte_policy = await fte_check.policy(self.session)
 
         for record in records:
             out_row, ref = [], record["student"]["ref"]
@@ -995,6 +999,15 @@ class StatutoryEngine:
                                 "fix": {"kind": "format_date", "field": fld, "value": v},
                                 "message": f"{fld} ('{v}') {rule.get('message', 'must be YYYYMMDD')}.",
                             })
+            # Demo 2 item 1.5 — the student's FTE must not exceed their modules' total (setting:
+            # statutory.fte_check off / warn / stop).
+            if fte_policy.severity:
+                msg = fte_check.evaluate(
+                    record["student"].get("intensityPct"), fte_check.module_fte_total(record.get("modules") or []),
+                    fte_policy, is_research=(record.get("programme") or {}).get("type") != "taught")
+                if msg:
+                    issues.append({"studentRef": ref, "field": "FTE", "severity": fte_policy.severity,
+                                   "ruleKey": "fte_vs_module_fte", "message": msg})
             rows.append(out_row)
 
         # ruleAnalysis lets the UI say "85% of records violate this rule — probably the rule is

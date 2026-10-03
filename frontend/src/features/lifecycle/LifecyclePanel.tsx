@@ -791,6 +791,8 @@ export function LifecyclePanel({ studentId, student }: { studentId: string; stud
                             try {
                               const res = await approve.mutateAsync({ eventId: e.id, note })
                               toast({ title: 'Approved', description: res.recalculation?.note })
+                              // e.g. the FTE vs module FTE check in warn mode — approved, but flagged.
+                              res.warnings?.forEach((w) => toast({ title: 'Approved with a warning', description: w }))
                               if (res.moduleProposal?.modules.length) setModuleProposal(res.moduleProposal)
                               return true
                             } catch (err2) { err(err2); return false }

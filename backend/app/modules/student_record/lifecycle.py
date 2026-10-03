@@ -266,6 +266,18 @@ class LifecycleService:
         if event.status is not LifecycleEventStatus.requested:
             raise ConflictError(f"This request is already {event.status.value}")
         student = await self._get_student(event.student_id)
+        fte_warnings: list[str] = []
+        if event.event_type is LifecycleEventType.intensity_change and event.intensity_pct:
+            # Demo 2 item 1.5 — FTE vs module FTE: refused in "stop" mode (before anything
+            # changes), a warning on the result in "warn" mode.
+            from app.modules.student_record import fte_check
+
+            fte_severity, fte_message = await fte_check.check_intensity(
+                self.session, student, event.intensity_pct, event.start_date)
+            if fte_severity == "error":
+                raise ConflictError(f"Not approved: {fte_message}")
+            if fte_message:
+                fte_warnings.append(fte_message)
 
         event.status = LifecycleEventStatus.approved
         event.approved_by_user_id = approver_user_id
@@ -325,6 +337,8 @@ class LifecycleService:
         await self.session.commit()
         await self.session.refresh(event)
         result = {"event": self.out(event), "recalculation": recalc}
+        if fte_warnings:
+            result["warnings"] = fte_warnings
         if event.event_type is LifecycleEventType.suspension:
             # Effective dating, Phase 3 — a suspension ends the student's open modules (HESA ends
             # the module instance when the student suspends). Propose them; the registry confirms

@@ -18,6 +18,7 @@ import { PageSection } from '@/components/common/PageSection'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -103,6 +104,13 @@ function SettingRow({ setting }: { setting: InstitutionSetting }) {
                 {draft ? 'On' : 'Off'}
               </Label>
             </div>
+          ) : setting.choices?.length ? (
+            <Select value={String(draft)} onValueChange={(v) => setDraft(v)}>
+              <SelectTrigger id={`set-${setting.key}`} className="w-40"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {setting.choices.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+              </SelectContent>
+            </Select>
           ) : (
             <Input
               id={`set-${setting.key}`}

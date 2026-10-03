@@ -241,7 +241,8 @@ async def test_training_learns_the_planted_signal_and_beats_the_baseline(ctx):
     # Registry: versions recorded, recommended one promoted to candidate, artifact stored.
     models = (await c.get("/api/v1/pattern-lab/models", headers=h)).json()
     m = next(x for x in models if x["name"] == "Delay risk (test)")
-    assert len(m["versions"]) == 3                     # three non-baseline candidates
+    # One version per non-baseline candidate: 3 always, plus XGBoost/LightGBM when installed.
+    assert len(m["versions"]) == sum(1 for x in run["candidates"] if not x["isBaseline"]) >= 3
     cand = [v for v in m["versions"] if v["status"] == "candidate"]
     assert len(cand) == 1 and cand[0]["algorithm"] == run["recommended"]
     assert cand[0]["artifactBytes"] > 0
