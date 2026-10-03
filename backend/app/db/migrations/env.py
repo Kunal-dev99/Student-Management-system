@@ -66,7 +66,15 @@ def do_run_migrations(connection) -> None:
             # T1 — RLS is fail-closed; migrations (backfills, checks) work across every tenant,
             # so this connection opts in to the owner's explicit bypass for its whole session.
             connection.exec_driver_sql("SELECT set_config('app.bypass_tenant', 'on', false)")
+            # T3 — the per-institution reporting views depend on core columns, and Postgres won't
+            # alter a column a view uses. Drop them first, rebuild them from the catalogue after.
+            from app.db import tenant_views
+            tenant_views.drop_all(connection)
         context.run_migrations()
+        if connection.dialect.name == "postgresql":
+            built = tenant_views.rebuild(connection)
+            if built:
+                print(f"tenant views rebuilt: {built}")
 
 
 async def run_migrations_online() -> None:
