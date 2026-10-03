@@ -35,7 +35,7 @@ async def sla_report(
     return await SlaService(session).report()
 
 
-@router.post("/sla-sweep", summary="F5 — mark breached tasks (also runs on the worker)")
+@router.post("/sla-sweep", summary="F5 — mark breached tasks now (the worker also runs this on schedule)")
 async def sla_sweep(
     session: AsyncSession = Depends(get_session),
     _=Depends(require_permission("admin.configure")),

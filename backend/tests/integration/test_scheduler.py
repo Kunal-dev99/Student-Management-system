@@ -1,4 +1,5 @@
-"""Scheduled jobs: milestone generation, funding-expiry flagging, overdue escalation (BE-2.2)."""
+"""Scheduled jobs: milestone generation, funding-expiry flagging, overdue escalation (BE-2.2),
+SLA breach marking."""
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
@@ -54,6 +55,9 @@ async def client():
         # An overdue open task -> should be escalated to blocked.
         s.add(Task(title="Overdue thing", assignee_role="PGR Administrator",
                    due_at=datetime.now(timezone.utc) - timedelta(days=1), status=TaskStatus.open))
+        # An open task whose 1-hour SLA ran out 2 hours ago -> should be marked breached.
+        s.add(Task(title="Slow reply", assignee_role="PGR Administrator", status=TaskStatus.open,
+                   sla_target_seconds=3600, sla_started_at=datetime.now(timezone.utc) - timedelta(hours=2)))
         await s.commit()
 
     async def _override():
@@ -78,9 +82,11 @@ async def test_scheduled_jobs_run_then_idempotent(client):
     assert d["milestonesGenerated"] == 1
     assert d["fundingExpiringFlagged"] == 1
     assert d["overdueTasksEscalated"] == 1
+    assert d["slaBreachesMarked"] == 1
 
     # Second run: nothing new (milestone exists, funding task deduped, task already blocked).
     d2 = (await client.post("/api/v1/admin/scheduled-jobs/run")).json()
     assert d2["milestonesGenerated"] == 0
     assert d2["fundingExpiringFlagged"] == 0
     assert d2["overdueTasksEscalated"] == 0
+    assert d2["slaBreachesMarked"] == 0

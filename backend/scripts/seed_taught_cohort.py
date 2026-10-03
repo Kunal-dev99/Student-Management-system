@@ -28,7 +28,8 @@ from decimal import Decimal
 from sqlalchemy import select
 
 from app.core.database import SessionFactory
-from app.core.tenant_context import system_scope  # T1: cross-tenant tool
+# Acts as the default deployment, so lookups by code or email never see another institution.
+from app.core.tenant_context import DEFAULT_TENANT_ID, tenant_scope
 from app.db import registry as _registry  # noqa: F401
 from app.modules.person.models import Person
 from app.modules.progression.models import MilestoneDefinition
@@ -195,7 +196,7 @@ async def _seed_students(s, prog: Programme) -> None:
 
 
 async def main() -> None:
-    async with system_scope(), SessionFactory() as s:
+    async with tenant_scope(DEFAULT_TENANT_ID), SessionFactory() as s:
         prog = await _get_or_create_programme(s)
         await _ensure_modules(s, prog)
         await _seed_students(s, prog)

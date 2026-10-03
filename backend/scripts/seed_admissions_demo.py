@@ -10,7 +10,8 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 
 from app.core.database import SessionFactory
-from app.core.tenant_context import system_scope  # T1: cross-tenant tool
+# Acts as the default deployment, so lookups by code or email never see another institution.
+from app.core.tenant_context import DEFAULT_TENANT_ID, tenant_scope
 # Import the registry so every model's ForeignKey targets are resolvable at flush time.
 from app.db import registry as _registry  # noqa: F401
 from app.modules.admissions.constants import OfferStatus
@@ -39,7 +40,7 @@ COHORT = [
 
 
 async def main() -> None:
-    async with system_scope(), SessionFactory() as s:
+    async with tenant_scope(DEFAULT_TENANT_ID), SessionFactory() as s:
         # Pick a live opportunity to attach the applications to.
         opp = (await s.execute(
             select(ResearchOpportunity)

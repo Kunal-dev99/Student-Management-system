@@ -16,7 +16,8 @@ import sys
 from sqlalchemy import select, text
 
 from app.core.database import SessionFactory
-from app.core.tenant_context import system_scope  # T1: cross-tenant tool
+# Acts as the default deployment, so lookups by code or email never see another institution.
+from app.core.tenant_context import DEFAULT_TENANT_ID, tenant_scope
 from app.core.security import hash_password
 from app.modules.identity.models import Role, User
 from app.modules.person.models import Person
@@ -53,7 +54,7 @@ async def main() -> None:
     if get_settings().app_env == "production":
         # T4 — demo logins have known passwords; never create them in production.
         raise SystemExit("seed_demo_logins refuses to run with APP_ENV=production")
-    async with system_scope(), SessionFactory() as s:
+    async with tenant_scope(DEFAULT_TENANT_ID), SessionFactory() as s:
         roles = {r.name: r for r in (await s.execute(select(Role))).scalars().all()}
         missing = {n for _e, _p, rs, _h, _d in ACCOUNTS for n in rs} - set(roles)
         if missing:
