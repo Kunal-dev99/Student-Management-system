@@ -32,9 +32,9 @@ SUBJECTS = {
 }
 
 
-def _render(template: str, payload: dict | None) -> tuple[str, str]:
+def _render(template: str, payload: dict | None, base: str | None = None) -> tuple[str, str]:
     subject = SUBJECTS.get(template, f"PGR Platform update: {template}")
-    base = get_settings().app_base_url
+    base = base or get_settings().app_base_url
     lines = [subject, ""]
     if payload:
         for k, v in payload.items():
@@ -104,6 +104,7 @@ class NotificationService:
         institution_email = await setting_value(self.session, "email.enabled")
         from_name = await setting_value(self.session, "email.from_name")
         emailed = 0
+        bases: dict = {}   # tenant id -> where its users sign in (one lookup per institution)
         for n in rows:
             n.status = NotificationStatus.sent  # in-app is now visible
             pref = await self._preference(n.recipient_user_id)
@@ -118,7 +119,11 @@ class NotificationService:
                     select(User).where(User.id == n.recipient_user_id)
                 )).scalar_one_or_none()
                 if user and user.email:
-                    subject, body = _render(n.template, n.payload)
+                    if user.tenant_id not in bases:
+                        from app.core.tenant_resolver import base_url_for_tenant
+
+                        bases[user.tenant_id] = await base_url_for_tenant(self.session, user.tenant_id)
+                    subject, body = _render(n.template, n.payload, bases[user.tenant_id])
                     try:
                         await send_email(to=user.email, subject=subject, body=body, from_name=from_name)
                         emailed += 1

@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import AuthError, PermissionError
 from app.core.principal import Principal
 from app.core.tenant_context import set_current_tenant
-from app.core.tenant_resolver import resolve_tenant_id_for_host
+from app.core.tenant_resolver import tenant_for_request
 from app.db.session import get_session
 from app.modules.identity.repository import IdentityRepository
 from app.modules.identity.service import IdentityService
@@ -34,7 +34,7 @@ async def get_current_principal(
     # with the token's tenant; the URL's tenant wins, and a token for another tenant cannot
     # be replayed against this subdomain. Neutral/dev hosts resolve to None, so this is a
     # no-op on localhost and falls back to the token tenant.
-    host_tid = await resolve_tenant_id_for_host(request.headers.get("host", ""))
+    host_tid = await tenant_for_request(request)
     effective = _reconcile_tenant(host_tid, principal.tenant_id)
     await _apply_tenant_context(session, effective)
     request.state.user_id = str(principal.user_id)   # T4 — for the access log line

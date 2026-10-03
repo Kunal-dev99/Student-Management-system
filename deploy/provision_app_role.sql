@@ -26,6 +26,7 @@ DECLARE
     app_role   text := 'pgr_app';
     app_pass   text := 'CHANGE_ME_IN_PROD';
     owner_role text := 'pgr';
+    fn         text;
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = app_role) THEN
         EXECUTE format('CREATE ROLE %I LOGIN PASSWORD %L NOSUPERUSER NOBYPASSRLS NOCREATEROLE NOCREATEDB',
@@ -39,6 +40,14 @@ BEGIN
     -- Future tables/sequences created by the owner auto-grant to the app role.
     EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO %I', owner_role, app_role);
     EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO %I', owner_role, app_role);
+
+    -- The narrow pre-sign-in lookups (migration t5_pre_auth_lookups): which institution an email,
+    -- user, referee token or bounced address belongs to. Revoked from PUBLIC; only the app may call.
+    FOR fn IN SELECT p.oid::regprocedure::text FROM pg_proc p
+              JOIN pg_namespace n ON n.oid = p.pronamespace
+              WHERE n.nspname = 'public' AND p.proname LIKE 'pgr\_tenant%' LOOP
+        EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO %I', fn, app_role);
+    END LOOP;
 
     RAISE NOTICE 'App role % provisioned (privileges only; RLS is fail-closed for it by the T1 policies).', app_role;
 END $$;

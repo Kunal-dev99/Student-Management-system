@@ -1501,6 +1501,8 @@ function OrderFixDialog({
   profileId: string
 }) {
   const { toast } = useToast()
+  const { hasPermission } = useAuth()
+  const canChangeSpec = hasPermission('platform.configure')
   const suppress = useSuppressRule(profileId)
   const [reason, setReason] = useState('')
   const [scope, setScope] = useState<'profile' | 'pack'>('profile')
@@ -1573,14 +1575,21 @@ function OrderFixDialog({
                       <span className="text-muted-foreground">Suppression applies to this return only. Other profiles on the same pack still enforce the rule.</span>
                     </span>
                   </label>
-                  <label className="flex items-start gap-3 p-3 cursor-pointer hover:bg-surface-2">
-                    <input type="radio" name="scope" className="mt-0.5"
-                      checked={scope === 'pack'} onChange={() => setScope('pack')} />
-                    <span className="text-xs">
-                      <span className="font-medium block">For every profile on this spec pack</span>
-                      <span className="text-muted-foreground">The right fix when the rule arrived via a bad advisory — one suppression covers every profile using the pack version.</span>
-                    </span>
-                  </label>
+                  {canChangeSpec ? (
+                    <label className="flex items-start gap-3 p-3 cursor-pointer hover:bg-surface-2">
+                      <input type="radio" name="scope" className="mt-0.5"
+                        checked={scope === 'pack'} onChange={() => setScope('pack')} />
+                      <span className="text-xs">
+                        <span className="font-medium block">For every profile on this spec pack</span>
+                        <span className="text-muted-foreground">The right fix when the rule arrived via a bad advisory — one suppression covers every profile using the pack version.</span>
+                      </span>
+                    </label>
+                  ) : (
+                    <p className="p-3 text-xs text-muted-foreground">
+                      The spec pack is shared by every institution, so a pack-wide suppression is made
+                      by the platform team. Suppress it for this profile, and report the rule to them.
+                    </p>
+                  )}
                 </div>
               </div>
               <div className="space-y-1.5">
@@ -1690,6 +1699,8 @@ function SuppressionsPanel({
   const { toast } = useToast()
   const confirm = useConfirm()
   const remove = useRemoveSuppression(profileId)
+  const { hasPermission } = useAuth()
+  const canChangeSpec = hasPermission('platform.configure')
 
   // UX fix (2026-09-17): the panel used to be amber-ringed with a prominent Undo button per
   // row, which read as "unresolved item, take action". That's misleading — a suppression is a
@@ -1744,7 +1755,7 @@ function SuppressionsPanel({
                 </TableCell>
                 {canManage && !signed && (
                   <TableCell className="text-right">
-                    <button
+                    {(s.scope !== 'pack' || canChangeSpec) && <button
                       type="button"
                       className="text-[11px] text-muted-foreground hover:text-foreground hover:underline"
                       disabled={remove.isPending}
@@ -1762,7 +1773,7 @@ function SuppressionsPanel({
                       }}
                     >
                       undo
-                    </button>
+                    </button>}
                   </TableCell>
                 )}
               </TableRow>
@@ -2272,6 +2283,8 @@ export default function StatutoryPage() {
   const { hasPermission } = useAuth()
   const canConfigure = hasPermission('admin.configure')
   const canSignOff = hasPermission('reports.signoff')
+  // The HESA specification is shared by every institution: only the platform team changes it.
+  const canChangeSpec = hasPermission('platform.configure')
 
   const profiles = useProfiles()
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -2320,7 +2333,7 @@ export default function StatutoryPage() {
         description="A statutory return is configuration, not code — HESA is an external specification, expressed as a versioned profile of field mappings."
         actions={canConfigure ? (
           <div className="flex items-center gap-2">
-            <ImportSpecDialog />
+            {canChangeSpec && <ImportSpecDialog />}
             <FromSpecDialog onCreated={setSelectedId} />
             <NewProfileDialog />
           </div>
@@ -2627,7 +2640,7 @@ export default function StatutoryPage() {
               )}
 
               {tab === 'advisories' && (
-                <AdvisoriesPanel canConfigure={canConfigure} canSignOff={canSignOff} />
+                <AdvisoriesPanel canConfigure={canChangeSpec} canSignOff={canChangeSpec} />
               )}
             </div>
           </>
@@ -2638,7 +2651,7 @@ export default function StatutoryPage() {
             accent="accent"
             description="Ingest a published HESA advisory, review the diff against the current pack, and accept it to make the change the active spec version — ingest → recommend → accept, human-gated."
           >
-            <AdvisoriesPanel canConfigure={canConfigure} canSignOff={canSignOff} />
+            <AdvisoriesPanel canConfigure={canChangeSpec} canSignOff={canChangeSpec} />
           </PageSection>
         )}
       </div>

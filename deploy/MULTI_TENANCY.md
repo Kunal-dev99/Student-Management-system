@@ -164,19 +164,81 @@ institutions' rows, and drops it again. It skips until reporting is provisioned.
 strings and has no tenant. Ours replaces it. Give each institution's partners its webhook secret,
 and have them post to the institution's subdomain.
 
+## Deployment: one shared address (the SaaS setup)
+
+The platform runs on one address (for example `research-student-management-system.fusionpractices.com`)
+for every institution. Leave `TENANT_BASE_DOMAIN` empty. Then:
+
+- **The institution comes from the user, not the address.** Sign-in emails are unique across
+  institutions, so the email (or the refresh or reset token) identifies the user's institution.
+  The sign-in token carries it, and every request runs as that institution under RLS.
+- **No bypass is needed before sign-in.** Narrow database functions (migration
+  `t5_pre_auth_lookups`) answer only "which institution is this email, user, referee token or
+  bounced address?" They return institution ids, never rows, and are executable by `pgr_app`
+  only. So the restricted app login works on one address. This was proven end to end: sign-in,
+  refresh, logout, wrong password and unknown email (401), password reset, webhooks and bounces
+  all ran as `pgr_app`.
+- **Partner webhooks** post to `/api/v1/integration/webhooks/<institution>/<system>` (e.g.
+  `/webhooks/icr/finance`), signed with that institution's own secret
+  (`python -m scripts.tenant_ops webhook-secret icr`). Another institution's secret gets 401, and
+  an unknown institution gets 404.
+- **Email bounces** come from one provider account for the whole platform. A bounce is applied
+  in every institution where that address belongs to a user or person, each in its own scope.
+- **The login page** shows no institution list in production. The email decides the institution,
+  and branding follows sign-in.
+- **What a subdomain would add** is one extra lock: a token can't be used on another
+  institution's address. On one address the database rules alone keep each token to its own
+  institution.
+
+## Domains and subdomains (optional, per institution)
+
+If an institution later wants its own address, the same code supports subdomains. Recommended
+layout on `fusionpractices.com`:
+
+| Address | Meaning |
+|---|---|
+| `pgr.fusionpractices.com` | The main address: the default deployment and demos |
+| `icr.pgr.fusionpractices.com` | ICR's space (the label in front of the base domain names the institution) |
+
+Settings and infrastructure:
+
+- `TENANT_BASE_DOMAIN=pgr.fusionpractices.com`
+- DNS: one wildcard record, `*.pgr.fusionpractices.com`, pointing at the load balancer. New
+  institutions then need no DNS change.
+- TLS: one wildcard certificate for `*.pgr.fusionpractices.com`, plus the main address.
+- `APP_BASE_URL=https://pgr.fusionpractices.com`. Emailed links (password reset,
+  notifications) go to the recipient's own subdomain, using this URL's scheme.
+- `TRUST_FORWARDED_HOST=true` when the API is reached through the Next.js proxy (it rewrites
+  Host and passes the user's address in `X-Forwarded-Host`). Leave it off if the API is
+  directly reachable from the internet; otherwise a caller could choose the host it is judged by.
+
+Don't put institutions directly under `fusionpractices.com`: a wildcard there would collide
+with the company's own addresses (`www`, `mail` and so on). A client that wants its own domain
+(e.g. `pgr.icr.ac.uk`) needs a small custom-domain mapping, which isn't built yet.
+
+What the addresses control:
+
+- **Sign-in** on a subdomain looks the user up in that institution only.
+- **Tokens** can't be used on another institution's subdomain (403).
+- **Partner webhooks** post to the institution's subdomain and sign with its own secret.
+- **The login-page list** (`GET /tenants`) shows only the institution the address names. The
+  main address shows the default deployment. Every institution is listed only when no base
+  domain is set (local dev).
+
+## Decisions taken
+
+- **Shared HESA specification:** only the platform team (`platform.configure`) can ingest,
+  import, accept or reject advisories, or suppress a rule for the whole pack. Institutions read
+  it and suppress rules for their own profiles.
+- **Public institution list:** limited as described above.
+- **AI:** left as is. External models receive student data whenever a provider key is
+  configured (the composer alone has a per-institution switch). This is an accepted risk.
+- **Sign-in emails:** stay unique across institutions, because they identify the user before
+  the institution is known.
+
 ## Not yet done
 
-- **Decisions for the product owner:**
-  - External AI models receive student data (names, meeting notes) whenever an API key is
-    configured. Only the composer has a per-institution switch. Decide whether every AI
-    feature needs a per-institution opt-in.
-  - Accepting a HESA advisory updates the specification every institution shares. Decide
-    whether that becomes a platform-admin action.
-  - `GET /tenants` (the login-page selector) is public and lists every institution.
-  - Sign-in emails are unique across institutions, so creating a user whose email exists at
-    another institution answers "already exists".
 - Reporting logins can see the names of other institutions' schemas in the system catalogue
   (not their contents). Hiding those names needs a separate database per institution.
-- Password-reset and notification links use the global `APP_BASE_URL`, not the institution's
-  subdomain. With the restricted app role, reset confirmation needs the subdomain link.
-- T5: independent security test preparation.
+- Signed, expiring download links (with the S3 storage backend) and malware scanning of uploads.
+- Custom domains per institution.

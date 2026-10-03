@@ -136,25 +136,19 @@ async def request_reference(
 # ---- reference submission (unauthenticated, token-scoped)
 
 async def _act_as_reference_tenant(request: Request, session: AsyncSession, token: str) -> None:
-    """T4 — the referee has no account, and RLS is fail-closed, so the institution must be set
-    before the token is looked up. A tenant subdomain names it; on a bare host the token itself
-    does (it is a secret naming exactly one request), found with the owner's bypass — the same
-    rule as sign-in, so with the restricted app role referees use the institution's subdomain."""
-    import uuid as _uuid
-
-    from sqlalchemy import select
-
-    from app.core.tenant_context import set_current_tenant, system_scope
-    from app.core.tenant_resolver import resolve_tenant_id_for_host
+    """The referee has no account, and RLS is fail-closed, so the institution must be set before
+    the token is looked up. A tenant subdomain names it; on a single shared address the token
+    itself does (a secret naming exactly one request), found through a narrow lookup function
+    that returns only the institution id - no bypass, so it works under pgr_app too."""
+    from app.core import pre_auth
+    from app.core.tenant_context import set_current_tenant
+    from app.core.tenant_resolver import tenant_for_request
     from app.modules.recruitment.f3_service import _hash
-    from app.modules.recruitment.f3_models import ReferenceRequest
 
-    tid: _uuid.UUID | None = await resolve_tenant_id_for_host(request.headers.get("host", ""))
+    tid = await tenant_for_request(request)
     if tid is None:
-        async with system_scope():
-            tid = await session.scalar(select(ReferenceRequest.tenant_id)
-                                       .where(ReferenceRequest.token_hash == _hash(token)))
-        await session.rollback()   # end the bypass transaction; the next one runs as the tenant
+        tid = await pre_auth.tenant_of_reference(session, _hash(token))
+        await session.rollback()   # end the lookup; the next transaction runs as the institution
     if tid is not None:
         set_current_tenant(tid)
 

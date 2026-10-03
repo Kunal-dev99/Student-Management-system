@@ -44,6 +44,12 @@ class Settings(BaseSettings):
     # front of it: icr.pgr.icr.ac.uk -> tenant "icr"; the bare base domain is the apex (no
     # tenant). When unset (dev), only "<sub>.localhost" subdomains are resolved.
     tenant_base_domain: str | None = None
+    # The frontend proxies /api/v1 to the backend (Next.js rewrites), which replaces Host with
+    # the backend's address and passes the user's address in X-Forwarded-Host. Turn this on when
+    # the API is only reachable through that proxy (or a load balancer that sets the header), so
+    # the institution's subdomain is seen. Off by default: a directly reachable API must not let
+    # a caller choose the host it is judged by.
+    trust_forwarded_host: bool = False
 
     # MT-6 — fail-closed app DB role. When APP_DATABASE_URL is set, the API request path
     # connects as this NON-OWNER role, whose RLS policy is fail-closed: an unset tenant

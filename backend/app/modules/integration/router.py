@@ -156,11 +156,25 @@ async def upsert_target(
 
 @router.post("/webhooks/{system}", summary="Signed inbound webhook (idempotent by source id)")
 async def webhook(system: str, request: Request, session: AsyncSession = Depends(get_session)) -> dict:
-    # Verify HMAC-SHA256 over the raw body (arch §17) with the institution's own secret. T4: the
-    # institution comes from the host, and is set before the first query (RLS is fail-closed).
+    """For a subdomain deployment (institution from the host) or a single-institution install."""
+    return await _inbound(request, session, system, institution=None)
+
+
+@router.post("/webhooks/{institution}/{system}",
+             summary="Signed inbound webhook for one institution (single shared address)")
+async def institution_webhook(institution: str, system: str, request: Request,
+                              session: AsyncSession = Depends(get_session)) -> dict:
+    """On the shared SaaS address the webhook URL names the institution, e.g.
+    ``/webhooks/icr/finance``; the body must be signed with that institution's own secret."""
+    return await _inbound(request, session, system, institution=institution)
+
+
+async def _inbound(request: Request, session: AsyncSession, system: str, institution: str | None) -> dict:
+    # Verify HMAC-SHA256 over the raw body (arch §17) with the institution's own secret. The
+    # institution is set before the first query (RLS is fail-closed).
     from app.core.inbound import verified_inbound
 
-    _, raw = await verified_inbound(request)
+    _, raw = await verified_inbound(request, institution)
     try:
         body = json.loads(raw or b"{}")
     except json.JSONDecodeError as exc:

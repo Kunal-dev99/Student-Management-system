@@ -57,6 +57,55 @@ def subdomain_of(host: str, base_domain: str | None = None) -> str | None:
     return first if first not in _NEUTRAL else None
 
 
+def request_host(request) -> str:
+    """The address the user actually visited: X-Forwarded-Host when the deployment says the
+    proxy in front of us sets it (TRUST_FORWARDED_HOST), otherwise Host."""
+    from app.core.config import get_settings
+
+    headers = request.headers
+    if get_settings().trust_forwarded_host:
+        forwarded = headers.get("x-forwarded-host", "")
+        if forwarded:
+            return forwarded.split(",")[0].strip()   # the first hop is the user's
+    return headers.get("host", "")
+
+
+def base_url_for_subdomain(subdomain: str | None) -> str:
+    """Where an institution's users open the app: https://icr.<base-domain> when the platform runs
+    on subdomains (TENANT_BASE_DOMAIN), else APP_BASE_URL. The scheme (and any port) come from
+    APP_BASE_URL; the default deployment, and dev without a base domain, use APP_BASE_URL itself."""
+    from urllib.parse import urlsplit
+
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    base_url = settings.app_base_url.rstrip("/")
+    domain = (settings.tenant_base_domain or "").strip().strip(".").lower()
+    sub = (subdomain or "").strip().lower()
+    if not domain or not sub or sub in _NEUTRAL:
+        return base_url
+    parts = urlsplit(base_url)
+    port = f":{parts.port}" if parts.port else ""
+    return f"{parts.scheme or 'https'}://{sub}.{domain}{port}"
+
+
+async def base_url_for_tenant(session, tenant_id: uuid.UUID | None) -> str:
+    """base_url_for_subdomain for a tenant id (the tenant registry is global, so any session reads it)."""
+    if tenant_id is None:
+        return base_url_for_subdomain(None)
+    from sqlalchemy import select
+
+    from app.modules.tenant.models import Tenant
+
+    sub = await session.scalar(select(Tenant.subdomain).where(Tenant.id == tenant_id))
+    return base_url_for_subdomain(sub)
+
+
+async def tenant_for_request(request) -> uuid.UUID | None:
+    """The institution named by the request's address, or None (apex, dev host, unknown)."""
+    return await resolve_tenant_id_for_host(request_host(request))
+
+
 async def _reload() -> None:
     global _cache, _loaded_at
     from sqlalchemy import select
@@ -79,7 +128,13 @@ async def resolve_tenant_id_for_host(host: str) -> uuid.UUID | None:
     from app.core.config import get_settings
 
     sub = subdomain_of(host, get_settings().tenant_base_domain)
-    if sub is None:
+    return await tenant_id_for_subdomain(sub) if sub is not None else None
+
+
+async def tenant_id_for_subdomain(sub: str) -> uuid.UUID | None:
+    """Active tenant id for a subdomain label (e.g. "icr"), or None. Served from the cache."""
+    sub = (sub or "").strip().lower()
+    if not sub:
         return None
     try:
         if not _cache or (time.monotonic() - _loaded_at) > _TTL_SECONDS:
