@@ -42,6 +42,10 @@ reportlab==5.0.0
 # fallback is a much weaker plain lowercase substring match — install this for real use.
 rapidfuzz==3.14.1
 
+# Data warehouse export: Parquet files and OCI Object Storage (S3-compatible API)
+pyarrow==25.0.1
+boto3==1.43.108
+
 # Dev / test
 pytest==8.3.4
 pytest-asyncio==0.25.0

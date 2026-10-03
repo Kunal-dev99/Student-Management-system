@@ -89,6 +89,7 @@ DEFAULT_WINDOW_SECS = 60.0
 DEFAULT_PROTECTED_PATHS: tuple[str, ...] = (
     "/api/v1/auth/login",
     "/api/v1/auth/password-reset/request",
+    "/api/v1/warehouse/oauth/token",       # client-credentials grant for warehouse consumers
 )
 
 

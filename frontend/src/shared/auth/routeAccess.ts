@@ -57,6 +57,9 @@ export const ROUTE_ACCESS: RouteAccess[] = [
   { href: '/programmes', perms: ['admin.configure'], roles: ADMIN_ROLES },
   { href: '/workflows', perms: ['admin.configure'] },
   { href: '/integration', perms: ['admin.configure'] },
+  // Data warehouse export: anyone with reporting.read sees publications and the catalogue;
+  // managing them (and API consumers) needs admin.configure, enforced by the API.
+  { href: '/warehouse', perms: ['reporting.read'], roles: ADMIN_ROLES },
   { href: '/settings', perms: [] },
   { href: '/settings/assistant', perms: ['admin.configure'], roles: ADMIN_ROLES },
   { href: '/audit', perms: ['audit.read'], roles: ADMIN_ROLES },

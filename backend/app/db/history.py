@@ -19,7 +19,7 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime, timezone
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, String, Text
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, String, Text, func
 from sqlalchemy.orm import Mapped, declared_attr, mapped_column
 
 # Why a row exists. "initial" = first status at enrolment; "change" = reality changed on a date;
@@ -40,6 +40,11 @@ class HistoryMixin:
     # Phase 7 — a copy written only to close the period it supersedes (same value and start). The
     # change itself is the row that follows; reports of "what changed" skip closures.
     closure: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # When the row last changed (a correction sets superseded_by on an existing row without
+    # touching recorded_at). Kept by a database trigger too, so the data warehouse export can
+    # pick up every change incrementally.
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now, server_default=func.now())
 
     @declared_attr
     def recorded_by_user_id(cls) -> Mapped[uuid.UUID | None]:

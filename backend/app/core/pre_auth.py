@@ -84,6 +84,17 @@ async def tenant_of_reference(session: AsyncSession, token_hash: str) -> uuid.UU
     return await session.scalar(q)
 
 
+async def tenant_of_warehouse_client(session: AsyncSession, client_id: str) -> uuid.UUID | None:
+    """The institution of an active data warehouse API client (migration w1_warehouse)."""
+    from app.modules.warehouse.models import WarehouseConsumer
+
+    q = select(WarehouseConsumer.tenant_id).where(WarehouseConsumer.client_id == client_id,
+                                                  WarehouseConsumer.active.is_(True))
+    if _pg(session):
+        return await _ask(session, "SELECT pgr_tenant_of_warehouse_client(CAST(:c AS text))", {"c": client_id}, q)
+    return await session.scalar(q)
+
+
 async def tenants_with_email(session: AsyncSession, email: str) -> list[uuid.UUID]:
     from app.modules.identity.models import User
     from app.modules.person.models import Person

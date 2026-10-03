@@ -20,7 +20,7 @@ _settings = get_settings()
 _pwd = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 
 ALGORITHM = "HS256"
-TokenType = Literal["access", "refresh"]
+TokenType = Literal["access", "refresh", "warehouse"]   # warehouse: consumer tokens, never valid elsewhere
 
 
 def hash_password(raw: str) -> str:

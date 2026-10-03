@@ -33,6 +33,7 @@ from app.modules.documents import models as documents_models  # noqa: F401,E402
 from app.modules.notifications import models as notifications_models  # noqa: F401,E402
 from app.modules.audit import models as audit_models  # noqa: F401,E402
 from app.modules.research import models as research_models  # noqa: F401,E402
+from app.modules.warehouse import models as warehouse_models  # noqa: F401,E402
 from app.modules.assistant import f6_models as assistant_f6_models  # noqa: F401,E402
 from app.modules.assistant import telemetry_models as assistant_telemetry_models  # noqa: F401,E402
 from app.modules.icr import models as icr_models  # noqa: F401,E402

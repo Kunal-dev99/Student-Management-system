@@ -29,6 +29,7 @@ import {
   FileText,
   MessageSquare,
   GitCompare,
+ Database,
 } from 'lucide-react'
 import { Sidebar, type NavItem } from '@/components/layout/sidebar'
 import { Header } from '@/components/layout/header'
@@ -72,6 +73,7 @@ const baseAdminNav: NavItem[] = [
   { href: '/programmes', label: 'Programmes', icon: GraduationCap },
   { href: '/workflows', label: 'Workflows', icon: Workflow },
   { href: '/integration', label: 'Integration', icon: Cable },
+  { href: '/warehouse', label: 'Data warehouse', icon: Database },
   { href: '/settings', label: 'Settings', icon: Settings },
 ]
 

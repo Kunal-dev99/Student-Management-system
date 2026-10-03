@@ -65,6 +65,21 @@ class Settings(BaseSettings):
     # Phase 4A.2 — file storage. "local" writes under storage_root; "s3" is a later swap.
     storage_backend: Literal["local", "s3"] = "local"
     storage_root: str = "./var/storage"
+
+    # Data warehouse export: where scheduled publications are written. "local" writes under
+    # warehouse_local_root (dev, or a mounted share); "s3" writes to an S3-compatible bucket, e.g.
+    # OCI Object Storage (endpoint https://<namespace>.compat.objectstorage.<region>.oraclecloud.com,
+    # keys from an OCI "Customer Secret Key"). Keys live in .env only.
+    warehouse_target: Literal["local", "s3"] = "local"
+    # How often the worker checks for due publications (they run on their own schedule).
+    worker_warehouse_interval_seconds: int = 300
+    warehouse_local_root: str = "./var/warehouse"
+    warehouse_s3_endpoint: str | None = None
+    warehouse_s3_region: str | None = None
+    warehouse_s3_bucket: str | None = None
+    warehouse_s3_access_key: str | None = None
+    warehouse_s3_secret_key: str | None = None
+    warehouse_s3_prefix: str = ""
     max_upload_mb: int = 50
 
     # Phase 4A.3 — email. "console" logs the message (dev); "smtp" sends via aiosmtplib (prod).
