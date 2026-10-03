@@ -137,17 +137,11 @@ tool → database; API → external model provider; API → email relay.
 
 - **Model egress:** external AI models receive student data whenever a provider key is set.
   Only the composer has a per-institution switch. Staging uses the mock provider unless you
-  ask otherwise.
-- **Shared specification:** accepting a HESA advisory changes the statutory specification
-  every institution shares.
-- **Public institution list:** `GET /api/v1/tenants` is public and lists every institution, for
-  the login-page selector.
+  ask otherwise. This is an accepted risk.
 - **Global sign-in emails:** sign-in emails are unique across institutions, so "user already
-  exists" can reveal that an address is registered somewhere.
+  exists" can reveal that an address is registered somewhere. This is by design.
 - **Schema names:** reporting logins can see other institutions' schema names (not contents)
   in `pg_catalog`.
-- **Email links:** password-reset and notification links use one global base URL, not the
-  institution's subdomain.
 - **No signed links:** download links are not signed or expiring. Every download is an
   authenticated API call (there are no public links yet).
 - **No malware scanning:** uploads are not malware-scanned (`scan_status` is set to "clean").
@@ -160,7 +154,8 @@ tool → database; API → external model provider; API → email relay.
    `deploy/provision_reporting.sql` as a superuser.
 3. **Configure the app:**
    - Set `APP_DATABASE_URL` so the API runs as the restricted `pgr_app` role.
-   - Set `TENANT_BASE_DOMAIN`.
+   - Set `TENANT_BASE_DOMAIN`, and `TRUST_FORWARDED_HOST=true` if the API sits behind the
+     Next.js proxy. See "Domains and subdomains" in `deploy/MULTI_TENANCY.md`.
    - Set `LLM_PROVIDER=mock` unless model testing is agreed.
    - Run uvicorn with `--no-access-log`.
 4. **Load data:** load synthetic data for two institutions, A and B, each with at least one

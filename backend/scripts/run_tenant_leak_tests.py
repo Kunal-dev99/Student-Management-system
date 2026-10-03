@@ -30,6 +30,7 @@ TESTS = [
     "tests/integration/test_tenant_leak_api.py",
     "tests/unit/test_tenant_view_catalogue.py",
     "tests/integration/test_tenant_views.py",
+    "tests/integration/test_pre_auth_lookups.py",
 ]
 
 

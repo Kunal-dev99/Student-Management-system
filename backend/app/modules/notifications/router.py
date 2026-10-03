@@ -76,19 +76,40 @@ async def email_bounce(
     """Public webhook — the provider (SES / Mailgun / SMTP relay) posts here. Hard bounces
     deactivate email for the affected user; soft bounces are recorded but leave email on.
 
-    T4: signed like every other webhook (``X-Signature``, the institution's webhook secret), so
-    nobody can switch off a user's email by posting a fake bounce, and scoped to the institution
-    named by the host before anything is read or written."""
+    Signed like every other webhook (``X-Signature``), so nobody can switch off a user's email
+    with a fake bounce. The email provider is one account for the whole platform, so a bounce
+    isn't tied to an institution: on a single shared address it is applied in every institution
+    where that address belongs to a user or person (found by a narrow lookup that returns only
+    institution ids), each in its own scope. On an institution's subdomain, only that one."""
     import json
 
+    from app.core import pre_auth
     from app.core.errors import ValidationAppError
     from app.core.inbound import verified_inbound
+    from app.core.tenant_context import tenant_scope
+    from app.core.tenant_resolver import tenant_for_request
 
-    _, raw = await verified_inbound(request)
+    tid, raw = await verified_inbound(request)
     try:
         body = BouncePayload.model_validate(json.loads(raw or b"{}"))
     except ValueError as exc:
         raise ValidationAppError("Invalid bounce payload") from exc
+
+    host_tid = await tenant_for_request(request)
+    if host_tid is not None:
+        tenants = [host_tid]
+    else:
+        tenants = await pre_auth.tenants_with_email(session, body.email)
+        await session.rollback()   # end the lookup; each institution below gets its own transaction
+    deactivated = False
+    for t in tenants or [tid]:     # an unknown address is still recorded, for the platform
+        async with tenant_scope(t):
+            deactivated = await _record_bounce(session, body) or deactivated
+    return {"recorded": True, "emailChannelDeactivated": deactivated}
+
+
+async def _record_bounce(session: AsyncSession, body: "BouncePayload") -> bool:
+    """Record the bounce in the acting institution; switch off email for a hard bounce."""
     from datetime import datetime, timezone
     from sqlalchemy import select
     from app.modules.identity.models import User
@@ -123,4 +144,4 @@ async def email_bounce(
             deactivated = True
 
     await session.commit()
-    return {"recorded": True, "emailChannelDeactivated": deactivated}
+    return deactivated

@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.storage import content_disposition
 from app.core.dependencies import require_permission
+from app.core.errors import PermissionError
 from app.db.session import get_session
 from app.modules.exports.schemas import (
     AdvisoryDecision,
@@ -344,6 +345,19 @@ class SuppressRuleRequest(BaseModel):
     scope: str = "profile"    # 'profile' | 'pack'
 
 
+# The statutory specification (advisories, spec versions, pack-level suppressions) is shared by
+# every institution, so changing it is a platform action, not an institution one (T4 decision).
+# Institutions still read it, and suppress rules for their own profiles.
+SHARED_SPEC_PERMISSION = "platform.configure"
+
+
+def _require_platform_for_pack(principal, scope: str) -> None:
+    if scope == "pack" and not principal.has_permission(SHARED_SPEC_PERMISSION):
+        raise PermissionError(
+            "Suppressing a rule for the whole pack changes it for every institution; "
+            "suppress it for this profile instead, or ask the platform team")
+
+
 @profiles_router.post("/{profile_id}/suppress-rule",
                       summary="Suppress a cross-field/format rule for this profile or for the whole pack")
 async def suppress_rule(
@@ -352,6 +366,7 @@ async def suppress_rule(
     session: AsyncSession = Depends(get_session),
     principal=Depends(require_permission("admin.configure")),
 ) -> dict:
+    _require_platform_for_pack(principal, body.scope)
     return await _engine(session).suppress_rule(
         profile_id,
         rule_key=body.rule_key, reason=body.reason, scope=body.scope,
@@ -371,8 +386,9 @@ async def remove_suppression(
     profile_id: uuid.UUID,
     body: RemoveSuppressionRequest,
     session: AsyncSession = Depends(get_session),
-    _=Depends(require_permission("admin.configure")),
+    principal=Depends(require_permission("admin.configure")),
 ) -> dict:
+    _require_platform_for_pack(principal, body.scope)
     return await _engine(session).remove_suppression(
         profile_id, rule_key=body.rule_key, scope=body.scope,
     )
@@ -632,7 +648,7 @@ async def list_advisory_sources(
 async def ingest_advisory(
     body: AdvisoryIngestRequest,
     session: AsyncSession = Depends(get_session),
-    principal=Depends(require_permission("admin.configure")),
+    principal=Depends(require_permission(SHARED_SPEC_PERMISSION)),
 ) -> dict:
     from app.modules.exports.advisory_service import AdvisoryService
 
@@ -658,7 +674,7 @@ class AdvisoryUrlIngest(BaseModel):
 async def ingest_from_url(
     body: AdvisoryUrlIngest,
     session: AsyncSession = Depends(get_session),
-    principal=Depends(require_permission("admin.configure")),
+    principal=Depends(require_permission(SHARED_SPEC_PERMISSION)),
 ) -> dict:
     from app.core.errors import ValidationAppError
     from app.modules.exports.advisory_service import AdvisoryService
@@ -684,7 +700,7 @@ async def ingest_upload(
     title: str | None = Form(None),
     file: UploadFile = File(...),
     session: AsyncSession = Depends(get_session),
-    principal=Depends(require_permission("admin.configure")),
+    principal=Depends(require_permission(SHARED_SPEC_PERMISSION)),
 ) -> dict:
     from app.core.config import get_settings
     from app.core.errors import ValidationAppError
@@ -714,7 +730,7 @@ async def import_spec(
     name: str | None = Form(None),
     file: UploadFile = File(...),
     session: AsyncSession = Depends(get_session),
-    principal=Depends(require_permission("reports.signoff")),
+    principal=Depends(require_permission(SHARED_SPEC_PERMISSION)),
 ) -> dict:
     """Sidesteps HESA's bot wall: upload HESA's data-model export (saved as CSV or JSON) and it
     becomes the active spec version for that return + year. A person always chooses to import."""
@@ -758,7 +774,7 @@ async def accept_advisory(
     advisory_id: uuid.UUID,
     body: AdvisoryDecision,
     session: AsyncSession = Depends(get_session),
-    principal=Depends(require_permission("reports.signoff")),
+    principal=Depends(require_permission(SHARED_SPEC_PERMISSION)),
 ) -> dict:
     from app.modules.exports.advisory_service import AdvisoryService
     from app.modules.exports.schemas import SpecVersionOut
@@ -776,7 +792,7 @@ async def reject_advisory(
     advisory_id: uuid.UUID,
     body: AdvisoryDecision,
     session: AsyncSession = Depends(get_session),
-    principal=Depends(require_permission("reports.signoff")),
+    principal=Depends(require_permission(SHARED_SPEC_PERMISSION)),
 ) -> dict:
     from app.modules.exports.advisory_service import AdvisoryService
 

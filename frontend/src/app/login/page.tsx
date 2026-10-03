@@ -120,6 +120,9 @@ export default function LoginPage() {
         )}
 
         <form onSubmit={onSubmit} className="card-elevated p-6 space-y-4">
+          {/* In production the API doesn't publish the institution list (the email alone says
+              which institution you belong to), so there is nothing to pick: hide the selector. */}
+          {(tenants.isLoading || (tenants.data?.length ?? 0) > 0) && (
           <div className="space-y-1.5">
             <Label htmlFor="tenant">Institution</Label>
             <Select value={tenantId} onValueChange={setTenantId} disabled={tenants.isLoading || submitting}>
@@ -144,10 +147,10 @@ export default function LoginPage() {
             </Select>
             <p className="text-helper text-xs flex items-center gap-1">
               <Building2 className="h-3 w-3" />
-              Demo: multi-tenant plumbing is in place; users sign in against the same
-              directory today.
+              Your email decides which institution you sign in to; this only sets the branding.
             </p>
           </div>
+          )}
 
           <div className="space-y-1.5">
             <Label htmlFor="email">Email</Label>

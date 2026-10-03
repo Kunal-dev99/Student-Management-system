@@ -155,7 +155,11 @@ class IdentityService:
         expires = datetime.now(timezone.utc) + timedelta(seconds=settings.password_reset_ttl_seconds)
         self.repo.add_reset_token(user.id, hash_opaque(raw), expires)
         await self.repo.session.commit()
-        link = f"{settings.app_base_url}/reset-password?token={raw}"
+        # The link opens the user's own institution (its subdomain), where sign-in is scoped.
+        from app.core.tenant_resolver import base_url_for_tenant
+
+        base = await base_url_for_tenant(self.repo.session, getattr(user, "tenant_id", None))
+        link = f"{base}/reset-password?token={raw}"
         minutes = settings.password_reset_ttl_seconds // 60
         text_body = (
             f"You have been invited to the PGR Platform.\n\n"
