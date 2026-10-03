@@ -75,3 +75,12 @@ def test_each_institution_has_its_own_webhook_secret():
     assert webhook_secret(DEFAULT_TENANT_ID) == get_settings().app_secret_key.encode()  # unchanged
     assert len({webhook_secret(t) for t in (DEFAULT_TENANT_ID, A, B)}) == 3
     assert sign(A, b"{}") != sign(B, b"{}")
+
+
+def test_a_missing_file_is_not_found_not_a_crash(tmp_path):
+    store = LocalObjectStore(str(tmp_path))
+    with tenant_scope(A):
+        key, _, _ = store.save(b"x")
+        (tmp_path / key).unlink()
+        with pytest.raises(NotFoundError):
+            store.open(key)

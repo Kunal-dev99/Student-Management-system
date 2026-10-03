@@ -77,8 +77,13 @@ class LocalObjectStore(ObjectStore):
 
     def open(self, key: str) -> bytes:
         _check_tenant(key)
-        with open(self._path(key), "rb") as f:
-            return f.read()
+        try:
+            with open(self._path(key), "rb") as f:
+                return f.read()
+        except FileNotFoundError as exc:
+            # The row exists but the file doesn't (removed, or never copied to this machine):
+            # a clean 404, never a 500.
+            raise NotFoundError("File not found") from exc
 
     def delete(self, key: str) -> None:
         _check_tenant(key)
