@@ -84,6 +84,18 @@ async def _run_notifications() -> None:
     await _per_tenant("notifications", job)
 
 
+async def _run_warehouse() -> None:
+    """Data warehouse export: run every institution's publications that are due."""
+    from app.modules.warehouse.service import PublicationService
+
+    async def job(session, tid):
+        runs = await PublicationService(session).run_due()
+        for r in runs:
+            logger.info("warehouse publication run %s for tenant %s: %s (%s)", r.publication_id, tid, r.status, r.mode)
+
+    await _per_tenant("warehouse", job)
+
+
 def _guard(coro_fn):
     """Wrap a job so an exception in one tick never kills the scheduler."""
     async def _wrapped():
@@ -104,6 +116,8 @@ async def main() -> None:
                       seconds=settings.worker_dispatch_interval_seconds, id="outbox_dispatch")
     scheduler.add_job(_guard(_run_notifications), "interval",
                       seconds=settings.worker_notify_interval_seconds, id="notifications")
+    scheduler.add_job(_guard(_run_warehouse), "interval",
+                      seconds=settings.worker_warehouse_interval_seconds, id="warehouse")
     scheduler.start()
     logger.info(
         "PGR worker started (scheduled=%ss, dispatch=%ss, notify=%ss). Ctrl+C to stop.",

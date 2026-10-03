@@ -7,6 +7,7 @@ The Postgres side of the same rule is tests/integration/test_tenant_guard.py.
 from __future__ import annotations
 
 import app.main  # noqa: F401  (registers every model on Base.metadata)
+import app.db.registry  # noqa: F401  (models no router imports yet)
 from app.db.base import Base
 from app.db.tenant_guard import GLOBAL_TABLES
 
@@ -44,6 +45,7 @@ def test_tenant_column_is_compulsory_and_stamped():
 _GLOBAL_UNIQUE = {
     ("users", ("email",)): "identifies who is signing in, before the institution is known",
     ("reference_request", ("token_hash",)): "a secret that names exactly one request",
+    ("warehouse_consumer", ("client_id",)): "random OAuth client id; names the consumer before the institution is known",
 }
 
 

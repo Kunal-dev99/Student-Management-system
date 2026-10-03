@@ -82,6 +82,10 @@ from app.modules.icr.router import router as icr_router
 from app.modules.icr.gaps_router import router as icr_gaps_router
 from app.modules.identity.admin_router import admin_router
 from app.modules.pattern_lab.router import router as pattern_lab_router
+from app.modules.warehouse.router import router as warehouse_router
+from app.modules.warehouse.pull import consumers_router as warehouse_consumers_router
+from app.modules.warehouse.pull import data_router as warehouse_data_router
+from app.modules.warehouse.pull import token_router as warehouse_token_router
 from app.modules.settings.router import reference_router, settings_router
 from app.modules.research.router import (
     areas_router,
@@ -222,3 +226,7 @@ api_router.include_router(settings_router)
 api_router.include_router(reference_router)
 api_router.include_router(admin_router)
 api_router.include_router(pattern_lab_router)
+api_router.include_router(warehouse_router)  # data warehouse export
+api_router.include_router(warehouse_consumers_router)
+api_router.include_router(warehouse_token_router)
+api_router.include_router(warehouse_data_router)

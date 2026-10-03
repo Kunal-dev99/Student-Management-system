@@ -31,6 +31,7 @@ TESTS = [
     "tests/unit/test_tenant_view_catalogue.py",
     "tests/integration/test_tenant_views.py",
     "tests/integration/test_pre_auth_lookups.py",
+    "tests/integration/test_warehouse_tracking.py",
 ]
 
 

@@ -26,6 +26,8 @@ httpx==0.28.1                      # outbound HTTP (integration adapters)
 APScheduler==3.11.0                # background worker scheduling
 python-multipart==0.0.20           # file uploads
 aiosmtplib==3.0.2                  # SMTP email
+pyarrow==25.0.1                    # data warehouse export: Parquet files
+boto3==1.43.108                    # data warehouse export: OCI Object Storage (S3-compatible)
 
 # --- optional capabilities (safe to keep; remove only for a minimal image) ---
 anthropic==0.40.0                  # Ask PGR LLM fallback — inert unless ASSISTANT_LLM_ENABLED + key
