@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.storage import content_disposition
 from app.core.dependencies import require_permission
 from app.core.errors import PermissionError
-from app.db.session import get_session
+from app.db.session import get_read_session, get_session
 from app.modules.exports.schemas import (
     AdvisoryDecision,
     AdvisoryIngestRequest,
@@ -755,6 +755,29 @@ async def import_spec(
     out["fieldCount"] = len(version.fields or [])
     out["ruleCount"] = len(version.rules or [])
     return out
+
+
+@advisories_router.get("/spec-versions", summary="Every version of a specification pack and year")
+async def list_spec_versions(
+    packCode: str, academicYear: str,
+    session: AsyncSession = Depends(get_read_session),
+    _=Depends(require_permission("reporting.read")),
+) -> list[dict]:
+    from app.modules.exports import spec_release
+
+    return [spec_release.version_out(v) for v in await spec_release.list_versions(session, packCode, academicYear)]
+
+
+@advisories_router.post("/spec-versions/{version_id}/restore",
+                        summary="Make an earlier specification version active again (roll back a release)")
+async def restore_spec_version(
+    version_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    principal=Depends(require_permission(SHARED_SPEC_PERMISSION)),
+) -> dict:
+    from app.modules.exports import spec_release
+
+    return spec_release.version_out(await spec_release.restore(session, version_id, user_id=principal.user_id))
 
 
 @advisories_router.get("/{advisory_id}", summary="One advisory with its proposed changes")

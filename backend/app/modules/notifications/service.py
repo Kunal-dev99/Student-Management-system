@@ -25,6 +25,7 @@ logger = logging.getLogger("pgr.notify")
 SUBJECTS = {
     "milestone.decided": "Your progression milestone has a decision",
     "task.assigned": "You have a new task",
+    "spec.released": "A new statutory specification version is live",
     "task.escalated": "A task needs attention",
     "funding.expiring": "Funding arrangement expiring soon",
     "thesis.outcome": "Your thesis examination outcome",
