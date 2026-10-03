@@ -146,6 +146,7 @@ async def cmd_export(ident: str, out: str) -> None:
             if rows:
                 print(f"  {t:34s} {len(rows)}")
         # T4 — the institution's stored files travel with its rows.
+        from app.core.errors import NotFoundError
         from app.core.storage import get_object_store
         from app.core.tenant_context import tenant_scope
 
@@ -154,7 +155,7 @@ async def cmd_export(ident: str, out: str) -> None:
             for key in await _stored_keys(conn, tid):
                 try:
                     data = store.open(key)
-                except FileNotFoundError:
+                except NotFoundError:
                     files[key] = {"missing": True}   # recorded, not fatal
                     continue
                 dest = outdir / "files" / key
