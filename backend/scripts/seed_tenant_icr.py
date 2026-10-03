@@ -52,6 +52,10 @@ async def main() -> None:
         await s.commit()
         print(f"  + tenant '{ICR_NAME}' created ({tenant.id})")
 
+    # T3 — the new institution gets its reporting view schemas.
+    from app.db.tenant_views import rebuild_now
+    print(f"  + reporting views: {await rebuild_now(tenant.id)}")
+
 
 if __name__ == "__main__":
     asyncio.run(main())

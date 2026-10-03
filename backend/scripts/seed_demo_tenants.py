@@ -73,6 +73,10 @@ async def main() -> None:
 
             set_current_tenant(None)
 
+    # T3 — every institution gets its reporting view schemas.
+    from app.db.tenant_views import rebuild_now
+    print(f"  reporting views: {await rebuild_now()}")
+
 
 if __name__ == "__main__":
     asyncio.run(main())

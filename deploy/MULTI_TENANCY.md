@@ -92,8 +92,56 @@ database not yet at T1, these tests skip.
 institution was served another's students for up to 30 seconds. It is now keyed by tenant and
 date. In-process caches of tenant data must always include the tenant in the key.
 
+## Reporting views per institution (T3)
+
+BI tools and data-warehouse loaders get their own read-only "virtual database" per institution,
+and never touch the core tables.
+
+| Piece | What it is |
+|---|---|
+| `app/db/tenant_views.py` | The **catalogue**: the 24 published objects (student, person, lifecycle events including HESA leaver data, every dated history, module enrolments, funding, supervision, programmes, modules and their versions, units of assessment, departments). Views are generated from it, never hand-written. |
+| `tenant_<sub>` | Standard schema: no names, emails, dates of birth (year of birth only) or free-text notes. |
+| `tenant_<sub>_full` | The same objects with personal data. Granted only when the institution asks for it. |
+| `<sub>_reporting` / `<sub>_reporting_full` | Read-only login for each schema. It has a connection limit of 5, a 120 s statement timeout and no privileges on the core tables. |
+| `pgr_views` | NOLOGIN role that owns every view. It isn't the table owner, so RLS applies to it fail-closed and the owner's bypass does nothing for it. |
+
+**Two locks.** Every view has its institution's id written into it (`WHERE tenant_id = '<uuid>'`)
+and is a `security_barrier` view. Underneath, RLS still applies, and each login is pinned to its
+institution (`app.current_tenant` set on the role). If a login changes its own tenant setting,
+RLS lets the other institution's rows through, but the view's filter then returns nothing. If it
+turns on the bypass, nothing changes, because the views don't run as the table owner.
+
+**Kept in step automatically.** Every migration drops the view schemas first (Postgres won't
+alter a column a view uses) and rebuilds them from the catalogue at the end. The seed scripts
+that create institutions build theirs straight away. Institutions that are deactivated or
+removed lose their schemas on the next rebuild.
+
+**One-time setup (superuser).** Run `deploy/provision_reporting.sql` once. It creates
+`pgr_views` and lets the owner role create reporting logins and pin their institution. Until
+then, views are still built, owned by the table owner, and the fixed filter is the lock. No
+logins can be created in that state.
+
+**Day to day (no superuser):**
+
+```bash
+python -m scripts.tenant_reporting status
+python -m scripts.tenant_reporting create-login icr          # prints the password once
+python -m scripts.tenant_reporting create-login icr --full   # personal data, only on request
+python -m scripts.tenant_reporting rotate icr
+python -m scripts.tenant_reporting drop-login icr
+python -m scripts.tenant_reporting rebuild [icr]
+```
+
+Store the printed password in the institution's secret store straight away; the tool keeps no
+copy. Tests: `tests/unit/test_tenant_view_catalogue.py` (catalogue matches the models, no
+personal data or free text in standard views) and `tests/integration/test_tenant_views.py`. The
+second creates a real login, checks it can't reach core tables, other schemas or other
+institutions' rows, and drops it again. It skips until reporting is provisioned.
+
 ## Not yet done
 
 - Accepting a HESA advisory updates the shared specification for every institution
   (`statutory_spec_version` is global). Decide whether that stays a platform-admin action.
-- T3: tenant reporting views; T4: leak paths outside the database (files, exports, jobs).
+- Reporting logins can see the names of other institutions' schemas in the system catalogue
+  (not their contents). Hiding those names needs a separate database per institution.
+- T4: leak paths outside the database (files, exports, jobs); T5: pen-test preparation.

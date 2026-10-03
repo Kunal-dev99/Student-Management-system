@@ -1,4 +1,4 @@
-"""Run the T2 tenant-leak tests on a throwaway, fully migrated copy of the database.
+"""Run the tenant isolation tests (T2 leak tests, T3 views) on a throwaway, fully migrated copy of the database.
 
     python scripts/run_tenant_leak_tests.py            # copy of the DATABASE_URL database
     python scripts/run_tenant_leak_tests.py --keep     # leave the copy for inspection
@@ -28,6 +28,8 @@ TESTS = [
     "tests/integration/test_tenant_rls_isolation.py",
     "tests/integration/test_tenant_guard.py",
     "tests/integration/test_tenant_leak_api.py",
+    "tests/unit/test_tenant_view_catalogue.py",
+    "tests/integration/test_tenant_views.py",
 ]
 
 
