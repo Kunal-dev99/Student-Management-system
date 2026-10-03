@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.storage import content_disposition
 from app.core.config import get_settings
 from app.core.dependencies import get_current_principal
 from app.core.errors import NotFoundError, ValidationAppError
@@ -273,7 +274,7 @@ async def download_own_document(
     return Response(
         content=data,
         media_type=doc.content_type,
-        headers={"Content-Disposition": f'{disposition}; filename="{doc.filename}"'},
+        headers={"Content-Disposition": content_disposition(doc.filename, disposition)},
     )
 
 

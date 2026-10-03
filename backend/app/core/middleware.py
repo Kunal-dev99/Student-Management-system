@@ -52,5 +52,9 @@ class RequestContextMiddleware:
                     "path": scope.get("path"),
                     "status": status_code,
                     "durationMs": duration_ms,
+                    # T4 — who acted (set by get_current_principal); the tenant is added to
+                    # every line by the JSON formatter. The path never includes the query
+                    # string, which can carry names or emails.
+                    "userId": scope.get("state", {}).get("user_id"),
                 },
             )

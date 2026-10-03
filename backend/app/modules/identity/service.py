@@ -99,7 +99,7 @@ class IdentityService:
             if user.failed_login_count >= settings.max_failed_logins:
                 user.locked_until = now + timedelta(minutes=settings.lockout_minutes)
                 user.failed_login_count = 0
-                logger.warning("account locked after repeated failures: %s", user.email)
+                logger.warning("account locked after repeated failures: user %s", user.id)
             await self.repo.session.commit()
             raise AuthError("Invalid email or password")
         # Success: reset counters, stamp login, issue tokens.

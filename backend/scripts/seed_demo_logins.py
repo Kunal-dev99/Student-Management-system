@@ -48,6 +48,11 @@ ACCOUNTS = [
 
 
 async def main() -> None:
+    from app.core.config import get_settings
+
+    if get_settings().app_env == "production":
+        # T4 — demo logins have known passwords; never create them in production.
+        raise SystemExit("seed_demo_logins refuses to run with APP_ENV=production")
     async with system_scope(), SessionFactory() as s:
         roles = {r.name: r for r in (await s.execute(select(Role))).scalars().all()}
         missing = {n for _e, _p, rs, _h, _d in ACCOUNTS for n in rs} - set(roles)

@@ -8,7 +8,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, Enum, Index, String
+from sqlalchemy import DateTime, Enum, Index, JSON, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, TenantMixin, UUIDMixin
@@ -28,4 +28,4 @@ class IntegrationLog(UUIDMixin, TenantMixin, Base):
     detail: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
-    __table_args__ = (Index("uq_integration_inbound", "system", "source_id", unique=True),)
+    __table_args__ = (UniqueConstraint("tenant_id", "system", "source_id", name="uq_integration_log_tenant_system_source_id"),)  # T4: per institution

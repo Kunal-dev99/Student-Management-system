@@ -37,6 +37,7 @@ async def get_current_principal(
     host_tid = await resolve_tenant_id_for_host(request.headers.get("host", ""))
     effective = _reconcile_tenant(host_tid, principal.tenant_id)
     await _apply_tenant_context(session, effective)
+    request.state.user_id = str(principal.user_id)   # T4 — for the access log line
     return principal
 
 

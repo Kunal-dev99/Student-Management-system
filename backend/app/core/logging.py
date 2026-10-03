@@ -15,6 +15,13 @@ class JsonFormatter(logging.Formatter):
             "logger": record.name,
             "message": record.getMessage(),
         }
+        # T4 — every line names the institution it was written for (when one is acting), so
+        # logs can be attributed, filtered and handed over per institution.
+        from app.core.tenant_context import get_current_tenant
+
+        tenant = get_current_tenant()
+        if tenant is not None:
+            payload["tenantId"] = str(tenant)
         # Merge structured extras attached via logger.info(..., extra={...}).
         for key, value in getattr(record, "__dict__", {}).items():
             if key in _RESERVED or key.startswith("_"):

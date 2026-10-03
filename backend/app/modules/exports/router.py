@@ -11,6 +11,7 @@ from pydantic.alias_generators import to_camel
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.storage import content_disposition
 from app.core.dependencies import require_permission
 from app.db.session import get_session
 from app.modules.exports.schemas import (
@@ -60,7 +61,7 @@ async def download_export(
     content = job.content or ""
     return Response(
         content=content, media_type="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="{job.filename or "export.csv"}"'},
+        headers={"Content-Disposition": content_disposition(job.filename or "export.csv")},
     )
 
 
@@ -563,7 +564,7 @@ async def download_return_version(
     name = (f"{profile.code.lower()}_{v.academic_year.replace('/', '-')}_v{v.version_no}_"
             f"{v.known_at.strftime('%Y%m%d')}.csv")
     return Response(content=buf.getvalue(), media_type="text/csv",
-                    headers={"Content-Disposition": f'attachment; filename="{name}"'})
+                    headers={"Content-Disposition": content_disposition(name)})
 
 
 @profiles_router.get("/{profile_id}/retrospective-changes",

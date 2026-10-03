@@ -8,7 +8,7 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import JSON, Boolean, Date, DateTime, Enum, ForeignKey, String, Text, Uuid
+from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, JSON, String, Text, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TenantMixin, TimestampMixin, UUIDMixin
@@ -17,15 +17,17 @@ from app.modules.person.constants import PersonContactChannel, PersonRelationshi
 
 class Person(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "person"
+    # T4: business keys are unique per institution, not across all of them.
+    __table_args__ = (UniqueConstraint("tenant_id", "external_person_ref", name="uq_person_tenant_external_person_ref"), UniqueConstraint("tenant_id", "email", name="uq_person_tenant_email"),)
 
     external_person_ref: Mapped[str | None] = mapped_column(
-        String(100), unique=True, nullable=True
+        String(100), nullable=True
     )
     given_name: Mapped[str] = mapped_column(String(150))
     family_name: Mapped[str] = mapped_column(String(150))
     preferred_name: Mapped[str | None] = mapped_column(String(150), nullable=True)
     date_of_birth: Mapped[date | None] = mapped_column(Date, nullable=True)
-    email: Mapped[str | None] = mapped_column(String(320), unique=True, nullable=True, index=True)
+    email: Mapped[str | None] = mapped_column(String(320), nullable=True, index=True)
     nationality: Mapped[str | None] = mapped_column(String(100), nullable=True)
     # Effective dating, Phase 9 — the person's unit of assessment today (cache of PersonUoaHistory;
     # FK added by migration, kept as a plain column here to avoid a model-import cycle).

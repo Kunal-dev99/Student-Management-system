@@ -28,14 +28,18 @@ from app.modules.student_record.constants import (
 
 class Department(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "department"
+    # T4: business keys are unique per institution, not across all of them.
+    __table_args__ = (UniqueConstraint("tenant_id", "code", name="uq_department_tenant_code"),)
     name: Mapped[str] = mapped_column(String(200))
-    code: Mapped[str] = mapped_column(String(30), unique=True)
+    code: Mapped[str] = mapped_column(String(30))
 
 
 class ResearchArea(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "research_area"
+    # T4: business keys are unique per institution, not across all of them.
+    __table_args__ = (UniqueConstraint("tenant_id", "code", name="uq_research_area_tenant_code"),)
     name: Mapped[str] = mapped_column(String(200))
-    code: Mapped[str] = mapped_column(String(30), unique=True)
+    code: Mapped[str] = mapped_column(String(30))
     department_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("department.id"), nullable=True
     )
@@ -49,8 +53,10 @@ class ResearchArea(UUIDMixin, TenantMixin, TimestampMixin, Base):
 
 class Programme(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "programme"
+    # T4: business keys are unique per institution, not across all of them.
+    __table_args__ = (UniqueConstraint("tenant_id", "code", name="uq_programme_tenant_code"),)
     name: Mapped[str] = mapped_column(String(200))
-    code: Mapped[str] = mapped_column(String(30), unique=True)
+    code: Mapped[str] = mapped_column(String(30))
     department_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("department.id"), nullable=True
     )
@@ -201,9 +207,11 @@ class StudentProgrammePin(UUIDMixin, TenantMixin, TimestampMixin, Base):
 
 class Student(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "student"
+    # T4: business keys are unique per institution, not across all of them.
+    __table_args__ = (UniqueConstraint("tenant_id", "student_ref", name="uq_student_tenant_student_ref"),)
 
     person_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("person.id"), index=True)
-    student_ref: Mapped[str] = mapped_column(String(40), unique=True)
+    student_ref: Mapped[str] = mapped_column(String(40))
     programme_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("programme.id"), nullable=True)
     department_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("department.id"), nullable=True)
     research_area_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("research_area.id"), nullable=True)

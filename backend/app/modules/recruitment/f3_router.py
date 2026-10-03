@@ -8,7 +8,7 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, ConfigDict
 from pydantic.alias_generators import to_camel
 from sqlalchemy import select
@@ -135,13 +135,39 @@ async def request_reference(
 
 # ---- reference submission (unauthenticated, token-scoped)
 
+async def _act_as_reference_tenant(request: Request, session: AsyncSession, token: str) -> None:
+    """T4 — the referee has no account, and RLS is fail-closed, so the institution must be set
+    before the token is looked up. A tenant subdomain names it; on a bare host the token itself
+    does (it is a secret naming exactly one request), found with the owner's bypass — the same
+    rule as sign-in, so with the restricted app role referees use the institution's subdomain."""
+    import uuid as _uuid
+
+    from sqlalchemy import select
+
+    from app.core.tenant_context import set_current_tenant, system_scope
+    from app.core.tenant_resolver import resolve_tenant_id_for_host
+    from app.modules.recruitment.f3_service import _hash
+    from app.modules.recruitment.f3_models import ReferenceRequest
+
+    tid: _uuid.UUID | None = await resolve_tenant_id_for_host(request.headers.get("host", ""))
+    if tid is None:
+        async with system_scope():
+            tid = await session.scalar(select(ReferenceRequest.tenant_id)
+                                       .where(ReferenceRequest.token_hash == _hash(token)))
+        await session.rollback()   # end the bypass transaction; the next one runs as the tenant
+    if tid is not None:
+        set_current_tenant(tid)
+
+
 @public_ref_router.post("/{token}", response_model=ReferenceOut,
                         summary="Referee submits a reference via their token")
 async def submit_reference(
     token: str,
     body: ReferenceSubmitBody,
+    request: Request,
     session: AsyncSession = Depends(get_session),
 ) -> ReferenceOut:
+    await _act_as_reference_tenant(request, session, token)
     row = await ReferenceService(session).submit(
         token, text_body=body.response_text, document_ref=body.response_document_ref,
     )

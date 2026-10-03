@@ -17,7 +17,7 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Date, DateTime, Enum, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import Date, DateTime, Enum, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, TenantMixin, TimestampMixin, UUIDMixin
@@ -26,8 +26,10 @@ from app.modules.research.constants import AwardStatus, DemandStatus
 
 class ResearchAward(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "research_award"
+    # T4: business keys are unique per institution, not across all of them.
+    __table_args__ = (UniqueConstraint("tenant_id", "award_ref", name="uq_research_award_tenant_award_ref"),)
 
-    award_ref: Mapped[str] = mapped_column(String(100), unique=True, index=True)  # funder's number
+    award_ref: Mapped[str] = mapped_column(String(100), index=True)  # funder's number
     title: Mapped[str] = mapped_column(String(400))
     funder_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("funding_source.id"), nullable=True)
     principal_investigator_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("person.id"), nullable=True)

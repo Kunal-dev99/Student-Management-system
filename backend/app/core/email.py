@@ -20,7 +20,13 @@ logger = logging.getLogger("pgr.email")
 async def send_email(*, to: str, subject: str, body: str, html: str | None = None) -> None:
     settings = get_settings()
     if settings.email_backend == "console":
-        logger.info("EMAIL (console backend)\n  To: %s\n  Subject: %s\n  %s", to, subject, body)
+        if settings.app_env == "dev":
+            logger.info("EMAIL (console backend)\n  To: %s\n  Subject: %s\n  %s", to, subject, body)
+        else:
+            # T4 — outside dev, never write the body (it carries reset links and personal data)
+            # or the full address to the logs.
+            logger.info("email (console backend, not sent) to=*@%s subject=%s",
+                        to.rpartition("@")[2], subject)
         return
 
     msg = EmailMessage()
@@ -41,4 +47,4 @@ async def send_email(*, to: str, subject: str, body: str, html: str | None = Non
         password=settings.smtp_password,
         start_tls=settings.smtp_use_tls,
     )
-    logger.info("email sent to %s (subject=%s)", to, subject)
+    logger.info("email sent to *@%s (subject=%s)", to.rpartition("@")[2], subject)

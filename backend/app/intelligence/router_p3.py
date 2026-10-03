@@ -99,7 +99,8 @@ async def student_insights_stream(
                 })
         except Exception as e:  # noqa: BLE001
             log.exception("insights stream failed")
-            await trace.error(str(e))
+            # T4: the raw exception can carry SQL and data; it goes to the log only.
+            await trace.error("Something went wrong while preparing this. The error has been logged.")
 
     asyncio.create_task(run())
 

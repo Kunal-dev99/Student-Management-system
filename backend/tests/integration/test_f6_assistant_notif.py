@@ -120,12 +120,31 @@ async def test_cancel_a_proposed_intent(ctx):
     assert r.status_code == 200 and r.json()["state"] == "cancelled"
 
 
+async def _bounce(c, payload: dict, signature: str | None = None):
+    import json
+
+    from app.core.inbound import sign
+    from app.core.tenant_context import DEFAULT_TENANT_ID
+
+    raw = json.dumps(payload).encode()
+    sig = signature if signature is not None else sign(DEFAULT_TENANT_ID, raw)
+    return await c.post("/api/v1/notifications/webhooks/email/bounce", content=raw,
+                        headers={"X-Signature": sig, "Content-Type": "application/json"})
+
+
+@pytest.mark.asyncio
+async def test_unsigned_bounce_is_refused(ctx):
+    """T4 — a forged bounce must not be able to switch off someone's email."""
+    c, h = ctx
+    r = await _bounce(c, {"email": "cc@t.com", "bounceType": "hard", "reason": "x"}, signature="forged")
+    assert r.status_code == 401
+    assert (await c.get("/api/v1/notifications/preferences", headers=h)).json()["emailEnabled"] is True
+
+
 @pytest.mark.asyncio
 async def test_hard_bounce_deactivates_email_channel(ctx):
     c, h = ctx
-    r = await c.post("/api/v1/notifications/webhooks/email/bounce", json={
-        "email": "cc@t.com", "bounceType": "hard", "reason": "550 no such user",
-    })
+    r = await _bounce(c, {"email": "cc@t.com", "bounceType": "hard", "reason": "550 no such user"})
     assert r.status_code == 200
     assert r.json()["emailChannelDeactivated"] is True
 
@@ -137,9 +156,7 @@ async def test_hard_bounce_deactivates_email_channel(ctx):
 @pytest.mark.asyncio
 async def test_soft_bounce_records_but_does_not_deactivate(ctx):
     c, h = ctx
-    r = await c.post("/api/v1/notifications/webhooks/email/bounce", json={
-        "email": "cc@t.com", "bounceType": "soft", "reason": "mailbox full",
-    })
+    r = await _bounce(c, {"email": "cc@t.com", "bounceType": "soft", "reason": "mailbox full"})
     assert r.status_code == 200
     assert r.json()["emailChannelDeactivated"] is False
     # Email still on

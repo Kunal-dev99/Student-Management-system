@@ -20,7 +20,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import require_permission
-from app.core.errors import ConflictError, NotFoundError, ValidationAppError
+from app.core.errors import ConflictError, NotFoundError, PermissionError, ValidationAppError
 from app.core.principal import Principal
 from app.db.session import get_read_session, get_session
 from app.modules.identity.models import Role, User
@@ -92,13 +92,21 @@ async def list_roles(
     return out
 
 
-async def _resolve_roles(session: AsyncSession, names: list[str]) -> list[Role]:
+async def _resolve_roles(session: AsyncSession, names: list[str], principal: Principal) -> list[Role]:
     if not names:
         raise ValidationAppError("A user needs at least one role")
     roles = (await session.execute(select(Role).where(Role.name.in_(names)))).scalars().unique().all()
     missing = set(names) - {r.name for r in roles}
     if missing:
         raise ValidationAppError(f"Unknown role(s): {', '.join(sorted(missing))}")
+    # T4: a role carrying a vendor-only permission (e.g. the `dev` console) can only be handed
+    # out by someone who holds that permission, not by every institution administrator.
+    from app.modules.identity.constants import EXCLUSIVE_PERMISSIONS, ROLES
+
+    for name in names:
+        exclusive = EXCLUSIVE_PERMISSIONS & set(ROLES.get(name, []))
+        if exclusive and not all(principal.has_permission(p) for p in exclusive):
+            raise PermissionError(f"Only a holder of {', '.join(sorted(exclusive))} can grant {name}")
     return list(roles)
 
 
@@ -107,7 +115,7 @@ async def _resolve_roles(session: AsyncSession, names: list[str]) -> list[Role]:
 async def create_user(
     body: UserCreate,
     session: AsyncSession = Depends(get_session),
-    _=Depends(require_permission("admin.configure")),
+    principal: Principal = Depends(require_permission("admin.configure")),
 ) -> dict:
     email = body.email.strip().lower()
     dup = (await session.execute(
@@ -116,10 +124,16 @@ async def create_user(
     if dup is not None:
         raise ConflictError(f"A user with email {email} already exists")
 
-    roles = await _resolve_roles(session, body.roleNames)
+    roles = await _resolve_roles(session, body.roleNames, principal)
     user = User(email=email, password_hash=None, is_active=True, person_id=body.personId)
     session.add(user)
-    await session.flush()
+    try:
+        await session.flush()
+    except IntegrityError as exc:
+        # Sign-in emails are unique across every institution, so the check above (which only
+        # sees this institution) can miss a clash. Same answer either way, never a 500.
+        await session.rollback()
+        raise ConflictError(f"A user with email {email} already exists") from exc
     await session.refresh(user, ["roles"])
     user.roles = roles
     await session.commit()
@@ -147,7 +161,7 @@ async def update_user(
         raise ConflictError("You cannot deactivate your own account")
 
     if body.roleNames is not None:
-        roles = await _resolve_roles(session, body.roleNames)
+        roles = await _resolve_roles(session, body.roleNames, principal)
         if acting_on_self:
             still_admin = False
             for r in roles:

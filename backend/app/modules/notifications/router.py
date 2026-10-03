@@ -1,7 +1,7 @@
 """Notification preferences + unread count for the notification centre (arch §10.4)."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -70,11 +70,25 @@ async def update_preferences(
 
 @router.post("/webhooks/email/bounce", summary="F6 — provider bounce hook (deactivates on hard bounce)")
 async def email_bounce(
-    body: BouncePayload,
+    request: Request,
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     """Public webhook — the provider (SES / Mailgun / SMTP relay) posts here. Hard bounces
-    deactivate email for the affected user; soft bounces are recorded but leave email on."""
+    deactivate email for the affected user; soft bounces are recorded but leave email on.
+
+    T4: signed like every other webhook (``X-Signature``, the institution's webhook secret), so
+    nobody can switch off a user's email by posting a fake bounce, and scoped to the institution
+    named by the host before anything is read or written."""
+    import json
+
+    from app.core.errors import ValidationAppError
+    from app.core.inbound import verified_inbound
+
+    _, raw = await verified_inbound(request)
+    try:
+        body = BouncePayload.model_validate(json.loads(raw or b"{}"))
+    except ValueError as exc:
+        raise ValidationAppError("Invalid bounce payload") from exc
     from datetime import datetime, timezone
     from sqlalchemy import select
     from app.modules.identity.models import User

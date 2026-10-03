@@ -331,7 +331,42 @@ async def _seed_workflow(session):
     await session.flush()
 
 
+async def _seed_production_admin(session) -> str | None:
+    """T4 — production never gets a known password. A first administrator is created only when
+    SEED_ADMIN_EMAIL and SEED_ADMIN_PASSWORD are set, only if missing, and never reset after."""
+    import os
+
+    email = (os.environ.get("SEED_ADMIN_EMAIL") or "").strip().lower()
+    password = os.environ.get("SEED_ADMIN_PASSWORD") or ""
+    if not email or not password:
+        return None
+    if len(password) < 14:
+        raise SystemExit("SEED_ADMIN_PASSWORD must be at least 14 characters")
+    if (await session.execute(select(User).where(User.email == email))).scalar_one_or_none():
+        return None
+    roles = (await session.execute(select(Role).where(Role.name == "Institution Administrator"))).scalars().all()
+    user = User(email=email, password_hash=hash_password(password), is_active=True)
+    session.add(user)
+    await session.flush()
+    await session.refresh(user, ["roles"])
+    user.roles = list(roles)
+    return email
+
+
 async def main() -> None:
+    from app.core.config import get_settings
+
+    if get_settings().app_env == "production":
+        # T4 — reference data only: roles and permissions. No demo people, students or
+        # accounts with known passwords (the deployment guide runs this on every deploy).
+        async with system_scope(), SessionFactory() as session:
+            await _seed_rbac(session)
+            admin = await _seed_production_admin(session)
+            await session.commit()
+        print("Seeded roles and permissions (production: no demo data or demo accounts)."
+              + (f" Created administrator {admin}." if admin else ""))
+        return
+
     async with system_scope(), SessionFactory() as session:
         await _seed_rbac(session)
         await _seed_admin(session)
