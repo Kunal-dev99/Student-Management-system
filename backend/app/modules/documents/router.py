@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, File, Form, UploadFile
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.storage import content_disposition
 from app.core.config import get_settings
 from app.core.dependencies import get_current_principal, require_permission
 from app.core.errors import PermissionError, ValidationAppError
@@ -101,7 +102,7 @@ async def download_document(
     return Response(
         content=data,
         media_type=doc.content_type,
-        headers={"Content-Disposition": f'attachment; filename="{doc.filename}"'},
+        headers={"Content-Disposition": content_disposition(doc.filename)},
     )
 
 

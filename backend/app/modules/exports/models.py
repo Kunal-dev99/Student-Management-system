@@ -20,6 +20,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     Uuid,
 )
 from sqlalchemy.orm import Mapped, mapped_column
@@ -73,7 +74,7 @@ class ReportProfile(UUIDMixin, TenantMixin, TimestampMixin, Base):
     # compatibility of the migration lineage; the API surface talks about "suppressions".
     muted_rule_keys: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
 
-    __table_args__ = (Index("uq_report_profile_version", "code", "academic_year", "version", unique=True),)
+    __table_args__ = (UniqueConstraint("tenant_id", "code", "academic_year", "version", name="uq_report_profile_tenant_code_academic_year_version"),)  # T4: per institution
 
 
 class ReportFieldMapping(UUIDMixin, TenantMixin, TimestampMixin, Base):

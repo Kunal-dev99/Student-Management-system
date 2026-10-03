@@ -16,8 +16,10 @@ from app.db.base import Base, TenantMixin, TimestampMixin, UUIDMixin
 
 class InstitutionSetting(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "institution_setting"
+    # T4: business keys are unique per institution, not across all of them.
+    __table_args__ = (UniqueConstraint("tenant_id", "key", name="uq_institution_setting_tenant_key"),)
 
-    key: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    key: Mapped[str] = mapped_column(String(100), index=True)
     value: Mapped[dict] = mapped_column(JSON)  # {"value": <typed value>} — JSON so bool/int/float/str all round-trip
     updated_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
@@ -34,7 +36,7 @@ class ValueSetOverride(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """
     __tablename__ = "value_set_override"
     __table_args__ = (
-        UniqueConstraint("enum_name", "value_code", name="uq_value_set_override_enum_code"),
+        UniqueConstraint("tenant_id", "enum_name", "value_code", name="uq_value_set_override_tenant_enum_name_value_code"),  # T4: per institution
     )
 
     enum_name: Mapped[str] = mapped_column(String(100), index=True)

@@ -63,7 +63,9 @@ async def execute(
     row = (await session.execute(
         select(AssistantWriteIntent).where(AssistantWriteIntent.id == intent_id)
     )).scalar_one_or_none()
-    if row is None:
+    # T4: an intent belongs to the user who proposed it; nobody else can run or cancel it
+    # (same answer as a missing one, so its existence isn't confirmed).
+    if row is None or row.proposed_by_user_id != principal.user_id:
         raise NotFoundError("Intent not found")
     if row.state != "proposed":
         raise ConflictError(f"Intent already {row.state}")
@@ -92,12 +94,14 @@ async def execute(
 async def cancel(
     intent_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
-    _=Depends(require_permission("assistant.use")),
+    principal=Depends(require_permission("assistant.use")),
 ) -> dict:
     row = (await session.execute(
         select(AssistantWriteIntent).where(AssistantWriteIntent.id == intent_id)
     )).scalar_one_or_none()
-    if row is None:
+    # T4: an intent belongs to the user who proposed it; nobody else can run or cancel it
+    # (same answer as a missing one, so its existence isn't confirmed).
+    if row is None or row.proposed_by_user_id != principal.user_id:
         raise NotFoundError("Intent not found")
     if row.state != "proposed":
         raise ConflictError(f"Intent already {row.state}")

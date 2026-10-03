@@ -170,7 +170,8 @@ async def stream(
                 })
         except Exception as exc:  # noqa: BLE001
             log.exception("meeting-brief stream failed")
-            await trace.error(str(exc))
+            # T4: the raw exception can carry SQL and data; it goes to the log only.
+            await trace.error("Something went wrong while preparing this. The error has been logged.")
 
     task = asyncio.create_task(run())
 

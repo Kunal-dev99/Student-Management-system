@@ -1,8 +1,6 @@
 """Integration HTTP endpoints (arch §10, §11.5)."""
 from __future__ import annotations
 
-import hashlib
-import hmac
 import json
 import uuid
 
@@ -10,9 +8,8 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import get_settings
 from app.core.dependencies import require_permission
-from app.core.errors import AuthError, ValidationAppError
+from app.core.errors import ValidationAppError
 from app.db.session import get_session
 from app.modules.integration.repository import IntegrationRepository
 from app.modules.integration.schemas import (
@@ -159,13 +156,11 @@ async def upsert_target(
 
 @router.post("/webhooks/{system}", summary="Signed inbound webhook (idempotent by source id)")
 async def webhook(system: str, request: Request, session: AsyncSession = Depends(get_session)) -> dict:
-    raw = await request.body()
-    # Verify HMAC-SHA256 signature over the raw body (arch §17: webhooks verify signatures).
-    secret = get_settings().app_secret_key.encode()
-    expected = hmac.new(secret, raw, hashlib.sha256).hexdigest()
-    provided = request.headers.get("X-Signature", "")
-    if not hmac.compare_digest(expected, provided):
-        raise AuthError("Invalid webhook signature")
+    # Verify HMAC-SHA256 over the raw body (arch §17) with the institution's own secret. T4: the
+    # institution comes from the host, and is set before the first query (RLS is fail-closed).
+    from app.core.inbound import verified_inbound
+
+    _, raw = await verified_inbound(request)
     try:
         body = json.loads(raw or b"{}")
     except json.JSONDecodeError as exc:

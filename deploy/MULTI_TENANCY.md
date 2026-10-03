@@ -138,10 +138,39 @@ personal data or free text in standard views) and `tests/integration/test_tenant
 second creates a real login, checks it can't reach core tables, other schemas or other
 institutions' rows, and drops it again. It skips until reporting is provisioned.
 
+## Outside the database (T4) — checklist with evidence
+
+| Area | Status | Evidence |
+|---|---|---|
+| **Stored files** | Keys are `<tenant id>/<random>.<ext>`. Opening or deleting a key that belongs to another institution reads as "not found" (a second lock behind the RLS-scoped `document` row every download loads first). Path containment is a real check. Pre-T4 keys still read. | `app/core/storage.py`; `tests/unit/test_storage_tenant.py` |
+| **Downloads** | There are no public or unauthenticated links. All 5 download endpoints need a token and load a tenant-scoped row first. Filenames are sanitised in the header. Signed, expiring links come with the S3 backend (not built). | `app/core/storage.py:content_disposition`; documents, portal, certificate and export routers |
+| **Exports** | Statutory and report CSVs live in tenant-scoped rows. `tenant_ops export` now includes the institution's files (hashed in the manifest). `tenant_ops delete` removes them after the rows commit. `export_taught.py` exports the default institution only. | `scripts/tenant_ops.py`; `app/db/export_taught.py` |
+| **Background jobs** | The worker runs every job once per active (activated, not deactivated) institution. "Run now" endpoints use the caller's institution. AI streams inherit the request's institution. | `app/worker.py`; T2 connection-reuse test |
+| **Requests with no user token** | Partner webhooks and email-bounce hooks take their institution from the host (bare host = default) before any query. Each is signed with that institution's own secret, so institution A's secret can't post into B. Bounces now need a signature (a forged one could switch off someone's email). Referee submissions take the institution from the host, or else from the secret token. | `app/core/inbound.py`; `python -m scripts.tenant_ops webhook-secret <tenant>`; `test_f6_assistant_notif.py::test_unsigned_bounce_is_refused` |
+| **Unique keys** | Business keys (programme and department codes, student numbers, setting keys, external refs and 11 more) are unique **per institution**, not across all of them. Before, two institutions couldn't share a code, only one could ever save a given setting, and the clash revealed another institution's data. Only `users.email` and the referee-token hash stay global, on purpose. | migration `t4_tenant_uniques`; `test_tenant_tables_declared.py::test_business_keys_are_unique_per_institution` |
+| **Caches** | The only data cache (weekly review queue) is keyed by institution. The others hold no tenant data (static registries) or are keyed by user. | `app/modules/reviews/service.py`; T2 sweep |
+| **Assistant and AI** | Every AI artefact (pattern-lab models, predictions, telemetry, write intents) lives in tenant-scoped tables. Prompts are built from the request's RLS-scoped session. A write intent can only be run or cancelled by the user who proposed it. | `app/modules/assistant/f6_router.py` |
+| **Logs** | Every JSON line carries `tenantId` when an institution is acting, and request lines carry `userId`. The access line logs the path without the query string. Outside dev, the console email backend never writes bodies (reset links) or full addresses. Account lockouts log the user id, not the email. AI streams send a generic error to the browser; the detail goes to the log only. | `app/core/logging.py`, `middleware.py`, `email.py` |
+| **Support access** | No impersonation or shared cross-institution login exists. In production the seed loads roles and permissions only, never demo accounts with known passwords. A first admin comes from `SEED_ADMIN_EMAIL`/`SEED_ADMIN_PASSWORD` and is never reset. `seed_demo_logins` refuses to run in production. Only a holder of `platform.configure` can grant the `dev` role. | `app/db/seed.py`; `scripts/seed_demo_logins.py`; `admin_router.py` |
+
+**Deployment notes:** run uvicorn with `--no-access-log`; its own access log includes query
+strings and has no tenant. Ours replaces it. Give each institution's partners its webhook secret,
+and have them post to the institution's subdomain.
+
 ## Not yet done
 
-- Accepting a HESA advisory updates the shared specification for every institution
-  (`statutory_spec_version` is global). Decide whether that stays a platform-admin action.
+- **Decisions for the product owner:**
+  - External AI models receive student data (names, meeting notes) whenever an API key is
+    configured. Only the composer has a per-institution switch. Decide whether every AI
+    feature needs a per-institution opt-in.
+  - Accepting a HESA advisory updates the specification every institution shares. Decide
+    whether that becomes a platform-admin action.
+  - `GET /tenants` (the login-page selector) is public and lists every institution.
+  - Sign-in emails are unique across institutions, so creating a user whose email exists at
+    another institution answers "already exists".
 - Reporting logins can see the names of other institutions' schemas in the system catalogue
   (not their contents). Hiding those names needs a separate database per institution.
-- T4: leak paths outside the database (files, exports, jobs); T5: pen-test preparation.
+- Password-reset and notification links use the global `APP_BASE_URL`, not the institution's
+  subdomain. With the restricted app role, reset confirmation needs the subdomain link.
+- The SLA sweep isn't scheduled (only the manual endpoint runs it). This isn't a tenancy issue.
+- T5: independent security test preparation.

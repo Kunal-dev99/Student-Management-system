@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict
 from pydantic.alias_generators import to_camel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.storage import content_disposition
 from app.core.dependencies import require_permission
 from app.core.errors import NotFoundError
 from app.core.storage import get_object_store
@@ -123,5 +124,5 @@ async def download_certificate(
     payload = get_object_store().open(d.storage_key)
     return Response(
         content=payload, media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{d.filename}"'},
+        headers={"Content-Disposition": content_disposition(d.filename)},
     )

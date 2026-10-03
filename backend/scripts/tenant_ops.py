@@ -6,6 +6,7 @@ This CLI does the three routine per-tenant jobs safely:
     python -m scripts.tenant_ops stats   <tenant>
     python -m scripts.tenant_ops export  <tenant> [--out DIR]
     python -m scripts.tenant_ops delete  <tenant> [--yes]
+    python -m scripts.tenant_ops webhook-secret <tenant>
 
 <tenant> is a tenant subdomain (e.g. "icr") or its uuid.
 
@@ -102,6 +103,12 @@ async def _resolve_tenant(conn, ident: str) -> tuple[uuid.UUID, str]:
     return row[0], row[1]
 
 
+async def _stored_keys(conn, tid: uuid.UUID) -> list[str]:
+    """Object-store keys of this tenant's files (the `document` rows are the index)."""
+    rows = await conn.execute(text("SELECT storage_key FROM document WHERE tenant_id=:i").bindparams(i=tid))
+    return [r[0] for r in rows if r[0]]
+
+
 async def cmd_stats(ident: str) -> None:
     async with engine.connect() as conn:
         tid, sub = await _resolve_tenant(conn, ident)
@@ -138,6 +145,25 @@ async def cmd_export(ident: str, out: str) -> None:
             manifest["tables"][t] = {"rows": len(rows), "file": f.name, "sha256": digest}
             if rows:
                 print(f"  {t:34s} {len(rows)}")
+        # T4 — the institution's stored files travel with its rows.
+        from app.core.storage import get_object_store
+        from app.core.tenant_context import tenant_scope
+
+        store, files = get_object_store(), {}
+        with tenant_scope(tid):
+            for key in await _stored_keys(conn, tid):
+                try:
+                    data = store.open(key)
+                except FileNotFoundError:
+                    files[key] = {"missing": True}   # recorded, not fatal
+                    continue
+                dest = outdir / "files" / key
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_bytes(data)
+                files[key] = {"bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+        manifest["files"] = files
+        if files:
+            print(f"  {'stored files':34s} {len(files)}")
         (outdir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
         total = sum(v["rows"] for v in manifest["tables"].values())
         print(f"\nExported {total} rows across {len(tables)} tables -> {outdir}")
@@ -150,6 +176,7 @@ async def cmd_delete(ident: str, commit: bool) -> None:
         await conn.execute(text("SELECT set_config('app.current_tenant', :i, false)").bindparams(i=str(tid)))
         tables = await _tenant_tables(conn)
         order = await _delete_order(conn, tables)
+        keys = await _stored_keys(conn, tid)
 
         # Global rows that reference this tenant's users must be cleared first.
         user_ids_sql = "SELECT id FROM users WHERE tenant_id=:i"
@@ -177,17 +204,40 @@ async def cmd_delete(ident: str, commit: bool) -> None:
                 total += res.rowcount
         print(f"\n  {'TOTAL tenant rows':34s} {total}")
 
+        print(f"  {'stored files':34s} {len(keys)}")
         if not commit:
             await conn.rollback()
             print("\nDRY RUN — rolled back. Re-run with --yes to delete for real.")
         else:
             print("\nCommitted. Tenant data removed.")
+    if commit and keys:
+        # T4 — only once the rows are committed as gone: a rolled-back delete must keep its files.
+        from app.core.storage import get_object_store
+        from app.core.tenant_context import tenant_scope
+
+        store = get_object_store()
+        with tenant_scope(tid):
+            for key in keys:
+                store.delete(key)
+        print(f"Removed {len(keys)} stored files.")
+
+
+async def cmd_webhook_secret(ident: str) -> None:
+    """T4 — the institution's own webhook signing secret, for its partners (finance, HR, email
+    provider). Each institution's differs, so one partner can't post into another institution."""
+    from app.core.inbound import webhook_secret
+
+    async with engine.connect() as conn:
+        tid, sub = await _resolve_tenant(conn, ident)
+    print(f"Webhook secret for {sub} ({tid}). Partners sign the raw body with HMAC-SHA256 and send it")
+    print(f"as X-Signature, posting to https://{sub}.<base-domain>/api/v1/... (shown once; keep it secret):")
+    print(f"  {webhook_secret(tid).decode()}")
 
 
 def main() -> None:
     p = argparse.ArgumentParser(description="Per-tenant stats / export / delete on the shared DB.")
     sub = p.add_subparsers(dest="cmd", required=True)
-    for name in ("stats", "export", "delete"):
+    for name in ("stats", "export", "delete", "webhook-secret"):
         sp = sub.add_parser(name)
         sp.add_argument("tenant", help="tenant subdomain or uuid")
         if name == "export":
@@ -201,6 +251,8 @@ def main() -> None:
         asyncio.run(cmd_export(a.tenant, a.out))
     elif a.cmd == "delete":
         asyncio.run(cmd_delete(a.tenant, commit=a.yes))
+    elif a.cmd == "webhook-secret":
+        asyncio.run(cmd_webhook_secret(a.tenant))
 
 
 if __name__ == "__main__":

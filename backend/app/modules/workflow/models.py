@@ -10,7 +10,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, Enum, ForeignKey, Index, Integer, String
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Index, Integer, JSON, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, TenantMixin, TimestampMixin, UUIDMixin
@@ -29,7 +29,7 @@ class WorkflowDefinition(UUIDMixin, TenantMixin, TimestampMixin, Base):
     transitions: Mapped[list] = mapped_column(JSON)             # [{"from","on","to","action"?}]
     active: Mapped[bool] = mapped_column(Boolean, default=False)
 
-    __table_args__ = (Index("uq_workflow_def_key_version", "key", "version", unique=True),)
+    __table_args__ = (UniqueConstraint("tenant_id", "key", "version", name="uq_workflow_definition_tenant_key_version"),)  # T4: per institution
 
 
 class WorkflowInstance(UUIDMixin, TenantMixin, TimestampMixin, Base):

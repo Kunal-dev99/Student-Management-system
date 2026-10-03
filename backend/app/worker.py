@@ -31,7 +31,9 @@ async def _tenant_ids() -> list:
     from app.modules.tenant.models import Tenant
 
     async with SessionFactory() as session:
-        rows = await session.execute(select(Tenant.id).where(Tenant.deactivated_at.is_(None)))
+        # Same rule as host resolution: activated and not deactivated.
+        rows = await session.execute(select(Tenant.id).where(
+            Tenant.activated_at.is_not(None), Tenant.deactivated_at.is_(None)))
         return [r[0] for r in rows.all()]
 
 

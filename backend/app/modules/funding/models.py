@@ -11,7 +11,7 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Date, DateTime, Enum, ForeignKey, Index, Integer, Numeric, String, Text
+from sqlalchemy import Date, DateTime, Enum, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, TenantMixin, TimestampMixin, UUIDMixin
@@ -33,15 +33,19 @@ class FundingSource(UUIDMixin, TenantMixin, TimestampMixin, Base):
 class CostCentre(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """A finance ledger bucket — institution-configurable via Settings → List of values."""
     __tablename__ = "cost_centre"
+    # T4: business keys are unique per institution, not across all of them.
+    __table_args__ = (UniqueConstraint("tenant_id", "code", name="uq_cost_centre_tenant_code"),)
     name: Mapped[str] = mapped_column(String(200))
-    code: Mapped[str] = mapped_column(String(50), unique=True)
+    code: Mapped[str] = mapped_column(String(50))
 
 
 class ProjectCode(UUIDMixin, TenantMixin, TimestampMixin, Base):
     """An internal project/grant code — institution-configurable via Settings → List of values."""
     __tablename__ = "project_code"
+    # T4: business keys are unique per institution, not across all of them.
+    __table_args__ = (UniqueConstraint("tenant_id", "code", name="uq_project_code_tenant_code"),)
     name: Mapped[str] = mapped_column(String(200))
-    code: Mapped[str] = mapped_column(String(50), unique=True)
+    code: Mapped[str] = mapped_column(String(50))
 
 
 class FundingArrangement(UUIDMixin, TenantMixin, TimestampMixin, Base):

@@ -27,6 +27,8 @@ class InterventionPlan(UUIDMixin, TenantMixin, TimestampMixin, Base):
     and stores their references on the linked action rows.
     """
     __tablename__ = "intervention_plan"
+    # T4: business keys are unique per institution, not across all of them.
+    __table_args__ = (UniqueConstraint("tenant_id", "idempotency_key", name="uq_intervention_plan_tenant_idempotency_key"),)
 
     case_ref: Mapped[str] = mapped_column(String(120), index=True)
     """Free-form reference: e.g. "student:<uuid>" or "cohort:no_supervision_90d"."""
@@ -46,7 +48,7 @@ class InterventionPlan(UUIDMixin, TenantMixin, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(20), default="draft", index=True)
     """draft | confirmed | cancelled | expired."""
 
-    idempotency_key: Mapped[str] = mapped_column(String(200), unique=True)
+    idempotency_key: Mapped[str] = mapped_column(String(200))
     """case_ref + source_signal_hash — refuses duplicate draft creation."""
 
     created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
