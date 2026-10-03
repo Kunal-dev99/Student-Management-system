@@ -23,7 +23,8 @@ from sqlalchemy import select
 from app.db import registry as _registry  # noqa: F401
 
 from app.core.database import SessionFactory
-from app.core.tenant_context import system_scope  # T1: cross-tenant tool
+# Acts as the default deployment, so lookups by code or email never see another institution.
+from app.core.tenant_context import DEFAULT_TENANT_ID, tenant_scope
 from app.modules.person.models import Person
 from app.modules.student_record.constants import ProgrammeType, StudentStatus, StudyMode
 from app.modules.student_record.models import Programme, Student
@@ -164,7 +165,7 @@ async def _enrol(session, student_id, module_id, e: dict) -> None:
 
 async def main() -> None:
     doc = json.loads(DATA.read_text(encoding="utf-8"))
-    async with system_scope(), SessionFactory() as session:
+    async with tenant_scope(DEFAULT_TENANT_ID), SessionFactory() as session:
         summary = []
         for p in doc["programmes"]:
             prog = await _programme(session, p)

@@ -47,7 +47,8 @@ from reportlab.pdfgen import canvas
 from sqlalchemy import func, select
 
 from app.core.database import SessionFactory
-from app.core.tenant_context import system_scope  # T1: cross-tenant tool
+# Acts as the default deployment, so lookups by code or email never see another institution.
+from app.core.tenant_context import DEFAULT_TENANT_ID, tenant_scope
 from app.core.storage import get_object_store
 # Register every mapper before use — cross-module foreign keys (funding to
 # research_award, project to research_opportunity) only resolve once every model
@@ -172,7 +173,7 @@ def _save_document(store, owner_type: str, owner_id, doc_type: str, filename: st
 
 
 async def main() -> None:
-    async with system_scope(), SessionFactory() as s:
+    async with tenant_scope(DEFAULT_TENANT_ID), SessionFactory() as s:
         progs = {p.code: p for p in (await s.execute(
             select(Programme).where(Programme.code.in_(["ICR-PHD", "ICR-MDRES"]))
         )).scalars().all()}

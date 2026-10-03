@@ -39,10 +39,17 @@ class SchedulerService:
             "milestonesGenerated": await self._generate_due_milestones(),
             "fundingExpiringFlagged": await self._flag_funding_expiring(),
             "overdueTasksEscalated": await self._escalate_overdue_tasks(),
+            "slaBreachesMarked": await self._mark_sla_breaches(),
             "notificationsDelivered": await self._deliver_notifications(),
             "viewsRefreshed": "n/a (dashboards computed on demand)",
             "ranAt": datetime.now(timezone.utc).isoformat(),
         }
+
+    async def _mark_sla_breaches(self) -> int:
+        """Flag open tasks whose SLA has run out (it used to run only from the manual endpoint)."""
+        from app.modules.workflow.f5_sla import SlaService
+
+        return (await SlaService(self.session).sweep())["newlyBreached"]
 
     async def _apply_due_status_changes(self) -> int:
         from app.modules.student_record.fact_history import refresh_all_due

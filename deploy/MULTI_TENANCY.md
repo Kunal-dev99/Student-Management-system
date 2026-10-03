@@ -153,6 +153,13 @@ institutions' rows, and drops it again. It skips until reporting is provisioned.
 | **Logs** | Every JSON line carries `tenantId` when an institution is acting, and request lines carry `userId`. The access line logs the path without the query string. Outside dev, the console email backend never writes bodies (reset links) or full addresses. Account lockouts log the user id, not the email. AI streams send a generic error to the browser; the detail goes to the log only. | `app/core/logging.py`, `middleware.py`, `email.py` |
 | **Support access** | No impersonation or shared cross-institution login exists. In production the seed loads roles and permissions only, never demo accounts with known passwords. A first admin comes from `SEED_ADMIN_EMAIL`/`SEED_ADMIN_PASSWORD` and is never reset. `seed_demo_logins` refuses to run in production. Only a holder of `platform.configure` can grant the `dev` role. | `app/db/seed.py`; `scripts/seed_demo_logins.py`; `admin_router.py` |
 
+**Also hardened:**
+- The server-wide partner URL (`INTEGRATION_<SYSTEM>_URL`) only stands in for the default
+  deployment. Any other institution sends nothing until it sets its own target.
+- Seed and demo scripts act as the default institution, so lookups by code or email never see
+  another institution. Only genuinely cross-institution tools use the bypass.
+- Read-only Alembic commands (`current`, `history`) no longer rebuild the reporting views.
+
 **Deployment notes:** run uvicorn with `--no-access-log`; its own access log includes query
 strings and has no tenant. Ours replaces it. Give each institution's partners its webhook secret,
 and have them post to the institution's subdomain.
@@ -172,5 +179,4 @@ and have them post to the institution's subdomain.
   (not their contents). Hiding those names needs a separate database per institution.
 - Password-reset and notification links use the global `APP_BASE_URL`, not the institution's
   subdomain. With the restricted app role, reset confirmation needs the subdomain link.
-- The SLA sweep isn't scheduled (only the manual endpoint runs it). This isn't a tenancy issue.
 - T5: independent security test preparation.

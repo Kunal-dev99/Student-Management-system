@@ -59,6 +59,14 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 
+def _changes_schema() -> bool:
+    """True for commands that can change the schema (upgrade/downgrade, or a programmatic call).
+    Read-only commands such as `alembic current` or `history` leave the reporting views alone."""
+    cmd = getattr(getattr(config, "cmd_opts", None), "cmd", None)
+    name = getattr(cmd[0], "__name__", "") if cmd else ""
+    return name in ("", "upgrade", "downgrade")
+
+
 def do_run_migrations(connection) -> None:
     context.configure(connection=connection, target_metadata=target_metadata, compare_type=True)
     with context.begin_transaction():
@@ -66,15 +74,17 @@ def do_run_migrations(connection) -> None:
             # T1 — RLS is fail-closed; migrations (backfills, checks) work across every tenant,
             # so this connection opts in to the owner's explicit bypass for its whole session.
             connection.exec_driver_sql("SELECT set_config('app.bypass_tenant', 'on', false)")
+        if connection.dialect.name == "postgresql" and _changes_schema():
             # T3 — the per-institution reporting views depend on core columns, and Postgres won't
             # alter a column a view uses. Drop them first, rebuild them from the catalogue after.
             from app.db import tenant_views
             tenant_views.drop_all(connection)
-        context.run_migrations()
-        if connection.dialect.name == "postgresql":
+            context.run_migrations()
             built = tenant_views.rebuild(connection)
             if built:
                 print(f"tenant views rebuilt: {built}")
+        else:
+            context.run_migrations()
 
 
 async def run_migrations_online() -> None:

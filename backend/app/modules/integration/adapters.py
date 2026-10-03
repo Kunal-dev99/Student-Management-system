@@ -72,10 +72,13 @@ async def resolve_target(session, system: str) -> tuple[str | None, bool, str]:
 
     Resolution order: institution_setting override → environment variable → None.
     `source` is one of "db", "env", "none" so the UI can show where the value comes from.
+
+    The environment variable is one URL for the whole server, so it only stands in for the
+    default deployment (a single-institution install). Every other institution must set its own
+    target; otherwise nothing is sent, rather than its messages going to someone else's partner.
     """
     from sqlalchemy import select
 
-    from app.core.config import get_settings
     from app.modules.settings.models import InstitutionSetting
 
     url_key = f"integration.{system}.url"
@@ -91,10 +94,20 @@ async def resolve_target(session, system: str) -> tuple[str | None, bool, str]:
         active = bool((by_key.get(active_key) or {"value": True}).get("value", True))
         return (url, active, "db" if url else "none")
 
-    env_url = getattr(get_settings(), f"integration_{system}_url", None)
+    env_url = _env_url(system)
     if env_url:
         return (env_url, True, "env")
     return (None, False, "none")
+
+
+def _env_url(system: str) -> str | None:
+    """The server-wide partner URL, for the default deployment only (see resolve_target)."""
+    from app.core.config import get_settings
+    from app.core.tenant_context import DEFAULT_TENANT_ID, get_current_tenant
+
+    if get_current_tenant() not in (None, DEFAULT_TENANT_ID):
+        return None
+    return getattr(get_settings(), f"integration_{system}_url", None)
 
 
 async def deliver(adapter: Adapter, event_type: str, payload: dict, session=None) -> dict:
@@ -105,17 +118,16 @@ async def deliver(adapter: Adapter, event_type: str, payload: dict, session=None
     so the outbox can retry and eventually dead-letter it. With no URL configured, delivery is a
     translate-only stand-in that always succeeds — the message is still recorded so nothing is lost.
     """
-    from app.core.config import get_settings
-
     message = adapter.translate(event_type, payload)
 
-    # Prefer DB-configured target (set from the Integration Hub UI); fall back to env.
+    # Prefer DB-configured target (set from the Integration Hub UI); fall back to env, which
+    # only the default deployment may use.
     url: str | None = None
     active = True
     if session is not None:
         url, active, _ = await resolve_target(session, adapter.system)
-    if url is None:
-        url = getattr(get_settings(), f"integration_{adapter.system}_url", None)
+    else:
+        url = _env_url(adapter.system)
 
     if not url or not active:
         return message
