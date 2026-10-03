@@ -559,11 +559,29 @@ async def list_return_versions(
     return [eng.version_out(v) for v in await eng.versions(profile_id)]
 
 
+@profiles_router.get("/{profile_id}/workbook",
+                     summary="Excel workbook of the return for review (return, every issue, field sources)")
+async def return_workbook(
+    profile_id: uuid.UUID,
+    as_at: date | None = Query(None, alias="asAt", description="Values as in force on this date"),
+    known_at: datetime | None = Query(None, alias="knownAt", description="Data as recorded at this moment"),
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("reporting.read")),
+) -> Response:
+    from app.core.xlsx import XLSX_MEDIA_TYPE
+    from app.modules.exports import workbook
+
+    data, name = await workbook.live(session, profile_id, **_snapshot(as_at, known_at))
+    return Response(content=data, media_type=XLSX_MEDIA_TYPE,
+                    headers={"Content-Disposition": content_disposition(name)})
+
+
 @profiles_router.get("/{profile_id}/versions/{version_id}/download",
-                     summary="Download a frozen return exactly as it was signed off (CSV)")
+                     summary="Download a frozen return exactly as it was signed off (CSV, or format=xlsx)")
 async def download_return_version(
     profile_id: uuid.UUID,
     version_id: uuid.UUID,
+    format: str = Query("csv", pattern="^(csv|xlsx)$"),
     session: AsyncSession = Depends(get_session),
     _=Depends(require_permission("reporting.read")),
 ) -> Response:
@@ -573,6 +591,13 @@ async def download_return_version(
     eng = _engine(session)
     v = await eng.get_version(profile_id, version_id)
     profile = await eng.get_profile(profile_id)
+    if format == "xlsx":
+        from app.core.xlsx import XLSX_MEDIA_TYPE
+        from app.modules.exports import workbook
+
+        data, name = workbook.frozen(profile, v)
+        return Response(content=data, media_type=XLSX_MEDIA_TYPE,
+                        headers={"Content-Disposition": content_disposition(name)})
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(v.header)

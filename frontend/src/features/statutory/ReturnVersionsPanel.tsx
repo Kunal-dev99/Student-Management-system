@@ -77,6 +77,17 @@ export function ReturnVersionsPanel({ profileId, code }: { profileId: string; co
                 }}>
                   <Download className="h-3.5 w-3.5 mr-1" /> CSV
                 </Button>
+                <Button size="sm" variant="ghost" title="Excel workbook for review (the CSV is the file to submit)"
+                  onClick={async () => {
+                    try {
+                      await downloadFile(`/report-profiles/${profileId}/versions/${v.id}/download?format=xlsx`,
+                        `${code.toLowerCase()}_${v.academicYear.replace('/', '-')}_v${v.versionNo}.xlsx`)
+                    } catch (e) {
+                      toast({ title: 'Download failed', description: (e as Error).message, variant: 'destructive' })
+                    }
+                  }}>
+                  <Download className="h-3.5 w-3.5 mr-1" /> Excel
+                </Button>
               </TableCell>
             </TableRow>
           ))}

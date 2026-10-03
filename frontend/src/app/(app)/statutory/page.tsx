@@ -36,6 +36,7 @@ import { ErrorState } from '@/components/common/ErrorState'
 import { ApiError } from '@/shared/api/client'
 import { useAuth } from '@/shared/auth/AuthContext'
 import { downloadExport } from '@/features/exports/api'
+import { downloadFile } from '@/shared/api/client'
 import { AdvisoriesPanel } from '@/features/statutory/AdvisoriesPanel'
 import { RetrospectiveChangesPanel } from '@/features/statutory/RetrospectiveChangesPanel'
 import { ReturnVersionsPanel } from '@/features/statutory/ReturnVersionsPanel'
@@ -2623,6 +2624,16 @@ export default function StatutoryPage() {
                         </Badge>
                         <Button size="sm" variant="outline" onClick={() => downloadExport(generated.job)}>
                           <Download className="h-4 w-4 mr-1" /> Download
+                        </Button>
+                        <Button size="sm" variant="ghost"
+                          title="The return, every validation issue and how each field is sourced, as an Excel workbook for review. Submit the CSV, not the workbook."
+                          onClick={async () => {
+                            try {
+                              await downloadFile(`/report-profiles/${generated.profile.id}/workbook`,
+                                (generated.job.filename ?? 'return.csv').replace(/\.csv$/, '_review.xlsx'))
+                            } catch (e) { err(toast, 'Could not build the workbook')(e) }
+                          }}>
+                          <FileSpreadsheet className="h-4 w-4 mr-1" /> Review workbook (Excel)
                         </Button>
                       </div>
                       <ValidationReportView
