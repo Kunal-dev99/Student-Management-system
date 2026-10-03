@@ -913,6 +913,7 @@ class StatutoryEngine:
 
     async def generate(
         self, profile_id: uuid.UUID, *, as_at: date | None = None, known_at: datetime | None = None,
+        issue_limit: int | None = 500,
     ) -> dict:
         """Produce the extract and its validation report, entirely from configuration.
         ``as_at`` / ``known_at`` take a snapshot (see ``build_records``)."""
@@ -1023,7 +1024,7 @@ class StatutoryEngine:
         # mandatory fields this is tens of thousands of rows. Counts, valid and ruleAnalysis are
         # computed from the FULL list above, so nothing is lost; the UI shows the first slice and
         # (via issuesTruncated/issueCount) offers to download the rest.
-        MAX_ISSUES = 500
+        MAX_ISSUES = issue_limit if issue_limit is not None else len(issues)
         errors = sum(1 for i in issues if i["severity"] == "error")
         warnings = sum(1 for i in issues if i["severity"] == "warning")
         return {
