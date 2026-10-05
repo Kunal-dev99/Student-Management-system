@@ -576,12 +576,28 @@ async def return_workbook(
                     headers={"Content-Disposition": content_disposition(name)})
 
 
+@profiles_router.get("/{profile_id}/xml",
+                     summary="The return as XML: one Record per row, one element per field code")
+async def return_xml(
+    profile_id: uuid.UUID,
+    as_at: date | None = Query(None, alias="asAt", description="Values as in force on this date"),
+    known_at: datetime | None = Query(None, alias="knownAt", description="Data as recorded at this moment"),
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("reporting.read")),
+) -> Response:
+    from app.modules.exports import xml_return
+
+    data, name = await xml_return.live(session, profile_id, **_snapshot(as_at, known_at))
+    return Response(content=data, media_type=xml_return.XML_MEDIA_TYPE,
+                    headers={"Content-Disposition": content_disposition(name)})
+
+
 @profiles_router.get("/{profile_id}/versions/{version_id}/download",
-                     summary="Download a frozen return exactly as it was signed off (CSV, or format=xlsx)")
+                     summary="Download a frozen return exactly as it was signed off (CSV, or format=xlsx / xml)")
 async def download_return_version(
     profile_id: uuid.UUID,
     version_id: uuid.UUID,
-    format: str = Query("csv", pattern="^(csv|xlsx)$"),
+    format: str = Query("csv", pattern="^(csv|xlsx|xml)$"),
     session: AsyncSession = Depends(get_session),
     _=Depends(require_permission("reporting.read")),
 ) -> Response:
@@ -597,6 +613,12 @@ async def download_return_version(
 
         data, name = workbook.frozen(profile, v)
         return Response(content=data, media_type=XLSX_MEDIA_TYPE,
+                        headers={"Content-Disposition": content_disposition(name)})
+    if format == "xml":
+        from app.modules.exports import xml_return
+
+        data, name = xml_return.frozen(profile, v)
+        return Response(content=data, media_type=xml_return.XML_MEDIA_TYPE,
                         headers={"Content-Disposition": content_disposition(name)})
     buf = io.StringIO()
     w = csv.writer(buf)

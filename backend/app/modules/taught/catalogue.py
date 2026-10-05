@@ -32,9 +32,10 @@ VERSIONED_FIELDS = ("title", "credits", "level", "term", "fte_pct")
 DEFAULT_FULL_TIME_CREDITS = 180
 
 
-def effective_fte(version, full_time_credits: int | None) -> Decimal | None:
+def effective_fte(version, full_time_credits: int | None, *, exact: bool = False) -> Decimal | None:
     """Phase 8c — a module's FTE % (share of a full-time year): the version's own value if set,
-    else credits ÷ the programme's full-time credits. None when neither is known."""
+    else credits ÷ the programme's full-time credits. None when neither is known. ``exact`` skips
+    rounding to 2 places, for totals (4 × 16.67 would otherwise add up to 66.68)."""
     if version is None:
         return None
     if version.fte_pct is not None:
@@ -42,7 +43,8 @@ def effective_fte(version, full_time_credits: int | None) -> Decimal | None:
     if not version.credits:
         return None
     total = full_time_credits or DEFAULT_FULL_TIME_CREDITS
-    return (Decimal(version.credits) * 100 / Decimal(total)).quantize(Decimal("0.01"))
+    value = Decimal(version.credits) * 100 / Decimal(total)
+    return value if exact else value.quantize(Decimal("0.01"))
 
 
 def academic_year_start(on: date | None = None) -> date:

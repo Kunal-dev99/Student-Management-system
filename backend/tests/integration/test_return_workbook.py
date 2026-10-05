@@ -158,3 +158,57 @@ async def test_frozen_version_downloads_as_excel(ctx):
     assert csv_r.headers["content-type"].startswith("text/csv")            # CSV stays the default
     assert (await c.get(f"/api/v1/report-profiles/{pid}/versions/{vid}/download", headers=h,
                         params={"format": "pdf"})).status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_xml_matches_the_csv(ctx):
+    """Demo 2 item 1.10 — XML: a Record per row, an element per field code, CSV text kept exactly."""
+    c, h, pid, sm = ctx
+    gen = (await c.post(f"/api/v1/report-profiles/{pid}/generate", headers=h)).json()
+    csv_rows = list(csv.reader(io.StringIO(
+        (await c.get(f"/api/v1/exports/{gen['job']['id']}/download", headers=h)).text)))
+    r = await c.get(f"/api/v1/report-profiles/{pid}/xml", headers=h)
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"].startswith("application/xml") and ".xml" in r.headers["content-disposition"]
+    root = ET.fromstring(r.content)
+    assert root.tag == "Return" and root.get("academicYear") == "2026/27" and root.get("records") == "2"
+    assert root.find("Validation").get("errors") == "1"
+    records = [{el.tag: el.text for el in rec} for rec in root.findall("Record")]
+    expected = [{k: v for k, v in zip(csv_rows[0], row) if v != ""} for row in csv_rows[1:]]
+    assert records == expected
+    assert {"OWNSTU": "0042", "NATION": "British"} in records          # leading zero kept
+    assert {"OWNSTU": "PGR-B"} in records                               # empty field left out
+
+    import uuid
+    from datetime import datetime, timezone
+
+    from app.modules.exports.models import ReportReturnVersion
+    async with sm() as s:
+        v = ReportReturnVersion(profile_id=uuid.UUID(pid), version_no=1, academic_year="2026/27", as_at=None,
+                                known_at=datetime(2027, 8, 1, tzinfo=timezone.utc), reason="sign_off",
+                                created_at=datetime.now(timezone.utc), header=["OWNSTU", "NATION"],
+                                rows=[["0042", "British"]], row_count=1, errors=0, warnings=0)
+        s.add(v)
+        await s.commit()
+        vid = v.id
+    frozen = await c.get(f"/api/v1/report-profiles/{pid}/versions/{vid}/download", headers=h,
+                         params={"format": "xml"})
+    froot = ET.fromstring(frozen.content)
+    assert froot.get("version") == "v1" and [[e.text for e in r] for r in froot.findall("Record")] == [["0042", "British"]]
+
+
+def test_xml_element_names_are_always_valid():
+    from app.modules.exports.xml_return import element_name
+
+    assert element_name("OWNSTU") == "OWNSTU"
+    assert element_name("1ST FIELD") == "F_1ST_FIELD"
+    assert element_name("xmlThing").startswith("F_")
+
+
+@pytest.mark.asyncio
+async def test_snapshot_date_must_fall_inside_the_reporting_year(ctx):
+    c, h, pid, _ = ctx
+    outside = await c.get(f"/api/v1/report-profiles/{pid}/validate", headers=h, params={"asAt": "2027-10-05"})
+    assert outside.status_code in (409, 422) and "outside the 2026/27 reporting year" in outside.text
+    inside = await c.get(f"/api/v1/report-profiles/{pid}/validate", headers=h, params={"asAt": "2027-07-31"})
+    assert inside.status_code == 200, inside.text

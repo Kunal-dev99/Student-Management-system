@@ -88,6 +88,17 @@ export function ReturnVersionsPanel({ profileId, code }: { profileId: string; co
                   }}>
                   <Download className="h-3.5 w-3.5 mr-1" /> Excel
                 </Button>
+                <Button size="sm" variant="ghost" title="The same return as XML (one Record per row)"
+                  onClick={async () => {
+                    try {
+                      await downloadFile(`/report-profiles/${profileId}/versions/${v.id}/download?format=xml`,
+                        `${code.toLowerCase()}_${v.academicYear.replace('/', '-')}_v${v.versionNo}.xml`)
+                    } catch (e) {
+                      toast({ title: 'Download failed', description: (e as Error).message, variant: 'destructive' })
+                    }
+                  }}>
+                  <Download className="h-3.5 w-3.5 mr-1" /> XML
+                </Button>
               </TableCell>
             </TableRow>
           ))}

@@ -5,8 +5,9 @@ checked in two places from one rule: the statutory return's validation and the a
 intensity change.
 
 Fixture: a full-time (100%) MSc student on a 180-credit programme taking two 60-credit modules
-(33.33% each) plus a withdrawn one that doesn't count, so their module FTE is 66.66%; and a PhD
-student with one module.
+(33.33% each) plus a withdrawn one that doesn't count, so their module FTE is 66.67% (all three
+modules are core, so the programme leaves no credits for a dissertation); and a PhD student with
+one module.
 """
 from __future__ import annotations
 
@@ -49,6 +50,9 @@ def test_rule():
     assert fte_check.academic_year_of(date(2027, 7, 31)) == "2026/27"
     assert fte_check.module_fte_total([{"ftePct": 50, "status": "enrolled"},
                                        {"ftePct": 50, "status": "withdrawn"}]) == 50
+    # The dissertation is worth the credits the core modules don't cover.
+    assert float(round(fte_check.dissertation_fte(180, 120), 2)) == 33.33
+    assert fte_check.dissertation_fte(180, 180) == 0 and fte_check.dissertation_fte(None, 60) == 0
 
 
 @pytest_asyncio.fixture
@@ -122,7 +126,7 @@ async def test_return_warns_by_default_and_skips_research(ctx):
     c, h, pid, _, _ = ctx
     issues, v = await _fte_issues(c, h, pid)
     assert [(i["studentRef"], i["severity"]) for i in issues] == [("MSC-1", "warning")]
-    assert "66.66%" in issues[0]["message"]          # the withdrawn module isn't counted
+    assert "66.67%" in issues[0]["message"]          # the withdrawn module isn't counted
     assert v["valid"] is True                        # a warning doesn't block sign-off
 
 
@@ -139,7 +143,7 @@ async def test_off_tolerance_and_research_opt_in(ctx):
     c, h, pid, _, sm = ctx
     await _set(sm, fte_check_tolerance=40.0, fte_check_research=True)
     issues, _ = await _fte_issues(c, h, pid)
-    # MSc is within 40 points (66.66 + 40 >= 100); the PhD (33.33%) is now checked and isn't.
+    # MSc is within 40 points (66.67 + 40 >= 100); the PhD (33.33%) is now checked and isn't.
     assert [i["studentRef"] for i in issues] == ["PHD-1"]
     async with sm() as s:
         s.add(InstitutionSetting(key="statutory.fte_check", value={"value": "off"}))
@@ -160,7 +164,7 @@ async def test_intensity_approval_warns_or_refuses(ctx):
     sid = ids["MSC-1"]
     ok = await c.post(f"/api/v1/lifecycle-events/{await _intensity(c, h, sid, 90)}/approve", headers=h, json={})
     assert ok.status_code == 200, ok.text
-    assert "66.66%" in ok.json()["warnings"][0]      # warn: approved, flagged
+    assert "66.67%" in ok.json()["warnings"][0]      # warn: approved, flagged
 
     await _set(sm, fte_check="stop")
     eid = await _intensity(c, h, sid, 80)
@@ -177,3 +181,33 @@ async def test_intensity_approval_warns_or_refuses(ctx):
     phd = await c.post(f"/api/v1/lifecycle-events/{await _intensity(c, h, ids['PHD-1'], 90)}/approve",
                        headers=h, json={})
     assert phd.status_code == 200, phd.text
+
+
+@pytest.mark.asyncio
+async def test_dissertation_counts_toward_module_fte(ctx):
+    """MSc of 180 credits with two 60-credit core modules: the dissertation is the other 60 (33.33%).
+    A student on both modules is at 100% with it; one missing a core module is still flagged."""
+    c, h, pid, _, sm = ctx
+    async with sm() as s:
+        prog = Programme(name="MSc Oncology", code="MSC-ONC", programme_type=ProgrammeType.taught,
+                         taught_total_credits=180)
+        s.add(prog); await s.flush()
+        a, b = (TaughtModule(programme_id=prog.id, code=f"ONC{i}", title=f"Oncology {i}", credits=60)
+                for i in (1, 2))
+        s.add_all([a, b]); await s.flush()
+        for ref, mods in (("ONC-FULL", [a, b]), ("ONC-SHORT", [a])):
+            person = Person(given_name="S", family_name=ref); s.add(person); await s.flush()
+            st = Student(person_id=person.id, student_ref=ref, programme_id=prog.id,
+                         start_date=date(2026, 9, 1), expected_end_date=date(2027, 9, 30),
+                         study_mode=StudyMode.full_time, status=StudentStatus.active)
+            s.add(st); await s.flush()
+            for m in mods:
+                s.add(ModuleEnrolment(student_id=st.id, module_id=m.id, academic_year=YEAR))
+        await s.commit()
+        short_id = st.id
+    issues, _ = await _fte_issues(c, h, pid)
+    flagged = {i["studentRef"]: i["message"] for i in issues}
+    assert "ONC-FULL" not in flagged                      # 33.33 + 33.33 dissertation + 33.33 = 100
+    assert "66.67%" in flagged["ONC-SHORT"]               # one module + the dissertation
+    async with sm() as s:
+        assert await fte_check.module_fte_for_year(s, short_id, YEAR) == 66.67

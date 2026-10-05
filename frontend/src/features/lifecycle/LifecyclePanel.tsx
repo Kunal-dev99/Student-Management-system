@@ -424,15 +424,15 @@ function RequestDialog({ studentId, student }: { studentId: string; student?: St
 
           {(eventType === 'withdrawal' || eventType === 'termination') && (
             <div className="space-y-1.5">
-              <Label>Reason for leaving (HESA)</Label>
+              <Label>Why the student is leaving the programme</Label>
               <Select value={leaverReason || '__none'} onValueChange={(v) => setLeaverReason(v === '__none' ? '' : v)}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="__none">Not recorded yet</SelectItem>
+                  <SelectItem value="__none">Not known yet</SelectItem>
                   {LEAVER_REASONS.map((r) => <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>)}
                 </SelectContent>
               </Select>
-              <p className="text-helper">Reported as the Leaver reason on the HESA return.</p>
+              <p className="text-helper">The student's whole registration ends, not a single module. This is reported to HESA as the reason their engagement ended (RSNENGEND).</p>
             </div>
           )}
 

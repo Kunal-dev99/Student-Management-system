@@ -8,7 +8,7 @@
 
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  CheckCircle2, CopyPlus, Download, FileSpreadsheet, FileUp, ListChecks, Lock, Unlock, Play, Plus, Pencil, Trash2, ShieldAlert, ShieldCheck, Sparkles,
+  CheckCircle2, CopyPlus, Download, FileCode, FileSpreadsheet, FileUp, ListChecks, Lock, Unlock, Play, Plus, Pencil, Trash2, ShieldAlert, ShieldCheck, Sparkles,
   type LucideIcon,
 } from 'lucide-react'
 import { PageHeader } from '@/components/common/PageHeader'
@@ -768,6 +768,12 @@ function DeleteFieldButton({ profileId, field }: { profileId: string; field: Fie
       <Trash2 className="h-4 w-4" />
     </Button>
   )
+}
+
+/** The HESA reporting year '2025/26' -> 1 Aug 2025 .. 31 Jul 2026 (a snapshot must fall inside it). */
+function yearBounds(academicYear: string): { from: string; to: string } | null {
+  const y = Number((academicYear || '').slice(0, 4))
+  return Number.isFinite(y) && y > 1900 ? { from: `${y}-08-01`, to: `${y + 1}-07-31` } : null
 }
 
 function CloneDialog({ profile }: { profile: ReportProfile }) {
@@ -2069,6 +2075,8 @@ function SignOffCard({ profileId, canSignOff }: { profileId: string; canSignOff:
                     <div className="space-y-1.5">
                       <Label htmlFor="s-asat">Snapshot as at (optional)</Label>
                       <Input id="s-asat" type="date" className="w-44" value={asAt}
+                        min={yearBounds(r.profile.academicYear)?.from}
+                        max={yearBounds(r.profile.academicYear)?.to}
                         onChange={(e) => setAsAt(e.target.value)} />
                       <p className="text-helper">
                         Values are taken as they stood on this date (blank = the end of the reporting
@@ -2634,6 +2642,16 @@ export default function StatutoryPage() {
                             } catch (e) { err(toast, 'Could not build the workbook')(e) }
                           }}>
                           <FileSpreadsheet className="h-4 w-4 mr-1" /> Review workbook (Excel)
+                        </Button>
+                        <Button size="sm" variant="ghost"
+                          title="The same return as XML: one Record per row, one element per field code."
+                          onClick={async () => {
+                            try {
+                              await downloadFile(`/report-profiles/${generated.profile.id}/xml`,
+                                (generated.job.filename ?? 'return.csv').replace(/\.csv$/, '.xml'))
+                            } catch (e) { err(toast, 'Could not build the XML')(e) }
+                          }}>
+                          <FileCode className="h-4 w-4 mr-1" /> XML
                         </Button>
                       </div>
                       <ValidationReportView

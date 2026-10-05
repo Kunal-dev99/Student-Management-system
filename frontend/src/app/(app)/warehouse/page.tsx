@@ -19,6 +19,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -281,13 +282,53 @@ function SecretDialog({ consumer, onClose }: { consumer: Consumer | null; onClos
             </div>
           ))}
           <p className="text-xs text-muted-foreground">
-            Token: <span className="font-mono">POST /api/v1/warehouse/oauth/token</span> with
-            grant_type=client_credentials. Data: <span className="font-mono">GET /api/v1/warehouse/data/objects</span>.
+            Token: <span className="font-mono break-all">POST {typeof window === 'undefined' ? '' : window.location.origin}/api/v1/warehouse/oauth/token</span> with
+            grant_type=client_credentials. Data: <span className="font-mono break-all">GET {typeof window === 'undefined' ? '' : window.location.origin}/api/v1/warehouse/data/objects</span>.
+            All the URLs are on the API consumers tab.
           </p>
         </div>
         <DialogFooter><Button onClick={onClose}>I&apos;ve stored it</Button></DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+/** The pull API's full URLs, so the receiving system knows where to call (not only the paths). The
+ *  frontend proxies /api/v1 to the backend, so this origin is the one outside systems use too. */
+function EndpointUrls() {
+  const { toast } = useToast()
+  const origin = typeof window === 'undefined' ? '' : window.location.origin
+  const rows: [string, string, string][] = [
+    ['Get a token', 'POST', `${origin}/api/v1/warehouse/oauth/token`],
+    ['List objects', 'GET', `${origin}/api/v1/warehouse/data/objects`],
+    ['Read an object', 'GET', `${origin}/api/v1/warehouse/data/objects/{name}?changedSince=`],
+    ['Deleted ids', 'GET', `${origin}/api/v1/warehouse/data/objects/{name}/deleted?changedSince=`],
+  ]
+  const copy = async (text: string) => {
+    try { await navigator.clipboard.writeText(text); toast({ title: 'Copied' }) } catch { /* clipboard blocked */ }
+  }
+  return (
+    <div className="rounded-md border border-border p-3 mb-4 space-y-2">
+      <p className="text-sm font-medium">Connection URLs</p>
+      <p className="text-helper">
+        Give these to the receiving system with a consumer&apos;s client ID and secret. It gets a token
+        (OAuth 2.0 client credentials, 15 minutes), then reads with <span className="font-mono">Authorization: Bearer &lt;token&gt;</span>.
+      </p>
+      <Table>
+        <TableBody>
+          {rows.map(([label, method, url]) => (
+            <TableRow key={label}>
+              <TableCell className="text-xs whitespace-nowrap">{label}</TableCell>
+              <TableCell><Badge variant="secondary" className="font-mono text-[10px]">{method}</Badge></TableCell>
+              <TableCell className="font-mono text-xs break-all">{url}</TableCell>
+              <TableCell className="text-right">
+                <Button size="sm" variant="ghost" onClick={() => copy(url)}>Copy</Button>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
   )
 }
 
@@ -353,6 +394,7 @@ function Consumers() {
     <PageSection icon={KeyRound} title="API consumers"
       description="Systems that pull through the API with OAuth client credentials. Each reads only this institution's data, and only the objects you allow."
       actions={<Button size="sm" onClick={() => setCreating(true)}><Plus className="h-4 w-4 mr-1" /> New consumer</Button>}>
+      <EndpointUrls />
       {isLoading && <Skeleton className="h-16 w-full" />}
       {data && data.length === 0 && <p className="text-helper">No consumers yet.</p>}
       {data && data.length > 0 && (
@@ -421,10 +463,19 @@ export default function WarehousePage() {
     <>
       <PageHeader title="Data warehouse"
         description="Publish this institution's data to its warehouse on a schedule, or let approved systems pull it through the API. Only this institution's data is ever included." />
-      <div className="px-6 pb-6 space-y-4">
-        <Publications canManage={canManage} />
-        {canManage && <Consumers />}
-        <Catalogue />
+      <div className="px-6 pb-6">
+        {/* Sub-tabs like the other admin pages, instead of three stacked sections to scroll. API
+            consumers is hidden without admin.configure (an empty tab invites dead clicks). */}
+        <Tabs defaultValue="publications">
+          <TabsList>
+            <TabsTrigger value="publications"><Database className="h-4 w-4 mr-1.5" /> Publications</TabsTrigger>
+            {canManage && <TabsTrigger value="consumers"><KeyRound className="h-4 w-4 mr-1.5" /> API consumers</TabsTrigger>}
+            <TabsTrigger value="catalogue"><Library className="h-4 w-4 mr-1.5" /> What is published</TabsTrigger>
+          </TabsList>
+          <TabsContent value="publications" className="mt-4"><Publications canManage={canManage} /></TabsContent>
+          {canManage && <TabsContent value="consumers" className="mt-4"><Consumers /></TabsContent>}
+          <TabsContent value="catalogue" className="mt-4"><Catalogue /></TabsContent>
+        </Tabs>
       </div>
     </>
   )

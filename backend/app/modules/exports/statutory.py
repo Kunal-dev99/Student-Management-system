@@ -611,6 +611,13 @@ class StatutoryEngine:
         from app.modules.taught.module_history import ModuleStatusHistoryService, year_window
 
         taught_modules = {m.id: m for m in (await self.session.execute(select(TaughtModule))).scalars().all()}
+        # Demo 2 item 1.5 — a taught programme's dissertation counts toward the FTE check: the
+        # credits its core modules don't cover.
+        from app.modules.student_record import fte_check
+        core_credits: dict = {}
+        for m in taught_modules.values():
+            if m.is_core:
+                core_credits[m.programme_id] = core_credits.get(m.programme_id, 0) + (m.credits or 0)
         from app.modules.taught.catalogue import effective_fte
         from app.modules.taught.models import ModuleRun, ModuleVersion
         # Phase 8b — the programme version each student is on, per programme (CMA).
@@ -748,7 +755,7 @@ class StatutoryEngine:
             arrangements = funding.get(student.id, [])
             relationships = supervision.get(student.id, [])
 
-            def _period_fields(lo: date, hi: date, as_of: date) -> dict:
+            def _period_fields(lo: date, hi: date, as_of: date, prog=None) -> dict:
                 """What was in force for the record's period ``[lo, hi)`` (Phase 4): the funding
                 and supervision as at ``as_of``, plus child lists for HESA entity exports
                 (status changes, modules, funding periods, supervisors). Child-list dates are
@@ -787,6 +794,7 @@ class StatutoryEngine:
                 primary = next((r for r in sups_now if _ev(r.role) == "primary"), None)
 
                 modules = []
+                studied_fte = []   # exact FTE of the modules not withdrawn, for the FTE check
                 for e in enrolments.get(student.id, []):
                     e_from = e.start_date
                     e_to = e.end_date + one_day if e.end_date else None
@@ -804,6 +812,10 @@ class StatutoryEngine:
                     # Phase 8c — module FTE (HESA): the version's own, or derived from credits.
                     home = programmes.get(m.programme_id) if m else None
                     fte = effective_fte(v if v is not None else m, home.taught_total_credits if home else None)
+                    exact_fte = effective_fte(v if v is not None else m,
+                                              home.taught_total_credits if home else None, exact=True)
+                    if exact_fte is not None and _ev(st) != "withdrawn":
+                        studied_fte.append(exact_fte)
                     modules.append({
                         "code": m.code if m else None,
                         "title": v.title if v else (m.title if m else None),
@@ -839,10 +851,19 @@ class StatutoryEngine:
                     # student's FTE doesn't exceed the sum of their module FTEs (Demo 2 item 1.5).
                     "engagement": engagement,
                     "leaver": leaver,
-                    "taught": {"moduleFteTotal": (
-                        round(sum(x["ftePct"] for x in modules if x["ftePct"] is not None), 2)
-                        if any(x["ftePct"] is not None for x in modules) else None
-                    )},
+                    "taught": {
+                        "moduleFteTotal": (
+                            round(sum(x["ftePct"] for x in modules if x["ftePct"] is not None), 2)
+                            if any(x["ftePct"] is not None for x in modules) else None
+                        ),
+                        # Modules not withdrawn + the dissertation's share, unrounded until the end.
+                        "fteCheckTotal": (
+                            float(round(sum(studied_fte, Decimal(0)) + (fte_check.dissertation_fte(
+                                prog.taught_total_credits, core_credits.get(prog.id, 0))
+                                if prog is not None and _ev(prog.programme_type) == "taught" else 0), 2))
+                            if studied_fte else None
+                        ),
+                    },
                     "fundingPeriods": [
                         {"type": _ev(a.funding_type),
                          "source": sources[a.funding_source_id].name if a.funding_source_id in sources else None,
@@ -882,7 +903,7 @@ class StatutoryEngine:
                     "research": common_research,
                     "award": common_award,
                     "custom": _custom_for(student.id, as_of),
-                    **_period_fields(ws, we, as_of),
+                    **_period_fields(ws, we, as_of, prog),
                 })
                 continue
 
@@ -907,7 +928,7 @@ class StatutoryEngine:
                     "research": common_research,
                     "award": common_award,
                     "custom": _custom_for(student.id, _slice_as_of(start_d, shown_end)),
-                    **_period_fields(start_d, end_x, _slice_as_of(start_d, shown_end)),
+                    **_period_fields(start_d, end_x, _slice_as_of(start_d, shown_end), prog),
                 })
         return records
 
@@ -920,6 +941,17 @@ class StatutoryEngine:
         """Produce the extract and its validation report, entirely from configuration.
         ``as_at`` / ``known_at`` take a snapshot (see ``build_records``)."""
         profile = await self.get_profile(profile_id)
+        if as_at is not None:
+            # A snapshot date must fall inside the return's own reporting year: a 2025/26 return
+            # "as at" October 2026 would report next year's facts (e.g. a later interruption).
+            from app.modules.taught.module_history import year_window
+
+            window = year_window(profile.academic_year)
+            if window and not (window[0] <= as_at <= window[1]):
+                raise WorkflowError(
+                    f"The snapshot date {as_at.isoformat()} is outside the {profile.academic_year} "
+                    f"reporting year ({window[0].isoformat()} to {window[1].isoformat()})"
+                )
         mappings = await self._mappings(profile_id)
         if not mappings:
             raise WorkflowError("This profile has no field mappings, so it cannot produce a return")
@@ -1003,7 +1035,7 @@ class StatutoryEngine:
             # statutory.fte_check off / warn / stop).
             if fte_policy.severity:
                 msg = fte_check.evaluate(
-                    record["student"].get("intensityPct"), fte_check.module_fte_total(record.get("modules") or []),
+                    record["student"].get("intensityPct"), (record.get("taught") or {}).get("fteCheckTotal"),
                     fte_policy, is_research=(record.get("programme") or {}).get("type") != "taught")
                 if msg:
                     issues.append({"studentRef": ref, "field": "FTE", "severity": fte_policy.severity,
@@ -1465,7 +1497,9 @@ class StatutoryEngine:
             "profile": self.profile_out(profile),
             "specCode": profile.code,
             "specFieldCount": len(spec),
-            "mappedFieldCount": len(mapped),
+            # Of the specification's fields, how many this profile maps (not every profile field:
+            # "14 / 5" compared a count of all fields with a count of spec fields).
+            "mappedFieldCount": sum(1 for f in spec if f["field"] in mapped),
             "missing": missing,
             # Present-but-unmapped required fields — not "missing" (they're in the Fields tab) but
             # they still block sign-off. The UI shows a pointer to the Fields tab for these.
