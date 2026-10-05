@@ -1,0 +1,472 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Effective Dating: How a Dated Change Flows",
+    "animation": "trace",
+    "quality_profile": "showcase",
+    "output": "explaination/effective-dating-process.html",
+    "repository": {
+      "url": "https://github.com/Kunal-dev99/Student-Management-system.git",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "0706ee98680b7cc35475f77d2a7e274b8009ec87"
+    }
+  },
+  "lanes": [
+    {
+      "id": "lifecycle",
+      "label": "Request and approval"
+    },
+    {
+      "id": "guards",
+      "label": "Checks and timing",
+      "variant": "exception"
+    },
+    {
+      "id": "history",
+      "label": "Dated history"
+    },
+    {
+      "id": "returns",
+      "label": "Statutory return"
+    }
+  ],
+  "phases": [
+    {
+      "id": "ask",
+      "label": "Request",
+      "fromCol": 0,
+      "toCol": 1
+    },
+    {
+      "id": "decide",
+      "label": "Decide + record",
+      "fromCol": 2,
+      "toCol": 3,
+      "variant": "emphasis"
+    },
+    {
+      "id": "read",
+      "label": "Read + report",
+      "fromCol": 4,
+      "toCol": 5,
+      "variant": "dashed"
+    }
+  ],
+  "mainPath": [
+    "staff",
+    "request",
+    "guard",
+    "approve",
+    "change",
+    "store",
+    "build",
+    "signoff"
+  ],
+  "nodes": [
+    {
+      "id": "staff",
+      "lane": "lifecycle",
+      "col": 0,
+      "type": "external",
+      "icon": "person",
+      "label": "Registry officer",
+      "sublabel": "asks for a dated change",
+      "width": 140,
+      "sources": [
+        {
+          "path": "backend/app/modules/student_record/router.py",
+          "line": 500,
+          "end_line": 520,
+          "label": "request endpoint"
+        }
+      ]
+    },
+    {
+      "id": "request",
+      "lane": "lifecycle",
+      "col": 1,
+      "type": "backend",
+      "label": "Lifecycle request",
+      "sublabel": "status: requested",
+      "tag": "no dates move yet",
+      "width": 140,
+      "sources": [
+        {
+          "path": "backend/app/modules/student_record/lifecycle.py",
+          "line": 107,
+          "end_line": 112,
+          "label": "request_event"
+        }
+      ]
+    },
+    {
+      "id": "guard",
+      "lane": "lifecycle",
+      "col": 2,
+      "type": "security",
+      "label": "Approve + guard",
+      "sublabel": "student.lifecycle.approve",
+      "width": 140,
+      "sources": [
+        {
+          "path": "backend/app/modules/student_record/router.py",
+          "line": 708,
+          "end_line": 722,
+          "label": "approve endpoint"
+        },
+        {
+          "path": "backend/app/modules/student_record/periods.py",
+          "line": 57,
+          "end_line": 75,
+          "label": "assert_backdate_allowed"
+        }
+      ],
+      "tag": "signed-off year?"
+    },
+    {
+      "id": "approve",
+      "lane": "lifecycle",
+      "col": 3,
+      "type": "backend",
+      "label": "approve_event",
+      "sublabel": "routes to the fact",
+      "tag": "status / intensity / programme",
+      "width": 140,
+      "sources": [
+        {
+          "path": "backend/app/modules/student_record/lifecycle.py",
+          "line": 262,
+          "end_line": 336,
+          "label": "approve_event"
+        }
+      ]
+    },
+    {
+      "id": "retro",
+      "lane": "guards",
+      "col": 1,
+      "type": "security",
+      "label": "Retrospective warning",
+      "sublabel": "hits a signed-off return",
+      "width": 140,
+      "sources": [
+        {
+          "path": "backend/app/modules/student_record/retrospective.py",
+          "line": 120,
+          "end_line": 133,
+          "label": "warnings_for"
+        },
+        {
+          "path": "backend/app/modules/student_record/router.py",
+          "line": 480,
+          "label": "shown on pending row"
+        }
+      ]
+    },
+    {
+      "id": "refused",
+      "lane": "guards",
+      "col": 2,
+      "type": "security",
+      "icon": "failure",
+      "label": "Refused",
+      "sublabel": "needs amend permission",
+      "width": 140,
+      "sources": [
+        {
+          "path": "backend/app/modules/student_record/periods.py",
+          "line": 64,
+          "end_line": 75,
+          "label": "PermissionError"
+        }
+      ]
+    },
+    {
+      "id": "cache",
+      "lane": "history",
+      "col": 5,
+      "type": "database",
+      "label": "Cached on student",
+      "sublabel": "status, programme, mode",
+      "width": 140,
+      "sources": [
+        {
+          "path": "backend/app/modules/student_record/fact_history.py",
+          "line": 321,
+          "end_line": 327,
+          "label": "refresh_cache"
+        },
+        {
+          "path": "backend/app/modules/student_record/fact_history.py",
+          "line": 351,
+          "end_line": 355,
+          "label": "_finish"
+        }
+      ]
+    },
+    {
+      "id": "scheduler",
+      "lane": "guards",
+      "col": 5,
+      "type": "messagebus",
+      "icon": "clock",
+      "label": "Scheduler tick",
+      "sublabel": "refresh_all_due",
+      "width": 140,
+      "sources": [
+        {
+          "path": "backend/app/modules/scheduler/service.py",
+          "line": 54,
+          "end_line": 58,
+          "label": "_apply_due_status_changes"
+        },
+        {
+          "path": "backend/app/modules/student_record/fact_history.py",
+          "line": 329,
+          "end_line": 349,
+          "label": "refresh_due"
+        }
+      ]
+    },
+    {
+      "id": "change",
+      "lane": "history",
+      "col": 3,
+      "type": "backend",
+      "label": "FactHistory.change",
+      "sublabel": "close old, open new",
+      "tag": "never edits in place",
+      "width": 140,
+      "sources": [
+        {
+          "path": "backend/app/modules/student_record/fact_history.py",
+          "line": 206,
+          "end_line": 272,
+          "label": "change"
+        }
+      ]
+    },
+    {
+      "id": "store",
+      "lane": "history",
+      "col": 4,
+      "type": "database",
+      "label": "History tables",
+      "sublabel": "valid_from to valid_to",
+      "tag": "recorded_at, superseded_by",
+      "width": 140,
+      "sources": [
+        {
+          "path": "backend/app/db/history.py",
+          "line": 34,
+          "end_line": 55,
+          "label": "HistoryMixin"
+        },
+        {
+          "path": "backend/app/modules/student_record/models.py",
+          "line": 314,
+          "label": "status history"
+        }
+      ]
+    },
+    {
+      "id": "after",
+      "lane": "returns",
+      "col": 3,
+      "type": "security",
+      "label": "After sign-off",
+      "sublabel": "retrospective-changes",
+      "width": 140,
+      "sources": [
+        {
+          "path": "backend/app/modules/exports/router.py",
+          "line": 611,
+          "end_line": 620,
+          "label": "endpoint"
+        },
+        {
+          "path": "backend/app/modules/student_record/retrospective.py",
+          "line": 149,
+          "label": "changes_since_signoff"
+        }
+      ]
+    },
+    {
+      "id": "build",
+      "lane": "returns",
+      "col": 4,
+      "type": "backend",
+      "label": "build_records",
+      "sublabel": "as_at + known_at",
+      "tag": "value on a date, as recorded then",
+      "width": 150,
+      "sources": [
+        {
+          "path": "backend/app/modules/exports/statutory.py",
+          "line": 400,
+          "end_line": 440,
+          "label": "snapshot filters"
+        },
+        {
+          "path": "backend/app/modules/exports/statutory.py",
+          "line": 642,
+          "end_line": 644,
+          "label": "value on a day"
+        }
+      ]
+    },
+    {
+      "id": "signoff",
+      "lane": "returns",
+      "col": 5,
+      "type": "database",
+      "icon": "success",
+      "label": "Signed-off version",
+      "sublabel": "frozen rows",
+      "width": 140,
+      "sources": [
+        {
+          "path": "backend/app/modules/exports/statutory.py",
+          "line": 1573,
+          "end_line": 1578,
+          "label": "ReportReturnVersion"
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-ask",
+      "from": "staff",
+      "to": "request",
+      "label": "request",
+      "variant": "default"
+    },
+    {
+      "id": "e-preview",
+      "from": "request",
+      "to": "retro",
+      "label": "preview",
+      "variant": "dashed",
+      "role": "branch"
+    },
+    {
+      "id": "e-decide",
+      "from": "request",
+      "to": "guard",
+      "label": "approve",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e-refuse",
+      "from": "guard",
+      "to": "refused",
+      "label": "locked year",
+      "variant": "security",
+      "role": "error"
+    },
+    {
+      "id": "e-allowed",
+      "from": "guard",
+      "to": "approve",
+      "label": "allowed",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e-write",
+      "from": "approve",
+      "to": "change",
+      "label": "change()",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e-period",
+      "from": "change",
+      "to": "store",
+      "label": "new period",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e-cache",
+      "from": "store",
+      "to": "cache",
+      "label": "covers today",
+      "variant": "default",
+      "role": "branch"
+    },
+    {
+      "id": "e-due",
+      "from": "scheduler",
+      "to": "cache",
+      "label": "date arrives",
+      "variant": "dashed",
+      "role": "async"
+    },
+    {
+      "id": "e-read",
+      "from": "store",
+      "to": "build",
+      "label": "periods",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e-freeze",
+      "from": "build",
+      "to": "signoff",
+      "label": "sign off",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e-later",
+      "from": "signoff",
+      "to": "after",
+      "label": "later edits",
+      "variant": "security",
+      "role": "return",
+      "fromSide": "bottom",
+      "toSide": "bottom",
+      "route": "bottom-channel",
+      "labelSegment": 1
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "How a change is recorded",
+      "items": [
+        "Each fact (status, programme, intensity and more) is a run of periods: valid_from to valid_to",
+        "A change closes the covering period with a closed copy and opens a new one; nothing is edited in place",
+        "A back-dated change only runs until the next recorded change, so later history is never overwritten",
+        "correct() fixes a wrong record: the wrong row stays, superseded by a fixed copy"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Today vs history",
+      "items": [
+        "Screens read the cached value on the student row, which always matches the period covering today",
+        "A future-dated change is stored now; the scheduler moves the cache when its date arrives"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Protecting signed-off returns",
+      "items": [
+        "Before approval: a warning names any signed-off return the change would reach",
+        "At approval: a change dated inside a signed-off year needs the amend permission",
+        "After: retrospective-changes lists what moved inside the year since sign-off",
+        "Intensity changes also run the FTE vs module FTE check (warn or stop)"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Reading the past",
+      "items": [
+        "as_at: the value each fact had on that date",
+        "known_at: only what had been recorded by that moment, so an old return can be rebuilt exactly"
+      ]
+    }
+  ]
+}

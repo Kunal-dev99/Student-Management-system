@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "79a14d30-2886-48c8-b06a-c19a95b188c5",
+  "status": "current",
+  "command": "deliver",
+  "type": "workflow",
+  "input": "C:\\Users\\KunalSharma\\OneDrive - fusionpractices.com\\Documents\\RMS_UPDATED\\explaination\\candidate.json",
+  "output": "C:\\Users\\KunalSharma\\OneDrive - fusionpractices.com\\Documents\\RMS_UPDATED\\explaination\\effective-dating-process.html",
+  "specification": {
+    "sha256": "abdce0e8e0144f3e79add370e122d364f0e722f8b9822922b5ec680ba5ea63fd",
+    "bytes": 11419
+  },
+  "artifact": {
+    "sha256": "e2ad5b86c41c82e30cee2d269fb5fe6af98cf36eb3d484036aa720124a8e78ae",
+    "bytes": 778435
+  }
+}

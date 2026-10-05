@@ -18,6 +18,7 @@ from sqlalchemy import select
 
 from app.db import registry as _registry  # noqa: F401
 from app.core.database import SessionFactory
+from app.core.tenant_context import system_scope  # T1: cross-tenant tool
 from app.modules.exports.models import ReportFieldMapping, ReportProfile, StatutorySpecVersion
 from app.modules.student_record.models import Student, StudentCustomField, StudentCustomValue
 
@@ -33,7 +34,7 @@ def _ev(v):
 
 
 async def main() -> None:
-    async with SessionFactory() as s:
+    async with system_scope(), SessionFactory() as s:
         spec_versions = []
         for v in (await s.execute(
             select(StatutorySpecVersion).order_by(
