@@ -936,9 +936,11 @@ class StatutoryEngine:
 
     async def generate(
         self, profile_id: uuid.UUID, *, as_at: date | None = None, known_at: datetime | None = None,
-        issue_limit: int | None = 500,
+        issue_limit: int | None = 500, include_records: bool = False,
     ) -> dict:
         """Produce the extract and its validation report, entirely from configuration.
+        ``include_records`` also returns the built records (``records[i]`` is ``rows[i]``'s source),
+        for the nested XML.
         ``as_at`` / ``known_at`` take a snapshot (see ``build_records``)."""
         profile = await self.get_profile(profile_id)
         if as_at is not None:
@@ -1072,7 +1074,9 @@ class StatutoryEngine:
         MAX_ISSUES = issue_limit if issue_limit is not None else len(issues)
         errors = sum(1 for i in issues if i["severity"] == "error")
         warnings = sum(1 for i in issues if i["severity"] == "warning")
+        extra = {"records": records} if include_records else {}
         return {
+            **extra,
             "profile": self.profile_out(profile),
             "asAt": as_at.isoformat() if as_at else None,
             "knownAt": known_at.isoformat() if known_at else None,
