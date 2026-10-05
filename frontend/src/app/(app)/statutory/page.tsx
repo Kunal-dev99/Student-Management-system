@@ -2653,6 +2653,16 @@ export default function StatutoryPage() {
                           }}>
                           <FileCode className="h-4 w-4 mr-1" /> XML
                         </Button>
+                        <Button size="sm" variant="ghost"
+                          title="Nested like HESA Data Futures: Student, Engagement, course session, status and module instances. Not yet checked against HESA's XSD."
+                          onClick={async () => {
+                            try {
+                              await downloadFile(`/report-profiles/${generated.profile.id}/xml?nested=true`,
+                                (generated.job.filename ?? 'return.csv').replace(/\.csv$/, '_nested.xml'))
+                            } catch (e) { err(toast, 'Could not build the nested XML')(e) }
+                          }}>
+                          <FileCode className="h-4 w-4 mr-1" /> XML (nested)
+                        </Button>
                       </div>
                       <ValidationReportView
                         result={generated.validation}

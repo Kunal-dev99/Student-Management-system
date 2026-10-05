@@ -577,17 +577,20 @@ async def return_workbook(
 
 
 @profiles_router.get("/{profile_id}/xml",
-                     summary="The return as XML: one Record per row, one element per field code")
+                     summary="The return as XML: flat (a Record per row) or nested=true (Student → "
+                             "Engagement → course session → status / module, HESA Data Futures shape)")
 async def return_xml(
     profile_id: uuid.UUID,
     as_at: date | None = Query(None, alias="asAt", description="Values as in force on this date"),
     known_at: datetime | None = Query(None, alias="knownAt", description="Data as recorded at this moment"),
+    nested: bool = Query(False, description="Nested like HESA Data Futures (not yet XSD-validated)"),
     session: AsyncSession = Depends(get_session),
     _=Depends(require_permission("reporting.read")),
 ) -> Response:
-    from app.modules.exports import xml_return
+    from app.modules.exports import xml_nested, xml_return
 
-    data, name = await xml_return.live(session, profile_id, **_snapshot(as_at, known_at))
+    builder = xml_nested if nested else xml_return
+    data, name = await builder.live(session, profile_id, **_snapshot(as_at, known_at))
     return Response(content=data, media_type=xml_return.XML_MEDIA_TYPE,
                     headers={"Content-Disposition": content_disposition(name)})
 
@@ -597,7 +600,7 @@ async def return_xml(
 async def download_return_version(
     profile_id: uuid.UUID,
     version_id: uuid.UUID,
-    format: str = Query("csv", pattern="^(csv|xlsx|xml)$"),
+    format: str = Query("csv", pattern="^(csv|xlsx|xml|xml-nested)$"),
     session: AsyncSession = Depends(get_session),
     _=Depends(require_permission("reporting.read")),
 ) -> Response:
@@ -613,6 +616,12 @@ async def download_return_version(
 
         data, name = workbook.frozen(profile, v)
         return Response(content=data, media_type=XLSX_MEDIA_TYPE,
+                        headers={"Content-Disposition": content_disposition(name)})
+    if format == "xml-nested":
+        from app.modules.exports import xml_nested
+
+        data, name = await xml_nested.frozen(session, profile, v)
+        return Response(content=data, media_type=xml_nested.XML_MEDIA_TYPE,
                         headers={"Content-Disposition": content_disposition(name)})
     if format == "xml":
         from app.modules.exports import xml_return

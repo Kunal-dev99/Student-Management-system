@@ -99,6 +99,18 @@ export function ReturnVersionsPanel({ profileId, code }: { profileId: string; co
                   }}>
                   <Download className="h-3.5 w-3.5 mr-1" /> XML
                 </Button>
+                <Button size="sm" variant="ghost"
+                  title="Nested like HESA Data Futures (Student, Engagement, course session, status, modules); not yet checked against HESA's XSD"
+                  onClick={async () => {
+                    try {
+                      await downloadFile(`/report-profiles/${profileId}/versions/${v.id}/download?format=xml-nested`,
+                        `${code.toLowerCase()}_${v.academicYear.replace('/', '-')}_v${v.versionNo}_nested.xml`)
+                    } catch (e) {
+                      toast({ title: 'Download failed', description: (e as Error).message, variant: 'destructive' })
+                    }
+                  }}>
+                  <Download className="h-3.5 w-3.5 mr-1" /> XML (nested)
+                </Button>
               </TableCell>
             </TableRow>
           ))}
