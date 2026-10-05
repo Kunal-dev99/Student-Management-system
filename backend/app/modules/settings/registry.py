@@ -36,6 +36,7 @@ class SettingDef:
     default: Any
     min: float | None = None
     max: float | None = None
+    choices: tuple[str, ...] | None = None    # a "str" setting limited to these values
 
     def validate(self, value: Any) -> Any:
         """Coerce and range-check a candidate value; raise ValueError with a human message."""
@@ -54,6 +55,8 @@ class SettingDef:
         elif self.type == "str":
             if not isinstance(value, str) or not value.strip():
                 raise ValueError(f"{self.label} must be non-empty text")
+            if self.choices and value.strip() not in self.choices:
+                raise ValueError(f"{self.label} must be one of: {', '.join(self.choices)}")
             return value.strip()
         if self.min is not None and value < self.min:
             raise ValueError(f"{self.label} must be at least {self.min}")
@@ -88,6 +91,31 @@ SETTINGS: dict[str, SettingDef] = {s.key: s for s in [
                     "(institution code + entry year + sequence + check digit), so it is never "
                     "hand-keyed. Set this to your registered HESA code before the first return.",
         type="str", default="0000",
+    ),
+    SettingDef(
+        key="statutory.fte_check", group="Statutory reporting",
+        label="Student FTE vs module FTE check",
+        description="HESA expects a taught student's FTE not to exceed the sum of their modules' "
+                    "FTE in the year. Off: not checked. Warn (default): flagged in the return's "
+                    "validation and when an intensity change is approved, but allowed. Stop: an "
+                    "error that blocks sign-off, and an intensity change that would breach it is "
+                    "refused.",
+        type="str", default="warn", choices=("off", "warn", "stop"),
+    ),
+    SettingDef(
+        key="statutory.fte_check_tolerance", group="Statutory reporting",
+        label="FTE check tolerance (percentage points)",
+        description="How far the student's FTE may exceed the sum of module FTE before the check "
+                    "fires, e.g. 5 allows a 100% student with 95% of module FTE.",
+        type="float", default=0.0, min=0, max=100,
+    ),
+    SettingDef(
+        key="statutory.fte_check_research", group="Statutory reporting",
+        label="Apply the FTE check to research students",
+        description="Off (default): research students, who usually take no modules, are not "
+                    "checked. On: any research student with module enrolments in the year is "
+                    "checked like a taught student.",
+        type="bool", default=False,
     ),
     # --- Supervision policy ---
     SettingDef(
@@ -198,6 +226,7 @@ def grouped() -> list[dict]:
         groups.setdefault(s.group, []).append(s)
     return [{"group": g, "settings": [
         {"key": s.key, "label": s.label, "description": s.description,
-         "type": s.type, "default": s.default, "min": s.min, "max": s.max}
+         "type": s.type, "default": s.default, "min": s.min, "max": s.max,
+         "choices": list(s.choices) if s.choices else None}
         for s in defs
     ]} for g, defs in groups.items()]

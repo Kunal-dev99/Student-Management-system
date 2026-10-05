@@ -49,15 +49,36 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (typeof MutationObserver === 'undefined') return
-    // Debounced batch — React can produce many mutations per render; walking the
-    // subtree once per animation frame keeps the observer cheap.
+    // Batched once per animation frame, and only over what changed: the elements React added or
+    // whose text it rewrote, not the whole page. A full-page walk on every mutation (hover states,
+    // typing, refetches) cost a pass over every text node per frame on large pages. English still
+    // runs (it turns raw codes like "research_council" into readable labels).
+    const roots = new Set<Node>()
     let pending = false
-    const observer = new MutationObserver(() => {
-      if (pending) return
+    const observer = new MutationObserver((records) => {
+      for (const r of records) {
+        if (r.type === 'characterData') {
+          if (r.target.parentElement) roots.add(r.target.parentElement)
+        } else {
+          r.addedNodes.forEach((n) => {
+            const el = n.nodeType === Node.TEXT_NODE ? n.parentElement : n
+            if (el) roots.add(el)
+          })
+        }
+      }
+      if (pending || roots.size === 0) return
       pending = true
       requestAnimationFrame(() => {
         pending = false
-        try { translateSubtree(document.body, langRef.current) } catch { /* ignore */ }
+        const batch = new Set(roots)
+        roots.clear()
+        batch.forEach((root) => {
+          // Skip nodes React already removed, and ones inside another root in this batch (it
+          // walks them anyway).
+          if (!root.isConnected) return
+          for (let p = root.parentNode; p; p = p.parentNode) if (batch.has(p)) return
+          try { translateSubtree(root, langRef.current) } catch { /* ignore */ }
+        })
       })
     })
     observer.observe(document.body, {

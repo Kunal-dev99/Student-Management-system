@@ -20,6 +20,8 @@ export interface InstitutionSetting {
   default: SettingValue
   min: number | null
   max: number | null
+  /** A text setting limited to these values (shown as a dropdown). */
+  choices?: string[] | null
   value: SettingValue
   overridden: boolean
   updatedAt: string | null

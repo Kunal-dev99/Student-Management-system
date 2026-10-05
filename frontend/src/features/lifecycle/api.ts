@@ -130,6 +130,8 @@ export interface LifecycleDecisionResult {
   recalculation: Recalculation | null
   /** Approving a suspension proposes the student's open modules to interrupt (registry confirms). */
   moduleProposal?: ModuleProposal
+  /** Approved but flagged, e.g. the student's FTE now exceeds their modules' total (warn mode). */
+  warnings?: string[]
 }
 
 export interface LifecycleEventRequest {
