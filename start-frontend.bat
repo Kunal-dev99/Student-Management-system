@@ -27,18 +27,7 @@ echo "%~dp0" | findstr /I "OneDrive" >nul
 if not errorlevel 1 (
     echo OneDrive checkout detected - starting the Next DEV server on http://localhost:3000
     echo ^(dev mode is stable on synced folders; production build is not. Press Ctrl+C to stop.^)
-    REM OneDrive turns idle .next files into cloud placeholders ^(reparse points^); Next's startup
-    REM cleanup then fails with "EINVAL: readlink .next\package.json". Dev rebuilds .next on
-    REM demand, so clear it first.
-    if exist ".next" (
-        echo Clearing .next ^(OneDrive can leave unreadable placeholder files in it^)...
-        rmdir /s /q ".next" 2>nul
-    )
     echo.
-    REM Dev builds each page on its first visit (the half-second "lag" on first clicks). Warm-up
-    REM requests every page once in the background, so they're built before anyone clicks.
-    echo Warming up pages in the background - "[warm-up] ... compiled" appears when done.
-    start "" /b node scripts\warmup.mjs
     call npm run dev
     pause
     exit /b 0
