@@ -297,6 +297,26 @@ class StatutoryEngine:
         await self.session.refresh(profile)
         return profile
 
+    async def _check_custom_source(self, source_expression: str | None) -> None:
+        """A mapping may only read a live custom attribute: not a request still awaiting a
+        decision, a rejected one, or a retired one. Other paths are left to the existing checks."""
+        expr = (source_expression or "").strip()
+        if not expr.startswith("custom."):
+            return
+        from app.modules.student_record.custom_fields import Status as CustomStatus
+        from app.modules.student_record.models import StudentCustomField
+
+        key = expr[len("custom."):]
+        field = (await self.session.execute(
+            select(StudentCustomField).where(StudentCustomField.key == key)
+        )).scalar_one_or_none()
+        if field is None:
+            raise ValidationAppError(f"There is no custom attribute '{key}'.")
+        if field.status not in CustomStatus.LIVE:
+            raise ValidationAppError(
+                f"Custom attribute '{field.label}' is {field.status}; only an active attribute can be mapped."
+            )
+
     @staticmethod
     def _refuse_if_signed_off(profile: ReportProfile, action: str) -> None:
         """A signed-off profile is a historical fact; editing would rewrite what Registry attested to."""
@@ -315,6 +335,7 @@ class StatutoryEngine:
         profile = await self.get_profile(profile_id)
         self._refuse_if_signed_off(profile, "add a field")
         _validate_transform_chain(transform)
+        await self._check_custom_source(source_expression)
         existing = await self._mappings(profile_id)
         if any(m.target_field == target_field for m in existing):
             raise ConflictError(f"Field '{target_field}' is already mapped in this profile")
@@ -483,10 +504,11 @@ class StatutoryEngine:
         # Admin-defined custom attributes (HESA gap capture): expose each student's value under the
         # `custom.<key>` path so a mapping can read it. Every key is present (None when unset) so the
         # resolve() contract is deterministic regardless of which students have data entered.
+        from app.modules.student_record.custom_fields import Status as CustomStatus
         from app.modules.student_record.models import StudentCustomField, StudentCustomValue
-        custom_fields = list(
-            (await self.session.execute(select(StudentCustomField))).scalars().all()
-        )
+        custom_fields = list((await self.session.execute(
+            select(StudentCustomField).where(StudentCustomField.status.in_(CustomStatus.LIVE))
+        )).scalars().all())
         custom_keys = [f.key for f in custom_fields]
         custom_by_student: dict = {}
         # Effective dating, Phase 6 — attributes that keep history are read as at the record's
@@ -1529,6 +1551,8 @@ class StatutoryEngine:
             raise NotFoundError("Field mapping not found")
         if changes.get("transform"):
             _validate_transform_chain(changes["transform"])
+        if changes.get("source_expression") and changes["source_expression"] != m.source_expression:
+            await self._check_custom_source(changes["source_expression"])
         for k, v in changes.items():
             if v is not None:
                 setattr(m, k, v)

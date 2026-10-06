@@ -1,15 +1,17 @@
 'use client'
 
 /**
- * Custom student attributes — create an attribute HESA needs but the core model doesn't hold, and
- * enter its value per student. Two steps in one place:
- *   1) "Add attribute" (label + type + mandatory reason) — one click, no code release.
- *   2) "Enter data" — a modal listing every student with a value box.
- * Once created it is mappable in a field as `custom.<key>`, so a required field can be re-pointed
- * at it instead of being deleted.
+ * Custom student attributes — capture an attribute HESA needs but the core model doesn't hold.
+ *
+ * Governed (maker-checker): someone *requests* an attribute (label + type + mandatory reason); a
+ * different person approves it — or rejects it with a reason — and activates it. Only an active
+ * attribute takes values ("Enter data") and is mappable in a field as `custom.<key>`.
+ *
+ * Tabs: Attributes (live ones) · Requests (the queue) · New request · History (decision trail).
+ * Each tab and action only shows for someone who holds the permission it needs.
  */
 import { useEffect, useState } from 'react'
-import { Plus, Table2, Trash2, Copy, Check } from 'lucide-react'
+import { Plus, Table2, Copy, Check, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger,
@@ -21,14 +23,18 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useToast } from '@/components/ui/use-toast'
 import { useConfirm } from '@/components/common/ConfirmDialog'
+import { useAuth } from '@/shared/auth/AuthContext'
 import {
-  useCustomFields, useCreateCustomField, useDeleteCustomField, useEnableCustomFieldHistory,
+  useCustomFields, useCustomFieldRequests, useCustomFieldEvents,
+  useRequestCustomField, useApproveCustomField, useRejectCustomField, useActivateCustomField,
+  useWithdrawCustomField, useEnableCustomFieldHistory,
   useCustomFieldValues, useSetCustomFieldValues,
-  type CustomField, type CustomFieldType,
+  type CustomField, type CustomFieldStatus, type CustomFieldType,
 } from '@/features/statutory/customFields'
 
 const TYPES: { v: CustomFieldType; l: string }[] = [
@@ -37,6 +43,27 @@ const TYPES: { v: CustomFieldType; l: string }[] = [
   { v: 'number', l: 'Number' },
   { v: 'date', l: 'Date' },
 ]
+
+const STATUS_BADGE: Record<CustomFieldStatus, { label: string; variant: 'warning' | 'info' | 'destructive' | 'success' | 'secondary' }> = {
+  pending: { label: 'Awaiting decision', variant: 'warning' },
+  approved: { label: 'Approved — not active', variant: 'info' },
+  rejected: { label: 'Rejected', variant: 'destructive' },
+  active: { label: 'Active', variant: 'success' },
+  review: { label: 'Under review', variant: 'warning' },
+  retired: { label: 'Retired', variant: 'secondary' },
+}
+
+const ACTION_LABEL: Record<string, string> = {
+  requested: 'Requested', approved: 'Approved', rejected: 'Rejected', activated: 'Activated',
+  withdrawn: 'Withdrawn', migrated: 'Carried over (pre-governance)',
+}
+
+const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleString() : '')
+
+function StatusBadge({ status }: { status: CustomFieldStatus }) {
+  const b = STATUS_BADGE[status] ?? { label: status, variant: 'secondary' as const }
+  return <Badge variant={b.variant}>{b.label}</Badge>
+}
 
 function CopyPath({ path }: { path: string }) {
   const [copied, setCopied] = useState(false)
@@ -145,155 +172,380 @@ function ValuesDialog({ field, onClose }: { field: CustomField; onClose: () => v
   )
 }
 
-export function CustomAttributesDialog() {
+/** Approve / reject a request. Reject needs a reason; approve can activate in the same step. */
+function DecisionDialog({ field, mode, onClose }: { field: CustomField; mode: 'approve' | 'reject'; onClose: () => void }) {
   const { toast } = useToast()
-  const confirm = useConfirm()
-  const { data: fields, isLoading } = useCustomFields()
-  const create = useCreateCustomField()
-  const del = useDeleteCustomField()
-  const [open, setOpen] = useState(false)
-  const [entering, setEntering] = useState<CustomField | null>(null)
-
-  const [label, setLabel] = useState('')
-  const [dataType, setDataType] = useState<CustomFieldType>('code')
+  const approve = useApproveCustomField()
+  const reject = useRejectCustomField()
   const [reason, setReason] = useState('')
-  const [trackHistory, setTrackHistory] = useState(false)
-  const enableHistory = useEnableCustomFieldHistory()
+  const [activate, setActivate] = useState(true)
+  const busy = approve.isPending || reject.isPending
 
-  const reset = () => { setLabel(''); setDataType('code'); setReason(''); setTrackHistory(false) }
-
-  const onCreate = async () => {
+  const onSubmit = async () => {
     try {
-      const f = await create.mutateAsync({ label: label.trim(), dataType, reason: reason.trim(), trackHistory })
-      toast({ title: `Created "${f.label}"`, description: `Map a field to ${f.sourcePath}, then enter data.` })
-      reset()
+      if (mode === 'approve') {
+        const f = await approve.mutateAsync({ id: field.id, reason: reason.trim() || undefined, activate })
+        toast({
+          title: `Approved "${f.label}"`,
+          description: f.status === 'active' ? `Active — map a field to ${f.sourcePath}, then enter data.` : 'Activate it when it should go live.',
+        })
+      } else {
+        await reject.mutateAsync({ id: field.id, reason: reason.trim() })
+        toast({ title: `Rejected "${field.label}"` })
+      }
+      onClose()
     } catch (e) {
-      toast({ title: 'Could not create attribute', description: (e as Error).message, variant: 'destructive' })
+      toast({ title: mode === 'approve' ? 'Could not approve' : 'Could not reject', description: (e as Error).message, variant: 'destructive' })
     }
   }
 
   return (
+    <Dialog open onOpenChange={(o) => { if (!o) onClose() }}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader><DialogTitle>{mode === 'approve' ? 'Approve' : 'Reject'} “{field.label}”</DialogTitle></DialogHeader>
+        <div className="space-y-3 text-sm">
+          <div className="rounded-md border border-border bg-muted/30 p-3 space-y-1">
+            <div className="flex items-center gap-2">
+              <Badge variant="secondary">{field.dataType}</Badge>
+              {field.trackHistory && <Badge variant="info">dated history</Badge>}
+              <span className="font-mono text-xs text-muted-foreground">{field.sourcePath}</span>
+            </div>
+            <p><span className="text-muted-foreground">Requested by</span> {field.requestedByEmail ?? 'unknown'} · {fmt(field.createdAt)}</p>
+            <p><span className="text-muted-foreground">Reason:</span> {field.reason}</p>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="cf-decision">{mode === 'approve' ? 'Note (optional)' : 'Reason for rejecting (required)'}</Label>
+            <Textarea id="cf-decision" className="min-h-[70px]" value={reason} onChange={(e) => setReason(e.target.value)}
+              placeholder={mode === 'approve' ? 'e.g. Confirmed against the 2026/27 spec.' : 'e.g. Already held in the core record as …'} />
+          </div>
+          {mode === 'approve' && (
+            <label className="flex items-start gap-2">
+              <input type="checkbox" className="mt-0.5" checked={activate} onChange={(e) => setActivate(e.target.checked)} />
+              <span>
+                Activate now
+                <span className="block text-helper">Makes it mappable and open for data entry straight away. Leave unticked to activate later.</span>
+              </span>
+            </label>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button variant={mode === 'reject' ? 'destructive' : 'default'} onClick={onSubmit}
+            disabled={busy || (mode === 'reject' && !reason.trim())}>
+            {busy ? 'Saving…' : mode === 'approve' ? (activate ? 'Approve & activate' : 'Approve') : 'Reject request'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function AttributesTab({ canEnterData, canConfigure, onEnter }: {
+  canEnterData: boolean; canConfigure: boolean; onEnter: (f: CustomField) => void
+}) {
+  const { toast } = useToast()
+  const confirm = useConfirm()
+  const { data: fields, isLoading } = useCustomFields()
+  const enableHistory = useEnableCustomFieldHistory()
+
+  if (isLoading) return <Skeleton className="h-16 w-full" />
+  if ((fields ?? []).length === 0) {
+    return <p className="text-helper">No active attributes yet. Request one, and once someone else approves it, it appears here.</p>
+  }
+  return (
+    <div className="rounded-md border border-border divide-y divide-border">
+      {(fields ?? []).map((f) => (
+        <div key={f.id} className="flex items-start justify-between gap-3 p-3">
+          <div className="min-w-0 space-y-0.5">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-medium">{f.label}</span>
+              <Badge variant="secondary">{f.dataType}</Badge>
+              {f.trackHistory && <Badge variant="info">dated history</Badge>}
+              {f.status !== 'active' && <StatusBadge status={f.status} />}
+            </div>
+            <CopyPath path={f.sourcePath} />
+            <p className="text-xs text-muted-foreground">{f.reason}</p>
+            {f.decidedByEmail && (
+              <p className="text-xs text-muted-foreground">Approved by {f.decidedByEmail} · {fmt(f.decidedAt)}</p>
+            )}
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            {canConfigure && !f.trackHistory && (
+              <Button size="sm" variant="ghost" disabled={enableHistory.isPending}
+                title="Record values with the date they took effect from now on"
+                onClick={async () => {
+                  if (!(await confirm({
+                    title: `Keep dated history for "${f.label}"?`,
+                    description: 'Values already entered are kept from each student\'s start date. From now on a change is recorded with the date it took effect, and values can no longer be cleared. This can\'t be switched off.',
+                    confirmLabel: 'Keep dated history',
+                  }))) return
+                  try {
+                    await enableHistory.mutateAsync(f.id)
+                    toast({ title: `"${f.label}" now keeps dated history` })
+                  } catch (e) {
+                    toast({ title: 'Could not switch on history', description: (e as Error).message, variant: 'destructive' })
+                  }
+                }}>
+                Keep history
+              </Button>
+            )}
+            {canEnterData && (
+              <Button size="sm" variant="secondary" onClick={() => onEnter(f)}>
+                <Table2 className="h-3.5 w-3.5 mr-1" /> Enter data
+              </Button>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function RequestsTab({ canApprove, myUserId }: { canApprove: boolean; myUserId: string | null }) {
+  const { toast } = useToast()
+  const confirm = useConfirm()
+  const { data, isLoading, isError, error } = useCustomFieldRequests(true)
+  const activate = useActivateCustomField()
+  const withdraw = useWithdrawCustomField()
+  const [deciding, setDeciding] = useState<{ field: CustomField; mode: 'approve' | 'reject' } | null>(null)
+
+  if (isLoading) return <Skeleton className="h-16 w-full" />
+  if (isError) return <p className="text-sm text-danger">{(error as Error).message}</p>
+  const order: CustomFieldStatus[] = ['pending', 'approved', 'rejected']
+  const rows = [...(data ?? [])].sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status))
+  if (rows.length === 0) return <p className="text-helper">No requests.</p>
+
+  return (
     <>
-      <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) reset() }}>
+      <div className="rounded-md border border-border divide-y divide-border">
+        {rows.map((f) => {
+          const mine = !!myUserId && f.requestedBy === myUserId
+          return (
+            <div key={f.id} className="flex items-start justify-between gap-3 p-3">
+              <div className="min-w-0 space-y-0.5">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-medium">{f.label}</span>
+                  <StatusBadge status={f.status} />
+                  <Badge variant="secondary">{f.dataType}</Badge>
+                  {f.trackHistory && <Badge variant="info">dated history</Badge>}
+                </div>
+                <p className="text-xs text-muted-foreground">{f.reason}</p>
+                <p className="text-xs text-muted-foreground">
+                  Requested by {mine ? 'you' : (f.requestedByEmail ?? 'unknown')} · {fmt(f.createdAt)}
+                </p>
+                {f.decidedByEmail && (
+                  <p className="text-xs text-muted-foreground">
+                    {f.status === 'rejected' ? 'Rejected' : 'Approved'} by {f.decidedByEmail} · {fmt(f.decidedAt)}
+                    {f.decisionReason ? ` — “${f.decisionReason}”` : ''}
+                  </p>
+                )}
+                {f.status === 'pending' && mine && canApprove && (
+                  <p className="text-xs text-muted-foreground">You raised this, so someone else has to decide it.</p>
+                )}
+              </div>
+              <div className="flex shrink-0 items-center gap-1">
+                {f.status === 'pending' && canApprove && !mine && (
+                  <>
+                    <Button size="sm" onClick={() => setDeciding({ field: f, mode: 'approve' })}>Approve</Button>
+                    <Button size="sm" variant="outline" onClick={() => setDeciding({ field: f, mode: 'reject' })}>Reject</Button>
+                  </>
+                )}
+                {f.status === 'approved' && canApprove && (
+                  <Button size="sm" disabled={activate.isPending} onClick={async () => {
+                    try {
+                      await activate.mutateAsync(f.id)
+                      toast({ title: `"${f.label}" is active`, description: `Map a field to ${f.sourcePath}, then enter data.` })
+                    } catch (e) {
+                      toast({ title: 'Could not activate', description: (e as Error).message, variant: 'destructive' })
+                    }
+                  }}>Activate</Button>
+                )}
+                {f.status === 'pending' && (mine || canApprove) && (
+                  <Button size="icon" variant="ghost" className="h-8 w-8" title="Withdraw this request"
+                    disabled={withdraw.isPending}
+                    onClick={async () => {
+                      if (!(await confirm({
+                        title: `Withdraw the request for "${f.label}"?`,
+                        description: 'The request is removed. The withdrawal stays in the history.',
+                        confirmLabel: 'Withdraw request',
+                      }))) return
+                      try {
+                        await withdraw.mutateAsync(f.id)
+                        toast({ title: `Withdrew "${f.label}"` })
+                      } catch (e) {
+                        toast({ title: 'Could not withdraw', description: (e as Error).message, variant: 'destructive' })
+                      }
+                    }}>
+                    <X className="h-4 w-4" />
+                  </Button>
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      {deciding && <DecisionDialog field={deciding.field} mode={deciding.mode} onClose={() => setDeciding(null)} />}
+    </>
+  )
+}
+
+function NewRequestTab({ onRequested }: { onRequested: () => void }) {
+  const { toast } = useToast()
+  const create = useRequestCustomField()
+  const [label, setLabel] = useState('')
+  const [dataType, setDataType] = useState<CustomFieldType>('code')
+  const [reason, setReason] = useState('')
+  const [trackHistory, setTrackHistory] = useState(false)
+
+  const onCreate = async () => {
+    try {
+      const f = await create.mutateAsync({ label: label.trim(), dataType, reason: reason.trim(), trackHistory })
+      toast({ title: `Requested "${f.label}"`, description: 'Someone else needs to approve it before it can be used.' })
+      setLabel(''); setDataType('code'); setReason(''); setTrackHistory(false)
+      onRequested()
+    } catch (e) {
+      toast({ title: 'Could not raise the request', description: (e as Error).message, variant: 'destructive' })
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-helper">
+        Ask for an attribute the return needs but the system doesn&apos;t hold. A different person reviews
+        and approves it; only then can it be mapped and filled in.
+      </p>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <Label htmlFor="cf-label">Label</Label>
+          <Input id="cf-label" value={label} maxLength={120} onChange={(e) => setLabel(e.target.value)}
+            placeholder="e.g. Care leaver flag" />
+        </div>
+        <div className="space-y-1.5">
+          <Label>Type</Label>
+          <Select value={dataType} onValueChange={(v) => setDataType(v as CustomFieldType)}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {TYPES.map((t) => <SelectItem key={t.v} value={t.v}>{t.l}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="cf-reason">Reason (why this is needed — which HESA field, which return)</Label>
+        <Textarea id="cf-reason" className="min-h-[70px]" value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder="e.g. HESA CARELEAVER — mandatory, not held in the core model." />
+      </div>
+      <label className="flex items-start gap-2 text-sm">
+        <input type="checkbox" className="mt-0.5" checked={trackHistory}
+          onChange={(e) => setTrackHistory(e.target.checked)} />
+        <span>
+          Keep dated history
+          <span className="block text-helper">
+            For attributes a return reads as at a date (e.g. a status that can change mid-year).
+            Values are recorded with the date they took effect. Can&apos;t be switched off later.
+          </span>
+        </span>
+      </label>
+      <Button size="sm" onClick={onCreate} disabled={!label.trim() || !reason.trim() || create.isPending}>
+        {create.isPending ? 'Sending…' : 'Submit request'}
+      </Button>
+    </div>
+  )
+}
+
+function HistoryTab() {
+  const { data, isLoading, isError, error } = useCustomFieldEvents(true)
+  if (isLoading) return <Skeleton className="h-16 w-full" />
+  if (isError) return <p className="text-sm text-danger">{(error as Error).message}</p>
+  if ((data ?? []).length === 0) return <p className="text-helper">Nothing recorded yet.</p>
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead className="min-w-[140px]">When</TableHead>
+          <TableHead>Attribute</TableHead>
+          <TableHead>Action</TableHead>
+          <TableHead>By</TableHead>
+          <TableHead>Note</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {(data ?? []).map((e) => (
+          <TableRow key={e.id}>
+            <TableCell className="text-xs">{fmt(e.at)}</TableCell>
+            <TableCell>{e.label}</TableCell>
+            <TableCell>{ACTION_LABEL[e.action] ?? e.action}</TableCell>
+            <TableCell className="text-xs">{e.actorEmail ?? '—'}</TableCell>
+            <TableCell className="text-xs text-muted-foreground">{e.notes ?? ''}</TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  )
+}
+
+export function CustomAttributesDialog() {
+  const { hasPermission, principal } = useAuth()
+  const canRequest = hasPermission('custom_attribute.request')
+  const canApprove = hasPermission('custom_attribute.approve')
+  const canGovern = canRequest || canApprove
+  const canEnterData = hasPermission('student.write')
+  const canConfigure = hasPermission('admin.configure')
+  const { data: queue } = useCustomFieldRequests(canGovern)
+  const pending = (queue ?? []).filter((f) => f.status === 'pending' || f.status === 'approved').length
+
+  const [open, setOpen] = useState(false)
+  const [tab, setTab] = useState('attributes')
+  const [entering, setEntering] = useState<CustomField | null>(null)
+
+  return (
+    <>
+      <Dialog open={open} onOpenChange={setOpen}>
         <DialogTrigger asChild>
-          <Button size="sm" variant="outline"><Plus className="h-4 w-4 mr-1" /> Custom attributes</Button>
+          <Button size="sm" variant="outline">
+            <Plus className="h-4 w-4 mr-1" /> Custom attributes
+            {canApprove && pending > 0 && <Badge variant="warning" className="ml-1.5">{pending}</Badge>}
+          </Button>
         </DialogTrigger>
-        <DialogContent className="flex max-h-[88vh] max-w-2xl flex-col overflow-hidden">
+        <DialogContent className="flex max-h-[88vh] max-w-3xl flex-col overflow-hidden">
           <DialogHeader className="flex-none"><DialogTitle>Custom student attributes</DialogTitle></DialogHeader>
           <p className="flex-none text-helper">
             Capture an attribute a return needs but the system doesn&apos;t hold yet — no code release.
-            Create it here, enter each student&apos;s value, then map the field to its{' '}
-            <span className="font-mono text-xs">custom.…</span> path.
+            A request is approved by someone other than the requester; once active, enter each
+            student&apos;s value and map the field to its <span className="font-mono text-xs">custom.…</span> path.
           </p>
 
-          <div className="-mr-2 mt-2 flex-1 space-y-5 overflow-y-auto pr-2">
-            {/* Create form */}
-            <div className="rounded-md border border-border bg-muted/30 p-3 space-y-3">
-              <p className="text-label">New attribute</p>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label htmlFor="cf-label">Label</Label>
-                  <Input id="cf-label" value={label} onChange={(e) => setLabel(e.target.value)}
-                    placeholder="e.g. Care leaver flag" />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Type</Label>
-                  <Select value={dataType} onValueChange={(v) => setDataType(v as CustomFieldType)}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {TYPES.map((t) => <SelectItem key={t.v} value={t.v}>{t.l}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="cf-reason">Reason (why this is being captured)</Label>
-                <Textarea id="cf-reason" className="min-h-[60px]" value={reason}
-                  onChange={(e) => setReason(e.target.value)}
-                  placeholder="e.g. HESA CARELEAVER — mandatory, not held in the core model." />
-              </div>
-              <label className="flex items-start gap-2 text-sm">
-                <input type="checkbox" className="mt-0.5" checked={trackHistory}
-                  onChange={(e) => setTrackHistory(e.target.checked)} />
-                <span>
-                  Keep dated history
-                  <span className="block text-helper">
-                    For attributes a return reads as at a date (e.g. a status that can change mid-year).
-                    Values are recorded with the date they took effect. Can&apos;t be switched off later.
-                  </span>
-                </span>
-              </label>
-              <Button size="sm" onClick={onCreate}
-                disabled={!label.trim() || !reason.trim() || create.isPending}>
-                {create.isPending ? 'Creating…' : 'Create attribute'}
-              </Button>
-            </div>
-
-            {/* Existing attributes */}
-            <div className="space-y-2">
-              <p className="text-label">Existing attributes</p>
-              {isLoading ? <Skeleton className="h-16 w-full" /> : (fields ?? []).length === 0 ? (
-                <p className="text-helper">None yet.</p>
-              ) : (
-                <div className="rounded-md border border-border divide-y divide-border">
-                  {(fields ?? []).map((f) => (
-                    <div key={f.id} className="flex items-start justify-between gap-3 p-3">
-                      <div className="min-w-0 space-y-0.5">
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium">{f.label}</span>
-                          <Badge variant="secondary">{f.dataType}</Badge>
-                          {f.trackHistory && <Badge variant="info">dated history</Badge>}
-                        </div>
-                        <CopyPath path={f.sourcePath} />
-                        <p className="text-xs text-muted-foreground">{f.reason}</p>
-                      </div>
-                      <div className="flex shrink-0 items-center gap-1">
-                        {!f.trackHistory && (
-                          <Button size="sm" variant="ghost" disabled={enableHistory.isPending}
-                            title="Record values with the date they took effect from now on"
-                            onClick={async () => {
-                              if (!(await confirm({
-                                title: `Keep dated history for "${f.label}"?`,
-                                description: 'Values already entered are kept from each student\'s start date. From now on a change is recorded with the date it took effect, and values can no longer be cleared. This can\'t be switched off.',
-                                confirmLabel: 'Keep dated history',
-                              }))) return
-                              try {
-                                await enableHistory.mutateAsync(f.id)
-                                toast({ title: `"${f.label}" now keeps dated history` })
-                              } catch (e) {
-                                toast({ title: 'Could not switch on history', description: (e as Error).message, variant: 'destructive' })
-                              }
-                            }}>
-                            Keep history
-                          </Button>
-                        )}
-                        <Button size="sm" variant="secondary" onClick={() => setEntering(f)}>
-                          <Table2 className="h-3.5 w-3.5 mr-1" /> Enter data
-                        </Button>
-                        <Button size="icon" variant="ghost" className="h-8 w-8 text-danger"
-                          title={`Delete ${f.label}`}
-                          onClick={async () => {
-                            if (!(await confirm({
-                              title: `Delete "${f.label}"?`,
-                              description: 'This removes the attribute and every value entered for it. Any mapping pointing at it will read blank.',
-                              confirmLabel: 'Delete attribute',
-                            }))) return
-                            try {
-                              await del.mutateAsync(f.id)
-                              toast({ title: `Deleted "${f.label}"` })
-                            } catch (e) {
-                              toast({ title: 'Could not delete', description: (e as Error).message, variant: 'destructive' })
-                            }
-                          }}>
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+          <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col">
+            <TabsList className="flex-none self-start">
+              <TabsTrigger value="attributes">Attributes</TabsTrigger>
+              {canGovern && (
+                <TabsTrigger value="requests">
+                  Requests{pending > 0 && <Badge variant="warning" className="ml-1.5">{pending}</Badge>}
+                </TabsTrigger>
+              )}
+              {canRequest && <TabsTrigger value="new">New request</TabsTrigger>}
+              {canGovern && <TabsTrigger value="history">History</TabsTrigger>}
+            </TabsList>
+            <div className="-mr-2 mt-3 min-h-0 flex-1 overflow-y-auto pr-2">
+              <TabsContent value="attributes" className="mt-0">
+                <AttributesTab canEnterData={canEnterData} canConfigure={canConfigure} onEnter={setEntering} />
+              </TabsContent>
+              {canGovern && (
+                <TabsContent value="requests" className="mt-0">
+                  <RequestsTab canApprove={canApprove} myUserId={principal?.userId ?? null} />
+                </TabsContent>
+              )}
+              {canRequest && (
+                <TabsContent value="new" className="mt-0">
+                  <NewRequestTab onRequested={() => setTab('requests')} />
+                </TabsContent>
+              )}
+              {canGovern && (
+                <TabsContent value="history" className="mt-0"><HistoryTab /></TabsContent>
               )}
             </div>
-          </div>
+          </Tabs>
 
           <DialogFooter className="flex-none">
             <Button variant="outline" onClick={() => setOpen(false)}>Done</Button>

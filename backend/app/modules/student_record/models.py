@@ -7,7 +7,7 @@ lookups. Portable types only (D-04).
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy import (
@@ -436,11 +436,47 @@ class StudentCustomField(UUIDMixin, TenantMixin, TimestampMixin, Base):
     track_history: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     # Why this attribute was created — mandatory commentary, shown in the picker and the audit trail.
     reason: Mapped[str] = mapped_column(Text)
+    # The requester (maker). Kept under its original name; the API calls it ``requestedBy``.
     created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
+    # Governance — an attribute is requested, decided by someone other than the requester, and
+    # only then made active. Only live attributes (active, under review) take values, appear in
+    # the mapping picker and are read by a return. See custom_fields.Status.
+    status: Mapped[str] = mapped_column(String(20), default="pending", server_default="pending", index=True)
+    decided_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # The checker's reason — mandatory on rejection, optional on approval.
+    decision_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     values: Mapped[list["StudentCustomValue"]] = relationship(
         back_populates="field", cascade="all, delete-orphan", lazy="selectin"
+    )
+
+
+class StudentCustomFieldEvent(UUIDMixin, TenantMixin, Base):
+    """One lifecycle decision on a custom attribute (requested, approved, rejected, activated, …).
+    Append-only. The attribute's key and label are copied in so the trail still reads after a
+    withdrawn request is removed."""
+    __tablename__ = "student_custom_field_event"
+
+    custom_field_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("student_custom_field.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    field_key: Mapped[str] = mapped_column(String(60))
+    field_label: Mapped[str] = mapped_column(String(120))
+    action: Mapped[str] = mapped_column(String(30))
+    from_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    to_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    actor_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    actor_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    detail: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
 
 

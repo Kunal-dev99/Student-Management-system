@@ -163,8 +163,12 @@ async def record_schema(
     from app.modules.student_record.models import StudentCustomField
 
     body = as_dict()
+    from app.modules.student_record.custom_fields import Status
+
+    # Only live attributes are mappable: a pending/rejected request or a retired attribute is not.
     custom = list((await session.execute(
-        select(StudentCustomField).order_by(StudentCustomField.label)
+        select(StudentCustomField).where(StudentCustomField.status.in_(Status.LIVE))
+        .order_by(StudentCustomField.label)
     )).scalars().all())
     if custom:
         body["groups"].append({

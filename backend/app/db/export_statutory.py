@@ -80,6 +80,7 @@ async def main() -> None:
             )).all()
             custom_fields.append({
                 "key": f.key, "label": f.label, "data_type": f.data_type, "reason": f.reason,
+                "status": f.status,
                 "values": [{"student_ref": ref, "value": cv.value} for cv, ref in vals],
             })
 

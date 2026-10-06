@@ -39,6 +39,19 @@ from app.modules.student_record.timeline import StudentTimeline
 START = date(2025, 10, 1)
 
 
+async def _live_field(s, *, label, data_type, reason, user_id=None, track_history=False):
+    """An attribute that has already been through request → approve → activate (that flow is
+    covered by test_custom_attr_governance_p1); these tests are about its dated values."""
+    from app.modules.student_record.custom_fields import slugify
+    from app.modules.student_record.models import StudentCustomField
+
+    f = StudentCustomField(key=slugify(label), label=label, data_type=data_type, reason=reason,
+                           created_by_user_id=user_id, track_history=track_history, status="active")
+    s.add(f)
+    await s.commit()
+    return f
+
+
 @pytest_asyncio.fixture
 async def ctx():
     eng = create_async_engine("sqlite+aiosqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
@@ -108,11 +121,11 @@ async def test_custom_attribute_history_opt_in(ctx, clock):
     sid, sm = ctx
     async with sm() as s:
         svc = CustomFieldService(s)
-        plain = await svc.create_field(label="Notes code", data_type="code", reason="one-off", user_id=None)
+        plain = await _live_field(s, label="Notes code", data_type="code", reason="one-off", user_id=None)
         await svc.set_values(plain.id, entries=[{"studentId": str(sid), "value": "A"}], user_id=None)
         await svc.set_values(plain.id, entries=[{"studentId": str(sid), "value": "B"}], user_id=None)
 
-        dated = await svc.create_field(label="Research council", data_type="code",
+        dated = await _live_field(s, label="Research council", data_type="code",
                                        reason="HESA needs it as at the year end", user_id=None)
         await svc.set_values(dated.id, entries=[{"studentId": str(sid), "value": "MRC"}], user_id=None)
         field = await svc.enable_history(dated.id, user_id=None)
@@ -147,7 +160,7 @@ async def test_return_and_views_read_the_new_facts_as_at_the_date(ctx, clock):
         await FeeStatusHistoryService(s).change(st, "home", effective_from=date(2026, 9, 1))  # next year
         await LocationHistoryService(s).change(st, "SUTTON", effective_from=date(2026, 2, 1))
         svc = CustomFieldService(s)
-        f = await svc.create_field(label="Research council", data_type="code", reason="HESA",
+        f = await _live_field(s, label="Research council", data_type="code", reason="HESA",
                                    user_id=None, track_history=True)
         await svc.set_values(f.id, entries=[{"studentId": str(sid), "value": "MRC"}], user_id=None,
                              effective_date=START)
@@ -191,12 +204,14 @@ async def test_http_record_fact_and_dated_custom_values(ctx, clock):
 
     sid, sm = ctx
     async with sm() as s:
-        perms = [Permission(code=c) for c in ("student.read", "student.write", "admin.configure")]
+        perms = [Permission(code=c) for c in ("student.read", "student.write", "admin.configure",
+                                               "custom_attribute.request", "custom_attribute.approve")]
         s.add_all(perms); await s.flush()
         role = Role(name="Registry"); s.add(role); await s.flush()
         await s.refresh(role, ["permissions"]); role.permissions = perms
-        user = User(email="r@t.com", password_hash=hash_password("pw"), is_active=True)
-        s.add(user); await s.flush(); await s.refresh(user, ["roles"]); user.roles = [role]
+        for email in ("r@t.com", "chk@t.com"):   # maker + checker
+            user = User(email=email, password_hash=hash_password("pw"), is_active=True)
+            s.add(user); await s.flush(); await s.refresh(user, ["roles"]); user.roles = [role]
         await s.commit()
 
     async def _override():
@@ -220,15 +235,16 @@ async def test_http_record_fact_and_dated_custom_values(ctx, clock):
             assert [x["feeStatus"] for x in hist] == ["home"]
             assert (await c.get(f"/api/v1/students/{sid}", headers=h)).json()["feeStatus"] == "home"
 
-            f = (await c.post("/api/v1/students/custom-fields", headers=h, json={
-                "label": "Research council", "dataType": "code", "reason": "HESA", "trackHistory": True,
-            })).json()
+            from tests.integration.custom_attr_helpers import live_attribute
+            tok2 = (await c.post("/api/v1/auth/login", json={"email": "chk@t.com", "password": "pw"})).json()
+            h2 = {"Authorization": f"Bearer {tok2['accessToken']}"}
+            f = await live_attribute(c, h, h2, label="Research council", dataType="code", reason="HESA",
+                                     trackHistory=True)
             assert f["trackHistory"] is True
             r = await c.put(f"/api/v1/students/custom-fields/{f['id']}/values", headers=h, json={
                 "effectiveDate": "2026-01-01", "values": [{"studentId": str(sid), "value": "MRC"}]})
             assert r.status_code == 200, r.text
-            plain = (await c.post("/api/v1/students/custom-fields", headers=h, json={
-                "label": "Desk", "dataType": "string", "reason": "ops"})).json()
+            plain = await live_attribute(c, h, h2, label="Desk", dataType="string", reason="ops")
             r = await c.post(f"/api/v1/students/custom-fields/{plain['id']}/track-history", headers=h)
             assert r.status_code == 200 and r.json()["trackHistory"] is True
     finally:

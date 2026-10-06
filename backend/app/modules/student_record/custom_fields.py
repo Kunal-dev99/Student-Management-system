@@ -1,9 +1,14 @@
 """Admin-defined custom student attributes — service layer.
 
 Captures an attribute a statutory return needs but the core model doesn't hold. A definition is
-created once (with mandatory commentary), then a value is entered per student. Statutory mappings
-read these through the ``custom.<key>`` source path (wired in ``exports.statutory.build_records``
-and the record-schema catalog).
+requested (with mandatory commentary), decided by someone other than the requester, activated, and
+only then takes a value per student. Statutory mappings read these through the ``custom.<key>``
+source path (wired in ``exports.statutory.build_records`` and the record-schema catalog).
+
+Governance (custom attribute plan, Phase 1): request → approve | reject → activate. Every
+transition is written to ``student_custom_field_event`` and to the audit log. Only *live*
+attributes (active, or active-but-under-review) take values, are offered for mapping and are read
+by a return; a pending or rejected request is invisible to all three.
 
 Effective dating, Phase 6: an attribute can opt in to dated history (``track_history``). Its values
 are then recorded with the date they took effect, the return reads the value as at the period it
@@ -13,21 +18,41 @@ from __future__ import annotations
 
 import re
 import uuid
-from datetime import date
+from datetime import date, datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import ConflictError, NotFoundError, ValidationAppError, WorkflowError
+from app.core.audit import record_audit
+from app.core.errors import (
+    ConflictError, NotFoundError, PermissionError, ValidationAppError, WorkflowError,
+)
+from app.core.principal import Principal
 from app.modules.person.models import Person
 from app.modules.student_record.models import (
     Student,
     StudentCustomField,
+    StudentCustomFieldEvent,
     StudentCustomValue,
 )
 
 _ALLOWED_TYPES = {"string", "number", "date", "code"}
 _KEY_RE = re.compile(r"[^a-z0-9]+")
+
+
+class Status:
+    """Lifecycle of a custom attribute (plan §5). Stored as plain strings."""
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    ACTIVE = "active"
+    REVIEW = "review"
+    RETIRED = "retired"
+
+    ALL = (PENDING, APPROVED, REJECTED, ACTIVE, REVIEW, RETIRED)
+    # Live = takes values, mappable, read by a return. "review" is still live: an attribute being
+    # reviewed for retirement keeps working until it is actually retired.
+    LIVE = (ACTIVE, REVIEW)
 
 
 def slugify(label: str) -> str:
@@ -36,31 +61,59 @@ def slugify(label: str) -> str:
     return key[:60] or "field"
 
 
+def is_live(field: StudentCustomField) -> bool:
+    return field.status in Status.LIVE
+
+
 class CustomFieldService:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def list_fields(self) -> list[StudentCustomField]:
-        return list((await self.session.execute(
-            select(StudentCustomField).order_by(StudentCustomField.label)
-        )).scalars().all())
+    async def list_fields(self, statuses: tuple[str, ...] | None = None) -> list[StudentCustomField]:
+        q = select(StudentCustomField).order_by(StudentCustomField.label)
+        if statuses:
+            bad = set(statuses) - set(Status.ALL)
+            if bad:
+                raise ValidationAppError(f"Unknown status: {', '.join(sorted(bad))}. "
+                                         f"Use one of {', '.join(Status.ALL)}.")
+            q = q.where(StudentCustomField.status.in_(statuses))
+        return list((await self.session.execute(q)).scalars().all())
 
-    async def get_field(self, field_id: uuid.UUID) -> StudentCustomField:
-        f = (await self.session.execute(
-            select(StudentCustomField).where(StudentCustomField.id == field_id)
-        )).scalar_one_or_none()
+    async def get_field(self, field_id: uuid.UUID, *, for_update: bool = False) -> StudentCustomField:
+        q = select(StudentCustomField).where(StudentCustomField.id == field_id)
+        if for_update:
+            # Two checkers deciding the same request at once: the second waits, then sees the
+            # first decision and is refused by the state check.
+            q = q.with_for_update()
+        f = (await self.session.execute(q)).scalar_one_or_none()
         if f is None:
-            raise NotFoundError("Custom field not found")
+            raise NotFoundError("Custom attribute not found")
         return f
 
-    async def create_field(
-        self, *, label: str, data_type: str, reason: str, user_id: uuid.UUID | None,
+    async def live_field(self, field_id: uuid.UUID) -> StudentCustomField:
+        """The attribute, refused unless it is live — the gate for entering values."""
+        field = await self.get_field(field_id)
+        if not is_live(field):
+            raise WorkflowError(
+                f"'{field.label}' is {field.status}, not active — values can only be entered for an "
+                "active attribute."
+            )
+        return field
+
+    # --- governance ---------------------------------------------------------------------------
+
+    async def request_field(
+        self, *, label: str, data_type: str, reason: str, principal: Principal,
         track_history: bool = False,
     ) -> StudentCustomField:
+        """The maker's step: a pending request. Nothing is mappable or enterable until a
+        different person approves it and it is activated."""
         label = (label or "").strip()
         reason = (reason or "").strip()
         if not label:
             raise ValidationAppError("A label is required.")
+        if len(label) > 120:
+            raise ValidationAppError("The label must be 120 characters or fewer.")
         if not reason:
             raise ValidationAppError("A reason is required — say why this attribute is being captured.")
         data_type = (data_type or "string").strip().lower()
@@ -71,15 +124,122 @@ class CustomFieldService:
             select(StudentCustomField).where(StudentCustomField.key == key)
         )).scalar_one_or_none()
         if exists is not None:
-            raise ConflictError(f"A custom attribute with key '{key}' already exists.")
+            raise ConflictError(
+                f"A custom attribute with key '{key}' already exists ('{exists.label}', {exists.status})."
+            )
         field = StudentCustomField(
             key=key, label=label, data_type=data_type, reason=reason,
-            created_by_user_id=user_id, track_history=bool(track_history),
+            created_by_user_id=principal.user_id, track_history=bool(track_history),
+            status=Status.PENDING,
         )
         self.session.add(field)
+        await self.session.flush()
+        await self._event(field, "requested", None, Status.PENDING, principal, reason,
+                          detail={"dataType": data_type, "trackHistory": bool(track_history)})
         await self.session.commit()
         await self.session.refresh(field)
         return field
+
+    async def approve(
+        self, field_id: uuid.UUID, *, principal: Principal, reason: str | None = None,
+        activate: bool = False,
+    ) -> StudentCustomField:
+        """The checker's step. Refused for the requester (maker-checker). ``activate`` makes it
+        live in the same call — two recorded transitions, approve then activate."""
+        field = await self.get_field(field_id, for_update=True)
+        self._require_status(field, Status.PENDING, "approve")
+        self._refuse_self_decision(field, principal)
+        field.status = Status.APPROVED
+        self._stamp_decision(field, principal, reason)
+        await self._event(field, "approved", Status.PENDING, Status.APPROVED, principal, field.decision_reason)
+        if activate:
+            field.status = Status.ACTIVE
+            await self._event(field, "activated", Status.APPROVED, Status.ACTIVE, principal, None)
+        await self.session.commit()
+        await self.session.refresh(field)
+        return field
+
+    async def reject(self, field_id: uuid.UUID, *, principal: Principal, reason: str) -> StudentCustomField:
+        reason = (reason or "").strip()
+        if not reason:
+            raise ValidationAppError("A reason is required to reject a request.")
+        field = await self.get_field(field_id, for_update=True)
+        self._require_status(field, Status.PENDING, "reject")
+        self._refuse_self_decision(field, principal)
+        field.status = Status.REJECTED
+        self._stamp_decision(field, principal, reason)
+        await self._event(field, "rejected", Status.PENDING, Status.REJECTED, principal, reason)
+        await self.session.commit()
+        await self.session.refresh(field)
+        return field
+
+    async def activate(self, field_id: uuid.UUID, *, principal: Principal) -> StudentCustomField:
+        field = await self.get_field(field_id, for_update=True)
+        self._require_status(field, Status.APPROVED, "activate")
+        field.status = Status.ACTIVE
+        await self._event(field, "activated", Status.APPROVED, Status.ACTIVE, principal, None)
+        await self.session.commit()
+        await self.session.refresh(field)
+        return field
+
+    async def withdraw(self, field_id: uuid.UUID, *, principal: Principal) -> None:
+        """Remove a pending request (raised by mistake, or no longer wanted). Nothing was ever
+        entered against it. Decided attributes are kept: a rejection is part of the record, and
+        an active attribute holds student data."""
+        field = await self.get_field(field_id, for_update=True)
+        if field.status != Status.PENDING:
+            raise ConflictError(
+                f"'{field.label}' is {field.status}; only a pending request can be withdrawn. "
+                "Attributes that have been decided are kept for the record."
+            )
+        await self._event(field, "withdrawn", Status.PENDING, None, principal, None)
+        await self.session.delete(field)
+        await self.session.commit()
+
+    async def events(self, field_id: uuid.UUID | None = None, *, limit: int = 200) -> list[StudentCustomFieldEvent]:
+        q = select(StudentCustomFieldEvent).order_by(StudentCustomFieldEvent.created_at.desc()).limit(limit)
+        if field_id is not None:
+            q = q.where(StudentCustomFieldEvent.custom_field_id == field_id)
+        return list((await self.session.execute(q)).scalars().all())
+
+    @staticmethod
+    def _require_status(field: StudentCustomField, expected: str, action: str) -> None:
+        if field.status != expected:
+            raise ConflictError(f"Can't {action} '{field.label}': it is {field.status}, not {expected}.")
+
+    @staticmethod
+    def _refuse_self_decision(field: StudentCustomField, principal: Principal) -> None:
+        if field.created_by_user_id is not None and field.created_by_user_id == principal.user_id:
+            raise PermissionError(
+                "You requested this attribute, so someone else must decide on it (maker-checker)."
+            )
+
+    @staticmethod
+    def _stamp_decision(field: StudentCustomField, principal: Principal, reason: str | None) -> None:
+        field.decided_by_user_id = principal.user_id
+        field.decided_at = datetime.now(timezone.utc)
+        field.decision_reason = (reason or "").strip() or None
+
+    async def _event(
+        self, field: StudentCustomField, action: str, from_status: str | None, to_status: str | None,
+        principal: Principal | None, notes: str | None, *, detail: dict | None = None,
+    ) -> None:
+        self.session.add(StudentCustomFieldEvent(
+            custom_field_id=field.id, field_key=field.key, field_label=field.label, action=action,
+            from_status=from_status, to_status=to_status,
+            actor_user_id=principal.user_id if principal else None,
+            actor_email=principal.email if principal else None,
+            notes=notes, detail=detail,
+        ))
+        await record_audit(
+            self.session, action=f"custom_attribute.{action}", entity_type="student_custom_field",
+            entity_id=field.id, actor_user_id=principal.user_id if principal else None,
+            actor_email=principal.email if principal else None,
+            detail={"key": field.key, "label": field.label, "from": from_status, "to": to_status,
+                    "notes": notes, **(detail or {})},
+        )
+
+    # --- values -------------------------------------------------------------------------------
 
     async def enable_history(self, field_id: uuid.UUID, *, user_id: uuid.UUID | None) -> StudentCustomField:
         """Start keeping dated history. Values already entered open their history from the
@@ -105,15 +265,10 @@ class CustomFieldService:
         await self.session.refresh(field)
         return field
 
-    async def delete_field(self, field_id: uuid.UUID) -> None:
-        field = await self.get_field(field_id)
-        await self.session.delete(field)
-        await self.session.commit()
-
     async def field_values(self, field_id: uuid.UUID) -> list[dict]:
         """Every student with their current value for this field (blank if unset) — drives the
         data-entry grid."""
-        await self.get_field(field_id)
+        await self.live_field(field_id)
         existing = {
             v.student_id: v.value
             for v in (await self.session.execute(
@@ -143,7 +298,7 @@ class CustomFieldService:
 
         For an attribute that keeps history, each value is recorded from ``effective_date``
         (default today) instead of overwriting, and clearing is refused."""
-        field = await self.get_field(field_id)
+        field = await self.live_field(field_id)
         if field.track_history:
             return await self._set_dated_values(field, entries, user_id, effective_date)
         current = {

@@ -60,6 +60,11 @@ PERMISSIONS: dict[str, str] = {
     # EXCLUSIVE — it is NOT granted by the "*" wildcard, so an Institution Administrator does not
     # get it; only a role that lists it explicitly (dev) holds it.
     "platform.configure": "Configure platform navigation / features (developer console)",
+    # Custom attribute governance — a new statutory attribute is requested by one person (maker)
+    # and decided by another (checker). Requesting is part of running a return (PGR Administrator);
+    # deciding is not — only "*" roles hold it by default.
+    "custom_attribute.request": "Request a new custom student attribute",
+    "custom_attribute.approve": "Approve, reject or activate custom student attribute requests",
 }
 
 # Permissions that the "*" wildcard does NOT grant — they must be listed explicitly on a role.
@@ -80,6 +85,7 @@ ROLES: dict[str, list[str]] = {
         "assistant.use", "student.lifecycle.approve",
         "ml.read", "ml.analyse", "ml.train",
         "taught.read", "taught.change",
+        "custom_attribute.request",
     ],
     "Supervisor": ["student.read", "progression.read", "progression.decide", "document.read", "taught.read"],
     "Executive": ["reporting.read"],

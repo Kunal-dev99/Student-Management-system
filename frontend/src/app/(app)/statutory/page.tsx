@@ -2292,6 +2292,9 @@ export default function StatutoryPage() {
   const { hasPermission } = useAuth()
   const canConfigure = hasPermission('admin.configure')
   const canSignOff = hasPermission('reports.signoff')
+  // Custom attributes: requesting/deciding is its own permission (PGR Administrator may request).
+  const canCustomAttrs = canConfigure || hasPermission('custom_attribute.request')
+    || hasPermission('custom_attribute.approve')
   // The HESA specification is shared by every institution: only the platform team changes it.
   const canChangeSpec = hasPermission('platform.configure')
 
@@ -2479,7 +2482,7 @@ export default function StatutoryPage() {
                 {tab === 'fields' && (
                   <div className="flex items-center gap-2">
                     {canConfigure && !detail.data?.signedOff && <AddFieldDialog profileId={selectedId} />}
-                    {canConfigure && <CustomAttributesDialog />}
+                    {canCustomAttrs && <CustomAttributesDialog />}
                     {canConfigure && detail.data && <CloneDialog profile={detail.data} />}
                   </div>
                 )}
