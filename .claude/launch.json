@@ -8,6 +8,13 @@
       "cwd": "frontend",
       "port": 3000,
       "autoPort": true
+    },
+    {
+      "name": "backend",
+      "runtimeExecutable": "C:/Users/KunalSharma/OneDrive - fusionpractices.com/Documents/RMS_UPDATED/backend/.venv/Scripts/python.exe",
+      "runtimeArgs": ["-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8000"],
+      "cwd": "backend",
+      "port": 8000
     }
   ]
 }
