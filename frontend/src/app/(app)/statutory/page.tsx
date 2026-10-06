@@ -41,6 +41,7 @@ import { AdvisoriesPanel } from '@/features/statutory/AdvisoriesPanel'
 import { RetrospectiveChangesPanel } from '@/features/statutory/RetrospectiveChangesPanel'
 import { ReturnVersionsPanel } from '@/features/statutory/ReturnVersionsPanel'
 import { MappingCheckNote } from '@/features/statutory/MappingCheckNote'
+import { ProfileCustomAttributesNote } from '@/features/statutory/ProfileCustomAttributesNote'
 import {
   useAddField, useCloneProfile, useCompileProfile, useCreateFromSpec, useCreateProfile,
   useGenerateProfile, useProfile, useProfiles, useSignOffProfile, useSpecs, useTransforms,
@@ -2535,6 +2536,7 @@ export default function StatutoryPage() {
             </div>
 
             <div className="pt-4">
+              {tab === 'fields' && selectedId && <ProfileCustomAttributesNote profileId={selectedId} />}
               {tab === 'fields' && (
                 detail.isLoading ? <Skeleton className="h-24 w-full" /> :
                 detail.isError ? <ErrorState error={detail.error} /> :
@@ -2673,6 +2675,18 @@ export default function StatutoryPage() {
                   {showGenerated && generated && (
                     <div className="pt-3 border-t border-border space-y-2">
                       <p className="text-label">Last generated</p>
+                      {generated.runtime && (
+                        <p className="text-helper">
+                          Read {generated.runtime.customKeysLoaded.length} custom attribute
+                          {generated.runtime.customKeysLoaded.length === 1 ? '' : 's'}
+                          {generated.runtime.customKeysLoaded.length > 0 && <> (<span className="font-mono text-xs">{generated.runtime.customKeysLoaded.join(', ')}</span>)</>}
+                          {' '}— {generated.runtime.customValuesLoaded.toLocaleString()} values, records built in{' '}
+                          {(generated.runtime.buildMs / 1000).toFixed(1)}s.
+                          {generated.runtime.customKeysSkipped.length > 0 && (
+                            <span className="text-danger"> Not read (no longer live): {generated.runtime.customKeysSkipped.join(', ')}.</span>
+                          )}
+                        </p>
+                      )}
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="text-sm font-mono">{generated.job.filename ?? 'export.csv'}</span>
                         <Badge variant="secondary">{generated.job.status}</Badge>

@@ -110,11 +110,37 @@ export interface ValidationReport {
   validation: ValidationResult
 }
 
+/** What building the return loaded (custom attribute governance, Phase 5). */
+export interface GenerateRuntime {
+  customScope: 'profile' | 'all-live'
+  customKeysLoaded: string[]
+  /** Named by a mapping but not live (retired / pending / missing) — read as blank. */
+  customKeysSkipped: string[]
+  customValuesLoaded: number
+  datedCustomValues: number
+  recordCount: number
+  buildMs: number
+}
+
 export interface GenerateResult {
   job: { id: string; filename: string | null; rowCount: number | null; status: string }
   profile: ReportProfile
   validation: ValidationResult
+  runtime?: GenerateRuntime | null
 }
+
+export interface ProfileCustomAttributes {
+  used: MappingDependency[]
+  obsoleteCount: number
+  unusedLive: string[]
+}
+
+export const useProfileCustomAttributes = (profileId: string | null) =>
+  useQuery({
+    queryKey: ['report-profile', profileId, 'custom-attributes'],
+    queryFn: () => api.get<ProfileCustomAttributes>(`/report-profiles/${profileId}/custom-attributes`),
+    enabled: !!profileId,
+  })
 
 export const useProfiles = () =>
   useQuery({ queryKey: ['report-profiles'], queryFn: () => api.get<ReportProfile[]>('/report-profiles') })

@@ -212,9 +212,12 @@ async def frozen(session: AsyncSession, profile, version) -> tuple[bytes, str]:
     from app.modules.exports.statutory import StatutoryEngine
 
     engine = StatutoryEngine(session)
+    from app.modules.exports.statutory import mapped_custom_keys
+
+    mappings = await engine._mappings(profile.id)
     records = await engine.build_records(academic_year=version.academic_year, as_at=version.as_at,
-                                         known_at=version.known_at)
-    sources = {m.target_field: m.source_expression for m in await engine._mappings(profile.id)}
+                                         known_at=version.known_at, custom_keys=mapped_custom_keys(mappings))
+    sources = {m.target_field: m.source_expression for m in mappings}
     data = build(version.header, version.rows, records, sources,
                  code=profile.code, academicYear=version.academic_year, version=f"v{version.version_no}",
                  asAt=version.as_at.isoformat() if version.as_at else None,

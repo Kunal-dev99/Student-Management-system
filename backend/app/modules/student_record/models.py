@@ -450,8 +450,11 @@ class StudentCustomField(UUIDMixin, TenantMixin, TimestampMixin, Base):
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # The checker's reason — mandatory on rejection, optional on approval.
     decision_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Never loaded through the definition (governance Phase 5): every catalogue/list query used to
+    # pull every student's value for every attribute via selectin. Values are always queried
+    # explicitly; deleting a definition leaves the value rows to the database's ON DELETE CASCADE.
     values: Mapped[list["StudentCustomValue"]] = relationship(
-        back_populates="field", cascade="all, delete-orphan", lazy="selectin"
+        back_populates="field", lazy="noload", passive_deletes=True
     )
 
 

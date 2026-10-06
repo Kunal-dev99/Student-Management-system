@@ -80,6 +80,8 @@ class ExportService:
             "profile": profile,
             "asAt": result.get("asAt"), "knownAt": result.get("knownAt"),
             "validation": result["validation"],
+            # Custom attribute governance, Phase 5 — what the return loaded, and how long it took.
+            "runtime": result.get("runtime"),
         }
 
     async def _run_students_statutory(self) -> tuple[str, int, str]:

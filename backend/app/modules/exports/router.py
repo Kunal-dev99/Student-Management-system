@@ -507,7 +507,10 @@ async def preview_transform(
         # a plain rejection, not the standard error envelope used by full mutations.
         raise HTTPException(status_code=400, detail=str(e))
 
-    records = await eng.build_records()
+    from app.modules.exports.statutory import mapped_custom_keys
+
+    # A preview reads one source path, so only that attribute (if custom) is loaded.
+    records = await eng.build_records(custom_keys=mapped_custom_keys([body.source_expression]))
     sample = records[:20]
 
     rows: list[dict] = []
