@@ -12,6 +12,7 @@ python -m scripts.seed_statutory_demo
 
 | Login | Role | Use in the demo |
 |---|---|---|
+| admin@icr.demo | Institution Administrator + PGR Administrator | The institution's admin (every permission) |
 | requester@icr.demo | PGR Administrator | Raises custom-attribute requests, runs/generates the return |
 | approver@icr.demo | Institution Administrator | Approves/rejects requests, maps fields, retires/restores, signs off |
 | approver2@icr.demo | Institution Administrator | The second person for maker-checker steps (e.g. retire after approver started a review) |
@@ -24,6 +25,7 @@ attributes (care leaver flag, disability, ethnic origin, refugee status, SEXORT)
 
 | Login | Role | Use in the demo |
 |---|---|---|
+| admin@oxbridge.demo | Institution Administrator + PGR Administrator | The institution's admin (every permission) |
 | requester@oxbridge.demo | PGR Administrator | Same as above, for Oxbridge |
 | approver@oxbridge.demo | Institution Administrator | Same as above, for Oxbridge |
 | approver2@oxbridge.demo | Institution Administrator | Second approver |

@@ -35,12 +35,14 @@ from app.modules.person.models import Person
 # subdomain -> (label, password, [(email, roles, (given, family), what it's for)])
 INSTITUTIONS = {
     "default": ("Institute of Cancer Research", "ICRdemo2026!", [
+        ("admin@icr.demo", ["Institution Administrator", "PGR Administrator"], ("Alex", "Morgan"), "Institution admin (all permissions)"),
         ("requester@icr.demo", ["PGR Administrator"], ("Riya", "Patel"), "Requests attributes, runs the return"),
         ("approver@icr.demo", ["Institution Administrator"], ("James", "Holt"), "Approves, maps, signs off"),
         ("approver2@icr.demo", ["Institution Administrator"], ("Sofia", "Marsh"), "Second approver (maker-checker)"),
         ("supervisor@icr.demo", ["Supervisor"], ("Owen", "Clarke"), "No statutory access"),
     ]),
     "oxbridge": ("Oxbridge University", "OXBdemo2026!", [
+        ("admin@oxbridge.demo", ["Institution Administrator", "PGR Administrator"], ("Clare", "Bennett"), "Institution admin (all permissions)"),
         ("requester@oxbridge.demo", ["PGR Administrator"], ("Hannah", "Reed"), "Requests attributes, runs the return"),
         ("approver@oxbridge.demo", ["Institution Administrator"], ("Daniel", "Ward"), "Approves, maps, signs off"),
         ("approver2@oxbridge.demo", ["Institution Administrator"], ("Grace", "Lin"), "Second approver (maker-checker)"),
