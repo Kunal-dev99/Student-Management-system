@@ -39,6 +39,7 @@ import {
 import { AssessmentPanel, VerdictBadge } from '@/features/statutory/AssessmentPanel'
 import { ACTION_LABEL, CopyPath, StatusBadge, fmt } from '@/features/statutory/customAttrUi'
 import { CatalogueTab } from '@/features/statutory/CustomAttributeCatalogue'
+import { UsageReviewTab } from '@/features/statutory/CustomAttributeUsage'
 
 const TYPES: { v: CustomFieldType; l: string }[] = [
   { v: 'code', l: 'Code (e.g. 01, 02)' },
@@ -551,6 +552,7 @@ export function CustomAttributesDialog() {
                 </TabsTrigger>
               )}
               {canRequest && <TabsTrigger value="new">New request</TabsTrigger>}
+              {canGovern && <TabsTrigger value="usage">Usage &amp; review</TabsTrigger>}
               {canGovern && <TabsTrigger value="history">History</TabsTrigger>}
             </TabsList>
             <div className="-mr-2 mt-3 min-h-0 flex-1 overflow-y-auto pr-2">
@@ -571,6 +573,9 @@ export function CustomAttributesDialog() {
                 <TabsContent value="new" className="mt-0">
                   <NewRequestTab onRequested={() => setTab('requests')} />
                 </TabsContent>
+              )}
+              {canGovern && (
+                <TabsContent value="usage" className="mt-0"><UsageReviewTab canGovern={canGovern} /></TabsContent>
               )}
               {canGovern && (
                 <TabsContent value="history" className="mt-0"><HistoryTab /></TabsContent>

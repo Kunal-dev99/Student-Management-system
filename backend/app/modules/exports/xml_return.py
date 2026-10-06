@@ -70,6 +70,9 @@ async def live(session: AsyncSession, profile_id: uuid.UUID, *, as_at: date | No
     engine = StatutoryEngine(session)
     result = await engine.generate(profile_id, as_at=as_at, known_at=known_at, issue_limit=0)
     profile = await engine.get_profile(profile_id)
+    # Governance Phase 6 — a downloaded return counts as a use of the attributes it read.
+    await engine.note_usage(profile, purpose="download", row_count=result["rowCount"])
+    await session.commit()
     v = result["validation"]
     data = build(result["header"], result["rows"], code=profile.code, academicYear=profile.academic_year,
                  asAt=result["asAt"], knownAt=result["knownAt"],

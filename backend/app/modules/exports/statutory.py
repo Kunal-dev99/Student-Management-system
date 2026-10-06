@@ -232,6 +232,15 @@ class StatutoryEngine:
         self.last_build_stats: dict = {}
         self.session = session
 
+    async def note_usage(self, profile, *, purpose: str, row_count: int) -> None:
+        """Record that a return read the custom attributes the last build loaded (governance
+        Phase 6). Only for real outputs — a file generated or downloaded, a sign-off — never a
+        validation preview. Adds rows; the caller commits."""
+        from app.modules.student_record.custom_attr_usage import record_usage
+
+        await record_usage(self.session, keys=self.last_build_stats.get("customKeysLoaded"),
+                           profile=profile, purpose=purpose, row_count=row_count)
+
     # ---------------- profiles ----------------
 
     async def list_profiles(self) -> list[dict]:
@@ -1662,6 +1671,7 @@ class StatutoryEngine:
             raise WorkflowError("Cannot sign off: profile has no field mappings")
         signed_at = datetime.now(timezone.utc)
         gen = await self.generate(profile_id, as_at=as_at, known_at=signed_at)
+        await self.note_usage(profile, purpose="sign_off", row_count=gen["rowCount"])
         if not gen["validation"]["valid"]:
             raise WorkflowError(
                 f"Cannot sign off: {gen['validation']['errors']} validation error(s) in the current "

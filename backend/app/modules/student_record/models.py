@@ -503,6 +503,28 @@ class StudentCustomFieldAssessment(UUIDMixin, TenantMixin, Base):
     )
 
 
+class StudentCustomFieldUsage(UUIDMixin, TenantMixin, Base):
+    """A return read this attribute (governance Phase 6): one row per attribute each time a return
+    is produced for real — generated, downloaded or signed off. Drives "last used" and the
+    lifecycle review. The profile's code and year are copied in so the row outlives the profile."""
+    __tablename__ = "student_custom_field_usage"
+    __table_args__ = (Index("ix_custom_field_usage_field_used", "custom_field_id", "used_at"),)
+
+    custom_field_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("student_custom_field.id", ondelete="CASCADE"), index=True
+    )
+    profile_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("report_profile.id", ondelete="SET NULL"), nullable=True
+    )
+    profile_code: Mapped[str] = mapped_column(String(40))
+    academic_year: Mapped[str] = mapped_column(String(9))
+    purpose: Mapped[str] = mapped_column(String(20))         # generate | download | sign_off
+    row_count: Mapped[int] = mapped_column(Integer, default=0)
+    used_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+
 class StudentCustomValue(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "student_custom_value"
     __table_args__ = (

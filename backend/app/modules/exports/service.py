@@ -57,6 +57,7 @@ class ExportService:
 
         engine = StatutoryEngine(self.session)
         result = await engine.generate(profile_id, as_at=as_at, known_at=known_at)
+        await engine.note_usage(result["profile"], purpose="generate", row_count=result["rowCount"])
 
         buf = io.StringIO()
         w = csv.writer(buf)

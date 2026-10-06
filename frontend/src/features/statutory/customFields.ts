@@ -58,6 +58,32 @@ export interface CustomFieldDetail extends CustomField {
 
 export type LifecycleAction = 'review' | 'keep' | 'retire' | 'restore'
 
+/** Usage signals and the review recommendation (governance Phase 6). */
+export interface CustomFieldHealth {
+  mappings: { profileId: string; profileCode: string; academicYear: string; targetField: string; signedOff: boolean; live: boolean }[]
+  liveMappingCount: number
+  filledCount: number
+  currentStudents: number
+  fillRate: number
+  lastValueUpdate: string | null
+  lastUsed: string | null
+  useCount: number
+  lastActivity: string | null
+  hesa: { field: string | null; state: 'present' | 'removed' | 'unknown'; specification: string | null }
+  /** Mapped in a live return — never proposed for review. */
+  protected: boolean
+  reasons: string[]
+  reviewCandidate: boolean
+  recommendation: string
+}
+
+export const useCustomFieldDashboard = (enabled: boolean) =>
+  useQuery({
+    queryKey: ['custom-field-dashboard'],
+    queryFn: () => api.get<(CustomField & { health: CustomFieldHealth })[]>('/students/custom-attributes/dashboard'),
+    enabled,
+  })
+
 export type AssessmentVerdict = 'duplicate' | 'review' | 'supported' | 'no_hesa_basis'
 
 export interface HesaFieldMatch {
@@ -162,6 +188,7 @@ const useInvalidateAll = () => {
     qc.invalidateQueries({ queryKey: ['custom-field-events'] })
     qc.invalidateQueries({ queryKey: ['custom-field-catalogue'] })
     qc.invalidateQueries({ queryKey: ['custom-field-detail'] })
+    qc.invalidateQueries({ queryKey: ['custom-field-dashboard'] })
     qc.invalidateQueries({ queryKey: ['report-profile-record-schema'] })
   }
 }

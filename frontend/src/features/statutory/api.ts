@@ -402,7 +402,11 @@ export function useGenerateProfile() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (profileId: string) => api.post<GenerateResult>(`/report-profiles/${profileId}/generate`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['exports'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['exports'] })
+      // A generated return records which custom attributes it read ("last used").
+      qc.invalidateQueries({ queryKey: ['custom-field-dashboard'] })
+    },
   })
 }
 

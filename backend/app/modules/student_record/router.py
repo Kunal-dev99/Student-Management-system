@@ -443,6 +443,60 @@ async def custom_attribute_catalogue(
     return await _catalogue_out(session, await CustomFieldService(session).list_fields(wanted))
 
 
+async def _health_out(session: AsyncSession, fields) -> list[dict]:
+    from app.modules.student_record.custom_attr_usage import health
+
+    fields = list(fields)
+    rows = await _fields_out(session, fields)
+    signals = await health(session, fields)
+    for f, row in zip(fields, rows):
+        row["health"] = signals.get(f.id)
+    return rows
+
+
+@router.get("/custom-attributes/dashboard",
+            summary="Usage and lifecycle review for every active / under-review attribute")
+async def custom_attribute_dashboard(
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_any_permission(*_GOVERNANCE)),
+) -> list[dict]:
+    fields = await CustomFieldService(session).list_fields((CustomStatus.ACTIVE, CustomStatus.REVIEW))
+    rows = await _health_out(session, fields)
+    # Review candidates first, then under review, then the rest by label.
+    rank = {"review": 0, "under review": 1}
+    return sorted(rows, key=lambda r: (rank.get(r["health"]["recommendation"], 2), r["label"]))
+
+
+@router.get("/custom-attributes/review-candidates",
+            summary="Active attributes the review rules flag (none are changed automatically)")
+async def custom_attribute_review_candidates(
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_any_permission(*_GOVERNANCE)),
+) -> list[dict]:
+    fields = await CustomFieldService(session).list_fields((CustomStatus.ACTIVE,))
+    return [r for r in await _health_out(session, fields) if r["health"]["reviewCandidate"]]
+
+
+@router.get("/custom-attributes/{field_id}/usage", summary="When and where returns read this attribute")
+async def custom_attribute_usage(
+    field_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_any_permission(*_GOVERNANCE)),
+) -> dict:
+    from app.modules.student_record.custom_attr_usage import usage_detail
+
+    return await usage_detail(session, await CustomFieldService(session).get_field(field_id))
+
+
+@router.get("/custom-attributes/{field_id}/health", summary="Usage signals and the review recommendation")
+async def custom_attribute_health(
+    field_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_any_permission(*_GOVERNANCE)),
+) -> dict:
+    return (await _health_out(session, [await CustomFieldService(session).get_field(field_id)]))[0]
+
+
 @router.get("/custom-attributes/{field_id}", summary="One attribute: usage, mappings, decision trail")
 async def custom_attribute_detail(
     field_id: uuid.UUID,
