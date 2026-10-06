@@ -1505,6 +1505,8 @@ class StatutoryEngine:
             m.target_field for m in mappings if m.required and not _resolved(m)
         )
         spec = await resolve_fields(self.session, profile.code, profile.academic_year)
+        from app.modules.exports.custom_mapping import obsolete_mappings
+        obsolete = await obsolete_mappings(self.session, profile, mappings)
         # Carry the spec's recommended source/transform/default through so the "Map" affordance
         # on the sign-off tab can offer a one-click map for fields the spec pack already knows how
         # to source (avoids the modal-and-a-form-for-every-row UX complaint from ICR testing).
@@ -1530,7 +1532,10 @@ class StatutoryEngine:
             # Present-but-unmapped required fields — not "missing" (they're in the Fields tab) but
             # they still block sign-off. The UI shows a pointer to the Fields tab for these.
             "unmappedRequired": unmapped_required,
-            "signOffReady": (not missing) and (not unmapped_required) and bool(mappings),
+            # Custom attribute governance, Phase 4 — a mapping to a retired / never-live / deleted
+            # custom attribute would quietly read blank, so it blocks sign-off until re-mapped.
+            "obsoleteMappings": obsolete,
+            "signOffReady": (not missing) and (not unmapped_required) and (not obsolete) and bool(mappings),
             # Suppressed rules are attested to at sign-off, so surface them wherever the sign-off
             # UI is rendered — not only inside a validation result.
             "suppressions": await self._collect_suppressions(profile),
@@ -1595,6 +1600,13 @@ class StatutoryEngine:
             raise ConflictError("Profile is already signed off")
         report = await self.compile(profile_id)
         if not report["signOffReady"]:
+            obsolete = report.get("obsoleteMappings", [])
+            if obsolete:
+                raise WorkflowError(
+                    "Cannot sign off: " + "; ".join(f"{o['targetField']} reads {o['sourceExpression']} — {o['reason']}"
+                                                   for o in obsolete[:5])
+                    + " Re-map these fields first."
+                )
             blockers = [m["field"] for m in report["missing"]] + report.get("unmappedRequired", [])
             if blockers:
                 shown = ", ".join(blockers[:8])

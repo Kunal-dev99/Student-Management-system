@@ -254,8 +254,73 @@ async def clone_profile(
     session: AsyncSession = Depends(get_session),
     _=Depends(require_permission("admin.configure")),
 ) -> dict:
+    from app.modules.exports.custom_mapping import obsolete_mappings
+
     eng = _engine(session)
-    return eng.profile_out(await eng.clone_profile(profile_id, academic_year=body.academic_year))
+    clone = await eng.clone_profile(profile_id, academic_year=body.academic_year)
+    # Custom attribute governance, Phase 4 — carried-forward mappings to attributes that are no
+    # longer live are copied (so they can be seen and re-mapped) but reported, and they block the
+    # new year's sign-off until fixed.
+    return {**eng.profile_out(clone), "obsoleteMappings": await obsolete_mappings(session, clone)}
+
+
+class FieldValidateIn(BaseModel):
+    targetField: str = ""
+    sourceExpression: str = ""
+    transform: str | None = None
+    mappingId: uuid.UUID | None = None   # when editing an existing mapping
+
+
+@profiles_router.get("/{profile_id}/record-schema",
+                     summary="Mapping picker for this profile: core paths plus live custom attributes with HESA relevance")
+async def profile_record_schema(
+    profile_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("reporting.read")),
+) -> dict:
+    from app.modules.exports.custom_mapping import profile_record_schema as build
+
+    return await build(session, await _engine(session).get_profile(profile_id))
+
+
+@profiles_router.get("/{profile_id}/custom-attributes",
+                     summary="Custom attributes this profile maps (and which are obsolete)")
+async def profile_custom_attributes(
+    profile_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("reporting.read")),
+) -> dict:
+    from app.modules.exports.custom_mapping import profile_custom_attributes as build
+
+    return await build(session, await _engine(session).get_profile(profile_id))
+
+
+@profiles_router.get("/{profile_id}/dependencies",
+                     summary="Where every mapping reads from, with obsolete sources flagged")
+async def profile_dependencies(
+    profile_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("reporting.read")),
+) -> list[dict]:
+    from app.modules.exports.custom_mapping import profile_dependencies as build
+
+    return await build(session, await _engine(session).get_profile(profile_id))
+
+
+@profiles_router.post("/{profile_id}/fields/validate",
+                      summary="Check a mapping before saving it (errors block, warnings inform)")
+async def validate_profile_field(
+    profile_id: uuid.UUID,
+    body: FieldValidateIn,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_permission("reporting.read")),
+) -> dict:
+    from app.modules.exports.custom_mapping import validate_mapping
+
+    return await validate_mapping(
+        session, await _engine(session).get_profile(profile_id), target_field=body.targetField,
+        source_expression=body.sourceExpression, transform=body.transform, mapping_id=body.mappingId,
+    )
 
 
 def _snapshot(as_at: date | None, known_at: datetime | None) -> dict:

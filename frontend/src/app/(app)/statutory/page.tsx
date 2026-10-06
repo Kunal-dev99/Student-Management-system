@@ -40,12 +40,13 @@ import { downloadFile } from '@/shared/api/client'
 import { AdvisoriesPanel } from '@/features/statutory/AdvisoriesPanel'
 import { RetrospectiveChangesPanel } from '@/features/statutory/RetrospectiveChangesPanel'
 import { ReturnVersionsPanel } from '@/features/statutory/ReturnVersionsPanel'
+import { MappingCheckNote } from '@/features/statutory/MappingCheckNote'
 import {
   useAddField, useCloneProfile, useCompileProfile, useCreateFromSpec, useCreateProfile,
   useGenerateProfile, useProfile, useProfiles, useSignOffProfile, useSpecs, useTransforms,
   useUnsignProfile, useValidateProfile, useFixSuggestions, useApplyFix,
   useUpdateField, useDeleteField, useRecordSchema, usePreviewTransform,
-  useSuggestDefaults, useApplyDefaults, useSuppressRule, useRemoveSuppression,
+  useSuggestDefaults, useApplyDefaults, useSuppressRule, useRemoveSuppression, useProfileDependencies,
   type GenerateResult, type ReportProfile, type ValidationResult, type FieldMapping,
   type DefaultSuggestion, type ValidationIssue, type RuleAnalysis, type RuleSuppression,
   type ProfileDetail, type ValidationReport, type CompileReport, type CompileMissing,
@@ -181,13 +182,16 @@ function NewProfileDialog() {
  *  /record-schema. Falls back to a plain text input if the schema hasn't loaded (or the
  *  currently-picked value isn't in the catalog — respects hand-typed legacy values). */
 function SourceExpressionPicker({
-  value, onChange, inputId,
+  value, onChange, inputId, profileId,
 }: {
   value: string
   onChange: (v: string) => void
   inputId?: string
+  /** With a profile, the picker is profile-aware: custom attributes carry their HESA relevance
+   *  to this return, their status and where they are already mapped (governance Phase 4). */
+  profileId?: string
 }) {
-  const schema = useRecordSchema()
+  const schema = useRecordSchema(profileId)
   const groups = schema.data?.groups
   const paths = schema.data?.paths ?? []
   const isCustom = !!value && !paths.includes(value)
@@ -234,6 +238,13 @@ function SourceExpressionPicker({
                         <span className="text-sm">{shortLabel}</span>
                         <span className="text-[10px] text-muted-foreground">
                           <span className="font-mono">{f.path}</span> · {f.type}
+                          {f.hesaField && (
+                            <span className={f.hesaRelevant ? 'text-[hsl(var(--success))]' : undefined}>
+                              {' '}· for HESA {f.hesaField}{f.hesaRelevant ? '' : ' (not in this return)'}
+                            </span>
+                          )}
+                          {f.status === 'review' && <span className="text-[hsl(var(--warning))]"> · under review</span>}
+                          {f.mappedAs && f.mappedAs.length > 0 && <> · mapped as {f.mappedAs.join(', ')}</>}
                         </span>
                       </div>
                     </SelectItem>
@@ -510,6 +521,7 @@ function AddFieldDialog({
   const [position, setPosition] = useState('')
   const [required, setRequired] = useState(initial?.required ?? false)
   const [allowedValues, setAllowedValues] = useState((initial?.allowedValues ?? []).join(', '))
+  const [mappingOk, setMappingOk] = useState(true)
 
   // Re-seed from `initial` every time the dialog OPENS, so multiple "Map this" clicks in a row
   // each hydrate the form for their own missing field rather than showing stale data.
@@ -560,7 +572,10 @@ function AddFieldDialog({
               inputId="f-src"
               value={sourceExpression}
               onChange={setSourceExpression}
+              profileId={profileId}
             />
+            <MappingCheckNote profileId={profileId} targetField={targetField} sourceExpression={sourceExpression}
+              transform={transform} onValidity={setMappingOk} />
             <p className="text-helper">
               Which column on the flat student record this field reads from. Pick from the catalog or
               switch to a custom path (deliberately not an expression language).
@@ -593,7 +608,7 @@ function AddFieldDialog({
         </div>
         <DialogFooter className="flex-none">
           <Button
-            disabled={!targetField.trim() || !sourceExpression.trim() || add.isPending}
+            disabled={!targetField.trim() || !sourceExpression.trim() || !mappingOk || add.isPending}
             onClick={async () => {
               const allowed = allowedValues.split(',').map((v) => v.trim()).filter(Boolean)
               try {
@@ -637,6 +652,7 @@ function EditFieldDialog({
   const [position, setPosition] = useState(String(field.position ?? ''))
   const [required, setRequired] = useState(field.required)
   const [allowedValues, setAllowedValues] = useState((field.allowedValues ?? []).join(', '))
+  const [mappingOk, setMappingOk] = useState(true)
 
   // Re-seed from the field whenever the dialog is (re)opened, so it always reflects the saved state.
   const seed = () => {
@@ -675,7 +691,12 @@ function EditFieldDialog({
               inputId="e-src"
               value={sourceExpression}
               onChange={setSourceExpression}
+              profileId={profileId}
             />
+            {open && (
+              <MappingCheckNote profileId={profileId} targetField={field.targetField} sourceExpression={sourceExpression}
+                transform={transform} mappingId={field.id} onValidity={setMappingOk} />
+            )}
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
@@ -702,7 +723,7 @@ function EditFieldDialog({
         </div>
         <DialogFooter className="flex-none">
           <Button
-            disabled={!sourceExpression.trim() || update.isPending}
+            disabled={!sourceExpression.trim() || !mappingOk || update.isPending}
             onClick={async () => {
               const allowed = allowedValues.split(',').map((v) => v.trim()).filter(Boolean)
               try {
@@ -806,7 +827,12 @@ function CloneDialog({ profile }: { profile: ReportProfile }) {
             onClick={async () => {
               try {
                 const created = await clone.mutateAsync({ id: profile.id, academicYear: academicYear.trim() })
-                toast({ title: `Cloned to ${created.academicYear}` })
+                const stale = created.obsoleteMappings ?? []
+                toast(stale.length > 0 ? {
+                  title: `Cloned to ${created.academicYear} — ${stale.length} field(s) need re-mapping`,
+                  description: stale.map((o) => `${o.targetField}: ${o.reason}`).join(' '),
+                  variant: 'destructive',
+                } : { title: `Cloned to ${created.academicYear}` })
                 setOpen(false); setAcademicYear('')
               } catch (e) { err(toast, 'Could not clone profile')(e) }
             }}
@@ -1995,7 +2021,9 @@ function SignOffCard({ profileId, canSignOff }: { profileId: string; canSignOff:
           </Badge>
         ) : (
           <Badge variant="destructive" className="inline-flex items-center gap-1">
-            <ShieldAlert className="h-3.5 w-3.5" /> Not ready — {r.missing.length + (r.unmappedRequired?.length ?? 0)} mandatory field{r.missing.length + (r.unmappedRequired?.length ?? 0) === 1 ? '' : 's'} unmapped
+            <ShieldAlert className="h-3.5 w-3.5" /> Not ready — {(r.obsoleteMappings?.length ?? 0) > 0 && r.missing.length + (r.unmappedRequired?.length ?? 0) === 0
+              ? `${r.obsoleteMappings!.length} field${r.obsoleteMappings!.length === 1 ? '' : 's'} read a retired attribute`
+              : `${r.missing.length + (r.unmappedRequired?.length ?? 0)} mandatory field${r.missing.length + (r.unmappedRequired?.length ?? 0) === 1 ? '' : 's'} unmapped`}
           </Badge>
         )}
         <span className="text-helper num">
@@ -2045,6 +2073,16 @@ function SignOffCard({ profileId, canSignOff }: { profileId: string; canSignOff:
               missing={r.missing}
               canConfigure={canManageFields}
             />
+          )}
+          {(r.obsoleteMappings?.length ?? 0) > 0 && (
+            <div className="flex items-start gap-2 rounded-md border border-[hsl(var(--danger)/0.3)] bg-[hsl(var(--danger)/0.06)] px-3 py-2 text-sm">
+              <ShieldAlert className="h-4 w-4 shrink-0 text-danger" />
+              <span>
+                <span className="font-medium">{r.obsoleteMappings!.length} field{r.obsoleteMappings!.length === 1 ? '' : 's'} read a custom attribute that is no longer live</span>
+                {' '}({r.obsoleteMappings!.map((o) => `${o.targetField} ← ${o.sourceExpression}`).join(', ')}).
+                {' '}They would ship blank. Re-map them in the <span className="font-medium">Fields</span> tab, or restore the attribute.
+              </span>
+            </div>
           )}
           {(r.unmappedRequired?.length ?? 0) > 0 && (
             <div className="flex items-start gap-2 rounded-md border border-[hsl(var(--warning)/0.3)] bg-[hsl(var(--warning)/0.08)] px-3 py-2 text-sm">
@@ -2303,6 +2341,12 @@ export default function StatutoryPage() {
   const detail = useProfile(selectedId)
   const validate = useValidateProfile(selectedId)
   const compile = useCompileProfile(selectedId)
+  // Governance Phase 4 — mappings whose custom attribute is no longer live, flagged in the table.
+  const dependencies = useProfileDependencies(selectedId)
+  const obsoleteById = useMemo(
+    () => new Map((dependencies.data ?? []).filter((d) => d.obsolete).map((d) => [d.mappingId, d])),
+    [dependencies.data],
+  )
   const generate = useGenerateProfile()
   const [generated, setGenerated] = useState<GenerateResult | null>(null)
   const [tab, setTab] = useState<StatutoryTab>('fields')
@@ -2523,10 +2567,11 @@ export default function StatutoryPage() {
                         // those get the warning tint. A defaulted field ships its default, so it's
                         // fine (shown as "uses default").
                         const unresolved = !f.sourceExpression && !(f.defaultValue ?? '').trim()
+                        const stale = obsoleteById.get(f.id)
                         return (
                         <TableRow
                           key={f.id}
-                          className={unresolved ? 'bg-[hsl(var(--warning)/0.07)]' : undefined}
+                          className={stale ? 'bg-[hsl(var(--danger)/0.06)]' : unresolved ? 'bg-[hsl(var(--warning)/0.07)]' : undefined}
                         >
                           <TableCell className="num text-muted-foreground">{f.position}</TableCell>
                           <TableCell className="font-mono text-xs font-medium">{f.targetField}</TableCell>
@@ -2558,7 +2603,9 @@ export default function StatutoryPage() {
                               </span>
                             )}
                           </TableCell>
-                          <TableCell className="text-xs text-muted-foreground">{f.keyedAt ?? '—'}</TableCell>
+                          <TableCell className="text-xs text-muted-foreground">
+                            {stale ? <Badge variant="destructive" title={stale.reason ?? undefined}>obsolete source</Badge> : (f.keyedAt ?? '—')}
+                          </TableCell>
                           <TableCell className="text-sm">{f.transform ?? '—'}</TableCell>
                           <TableCell>
                             {f.required ? <Badge variant="warning">required</Badge> : <span className="text-muted-foreground text-sm">—</span>}

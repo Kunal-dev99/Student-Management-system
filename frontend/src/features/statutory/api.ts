@@ -199,6 +199,14 @@ export interface RecordSchemaField {
   type: 'string' | 'date' | 'number' | 'code' | 'boolean'
   hint: string
   nullable: boolean
+  // Custom attributes in the profile-aware picker (governance Phase 4):
+  status?: 'active' | 'review'
+  /** The HESA field this attribute was requested for, if the check found one. */
+  hesaField?: string | null
+  /** Requested for a field of THIS return's specification. */
+  hesaRelevant?: boolean
+  /** Target fields in this profile that already read it. */
+  mappedAs?: string[]
 }
 export interface RecordSchemaGroup {
   root: string
@@ -213,11 +221,58 @@ export interface RecordSchema {
 
 /** Catalog of dotted source paths a mapping may read from. Cached — it changes only when the
  *  backend record-schema catalog changes (a code deploy). */
-export const useRecordSchema = () =>
+export const useRecordSchema = (profileId?: string | null) =>
   useQuery({
-    queryKey: ['report-profile-record-schema'],
-    queryFn: () => api.get<RecordSchema>('/report-profiles/record-schema'),
-    staleTime: 60 * 60 * 1000,
+    // Same key prefix either way, so invalidating ['report-profile-record-schema'] refreshes both.
+    queryKey: ['report-profile-record-schema', profileId ?? null],
+    queryFn: () => api.get<RecordSchema>(profileId
+      ? `/report-profiles/${profileId}/record-schema` : '/report-profiles/record-schema'),
+    // The profile-aware picker reflects attribute status and current mappings, so keep it fresher.
+    staleTime: profileId ? 30_000 : 60 * 60 * 1000,
+  })
+
+// -------- Custom attributes as mapping sources (governance Phase 4) --------
+
+export interface MappingCheck {
+  valid: boolean
+  errors: string[]
+  warnings: string[]
+  spec: { field: string; description: string; allowed: string[]; required: boolean } | null
+  customAttribute: { id: string; key: string; label: string; status: string; dataType: string } | null
+}
+
+/** Check a mapping before saving it. Callers debounce the inputs. */
+export const useMappingCheck = (
+  profileId: string | null,
+  body: { targetField: string; sourceExpression: string; transform?: string | null; mappingId?: string },
+  enabled: boolean,
+) =>
+  useQuery({
+    queryKey: ['report-profile', profileId, 'mapping-check', body],
+    queryFn: () => api.post<MappingCheck>(`/report-profiles/${profileId}/fields/validate`, body),
+    enabled: !!profileId && enabled,
+    retry: false,
+    placeholderData: keepPreviousData,
+  })
+
+export interface MappingDependency {
+  mappingId: string
+  targetField: string
+  sourceExpression: string
+  required: boolean
+  kind: 'core' | 'custom' | 'unknown' | 'unmapped'
+  obsolete: boolean
+  reason: string | null
+  customKey?: string
+  customLabel?: string | null
+  customStatus?: string | null
+}
+
+export const useProfileDependencies = (profileId: string | null) =>
+  useQuery({
+    queryKey: ['report-profile', profileId, 'dependencies'],
+    queryFn: () => api.get<MappingDependency[]>(`/report-profiles/${profileId}/dependencies`),
+    enabled: !!profileId,
   })
 
 export interface ProfileInput {
@@ -274,6 +329,8 @@ function invalidateProfileEverything(qc: ReturnType<typeof useQueryClient>, prof
   qc.invalidateQueries({ queryKey: ['report-profile', profileId] })
   qc.invalidateQueries({ queryKey: ['report-profile', profileId, 'compile'] })
   qc.invalidateQueries({ queryKey: ['report-profiles'] })
+  // The profile-aware picker shows where each custom attribute is already mapped.
+  qc.invalidateQueries({ queryKey: ['report-profile-record-schema', profileId] })
   // Validate is enabled:false + gcTime:0. Drop the cache entirely so the Validate tab pill
   // stops advertising a count that pre-dates this mutation (was: user maps a field, tab still
   // says "2,026 errors" until they click Validate again).
@@ -297,7 +354,7 @@ export function useCloneProfile() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: ({ id, academicYear }: { id: string; academicYear: string }) =>
-      api.post<ReportProfile>(`/report-profiles/${id}/clone`, { academicYear }),
+      api.post<ReportProfile & { obsoleteMappings?: MappingDependency[] }>(`/report-profiles/${id}/clone`, { academicYear }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['report-profiles'] }),
   })
 }
@@ -347,6 +404,8 @@ export interface CompileReport {
   /** Present-but-unmapped required fields — not "missing" (they're in the Fields tab) but they
    *  still block sign-off. Target-field codes only. */
   unmappedRequired?: string[]
+  /** Mappings to a retired / never-live / missing custom attribute — they block sign-off. */
+  obsoleteMappings?: MappingDependency[]
   signOffReady: boolean
   suppressions?: RuleSuppression[]
 }
