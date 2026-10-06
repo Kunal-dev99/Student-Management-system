@@ -10,7 +10,7 @@ import uuid
 from datetime import date
 
 from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.authorization import student_scope
@@ -371,15 +371,18 @@ async def _fields_out(session: AsyncSession, fields, *, with_assessment: bool = 
     return out
 
 
+# Lengths and required values are checked by the service, not by pydantic constraints: the
+# service answers with the standard error envelope the frontend reads, where a pydantic failure
+# would answer with FastAPI's bare {"detail": [...]}.
 class CustomAttributeRequestIn(BaseModel):
-    label: str = Field(min_length=1, max_length=120)
+    label: str = ""
     dataType: str = "string"
-    reason: str = Field(min_length=1)
+    reason: str = ""
     trackHistory: bool = False
 
 
 class CustomAttributeCheckIn(BaseModel):
-    label: str = Field(min_length=1, max_length=120)
+    label: str = ""
     reason: str = ""
     dataType: str | None = None
 

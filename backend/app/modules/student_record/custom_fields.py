@@ -370,6 +370,9 @@ class CustomFieldService:
         """The same check for a request not yet raised — drives the warning in the request form."""
         from app.modules.student_record.custom_attr_assessment import assess
 
+        label = (label or "").strip()
+        if not label or len(label) > 120:
+            raise ValidationAppError("A label of 1 to 120 characters is required.")
         return await assess(self.session, label=label, reason=reason, data_type=data_type)
 
     async def latest_assessments(self, field_ids) -> dict:

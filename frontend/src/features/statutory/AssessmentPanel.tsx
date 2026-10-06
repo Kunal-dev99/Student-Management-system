@@ -34,7 +34,7 @@ export function AssessmentPanel({ a, compact = false }: { a: CustomFieldAssessme
   return (
     <div className="rounded-md border border-border bg-muted/30 p-3 space-y-2 text-sm">
       <div className="flex flex-wrap items-center gap-2">
-        <Icon className="h-4 w-4 text-muted-foreground" />
+        <Icon className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
         <VerdictBadge verdict={a.verdict} />
         {a.hesa.specification && <span className="text-xs text-muted-foreground">checked against {a.hesa.specification}</span>}
       </div>

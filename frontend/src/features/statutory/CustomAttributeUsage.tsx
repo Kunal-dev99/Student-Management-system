@@ -89,7 +89,7 @@ export function UsageReviewTab({ canGovern }: { canGovern: boolean }) {
                   </TableCell>
                   <TableCell className="text-xs space-y-1 min-w-[220px]">
                     <div className="flex items-center gap-1.5">
-                      {h.protected && <ShieldCheck className="h-3.5 w-3.5 text-[hsl(var(--success))]" />}
+                      {h.protected && <ShieldCheck className="h-3.5 w-3.5 text-[hsl(var(--success))]" aria-label="Protected: mapped in a live return" />}
                       <Badge variant={h.reviewCandidate ? 'warning' : 'secondary'}>{h.recommendation}</Badge>
                     </div>
                     {h.reasons.length > 0 && (

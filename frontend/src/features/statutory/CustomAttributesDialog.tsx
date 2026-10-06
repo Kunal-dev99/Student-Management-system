@@ -371,6 +371,7 @@ function RequestsTab({ canApprove, myUserId }: { canApprove: boolean; myUserId: 
                 )}
                 {f.status === 'pending' && (mine || canApprove) && (
                   <Button size="icon" variant="ghost" className="h-8 w-8" title="Withdraw this request"
+                    aria-label={`Withdraw the request for ${f.label}`}
                     disabled={withdraw.isPending}
                     onClick={async () => {
                       if (!(await confirm({

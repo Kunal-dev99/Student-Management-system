@@ -35,12 +35,12 @@ export function MappingCheckNote({
 
   if (!check.data || (check.data.errors.length === 0 && check.data.warnings.length === 0)) return null
   return (
-    <div className="space-y-1 text-xs">
+    <div className="space-y-1 text-xs" role="status" aria-live="polite">
       {check.data.errors.map((e) => (
-        <p key={e} className="flex items-start gap-1.5 text-danger"><XCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />{e}</p>
+        <p key={e} className="flex items-start gap-1.5 text-danger"><XCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" aria-hidden="true" /><span className="sr-only">Error: </span>{e}</p>
       ))}
       {check.data.warnings.map((w) => (
-        <p key={w} className="flex items-start gap-1.5 text-[hsl(var(--warning))]"><AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />{w}</p>
+        <p key={w} className="flex items-start gap-1.5 text-[hsl(var(--warning))]"><AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" aria-hidden="true" /><span className="sr-only">Warning: </span>{w}</p>
       ))}
     </div>
   )

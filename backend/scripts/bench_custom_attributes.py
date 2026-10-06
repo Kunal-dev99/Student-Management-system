@@ -81,6 +81,38 @@ async def measure(sm, custom_keys) -> tuple[float, float, dict, list]:
         return ms, peak / 1_048_576, eng.last_build_stats, records
 
 
+async def bench_catalogue(sm) -> None:
+    """Governance screens against the whole catalogue (Phase 7 large-catalogue check): the
+    catalogue's usage counts, the review dashboard's health signals, and a new request's
+    duplicate check — each should stay a handful of queries however many attributes exist."""
+    from sqlalchemy import event
+
+    from app.modules.student_record.custom_attr_assessment import assess
+    from app.modules.student_record.custom_attr_usage import health
+    from app.modules.student_record.custom_fields import CustomFieldService
+
+    async with sm() as s:
+        fields = await CustomFieldService(s).list_fields()
+        statements = []
+        sync_engine = s.bind.sync_engine
+
+        def count(*_a, **_k):
+            statements.append(1)
+
+        event.listen(sync_engine, "before_cursor_execute", count)
+        print(f"\nGovernance screens over {len(fields)} attributes:")
+        for label, run in (
+            ("catalogue usage counts", lambda: CustomFieldService(s).usage(fields)),
+            ("dashboard health + review rules", lambda: health(s, fields)),
+            ("new request duplicate/HESA check", lambda: assess(s, label="Care leaver status", reason="HESA CARELEAVER")),
+        ):
+            statements.clear()
+            t0 = time.perf_counter()
+            await run()
+            print(f"  {label:34} {(time.perf_counter() - t0) * 1000:8.0f} ms  {len(statements):3} queries")
+        event.remove(sync_engine, "before_cursor_execute", count)
+
+
 async def main(a) -> None:
     eng = create_async_engine("sqlite+aiosqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     async with eng.begin() as conn:
@@ -91,6 +123,10 @@ async def main(a) -> None:
     print(f"Seeded {a.students} students, {a.live} live + {a.retired} retired attributes, "
           f"{a.students * (a.live + a.retired):,} values in {time.perf_counter() - t0:.1f}s")
     mapped = live_keys[: a.mapped]
+    if a.catalogue:
+        await bench_catalogue(sm)
+        await eng.dispose()
+        return
 
     rows = []
     for label, keys in (("all-live (before)", None), (f"profile, {a.mapped} mapped (after)", set(mapped))):
@@ -118,4 +154,6 @@ if __name__ == "__main__":
     p.add_argument("--retired", type=int, default=50)
     p.add_argument("--mapped", type=int, default=3)
     p.add_argument("--repeat", type=int, default=2)
+    p.add_argument("--catalogue", action="store_true",
+                   help="time the governance screens over the catalogue instead of build_records")
     asyncio.run(main(p.parse_args()))

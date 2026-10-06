@@ -152,7 +152,7 @@ function DetailDialog({ id, canGovern, canApprove, canEnterData, canConfigure, o
                 <p className="text-helper">{ACTIONS[action].hint}</p>
                 {action === 'retire' && blockers.length > 0 && (
                   <p className="flex items-start gap-1.5 text-xs text-danger">
-                    <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                    <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" aria-hidden="true" />
                     Still mapped in {blockers.map((d) => `${d.profileCode} ${d.academicYear} (${d.targetField})`).join(', ')}.
                     Re-map or remove those fields first.
                   </p>
