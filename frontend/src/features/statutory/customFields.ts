@@ -33,7 +33,30 @@ export interface CustomField {
   createdAt: string | null
   /** Latest necessity check (governance Phase 2); null if it hasn't run. */
   assessment?: CustomFieldAssessment | null
+  /** Catalogue / detail only (Phase 3). */
+  usage?: { valueCount: number; lastValueUpdate: string | null; mappingCount: number } | null
 }
+
+export interface CustomFieldDependency {
+  profileId: string
+  profileCode: string
+  profileName: string
+  academicYear: string
+  profileActive: boolean
+  signedOff: boolean
+  mappingId: string
+  targetField: string
+  required: boolean
+  /** A live, not-signed-off mapping — the attribute can't be retired while it exists. */
+  blocksRetirement: boolean
+}
+
+export interface CustomFieldDetail extends CustomField {
+  dependencies: CustomFieldDependency[]
+  events: CustomFieldEvent[]
+}
+
+export type LifecycleAction = 'review' | 'keep' | 'retire' | 'restore'
 
 export type AssessmentVerdict = 'duplicate' | 'review' | 'supported' | 'no_hesa_basis'
 
@@ -113,6 +136,22 @@ export const useCustomFieldEvents = (enabled: boolean) =>
     enabled,
   })
 
+/** Every attribute that has been live (active, review, retired), with usage. */
+export const useCustomFieldCatalogue = (status: string | null, enabled: boolean) =>
+  useQuery({
+    queryKey: ['custom-field-catalogue', status],
+    queryFn: () => api.get<CustomField[]>(
+      `/students/custom-attributes/catalogue${status ? `?status=${encodeURIComponent(status)}` : ''}`),
+    enabled,
+  })
+
+export const useCustomFieldDetail = (id: string | null) =>
+  useQuery({
+    queryKey: ['custom-field-detail', id],
+    queryFn: () => api.get<CustomFieldDetail>(`/students/custom-attributes/${id}`),
+    enabled: !!id,
+  })
+
 /** Anything that changes an attribute's status refreshes every list that shows it, plus the
  *  mapping picker (it lists live custom paths from the record-schema catalog). */
 const useInvalidateAll = () => {
@@ -121,8 +160,20 @@ const useInvalidateAll = () => {
     qc.invalidateQueries({ queryKey: ['custom-fields'] })
     qc.invalidateQueries({ queryKey: ['custom-field-requests'] })
     qc.invalidateQueries({ queryKey: ['custom-field-events'] })
+    qc.invalidateQueries({ queryKey: ['custom-field-catalogue'] })
+    qc.invalidateQueries({ queryKey: ['custom-field-detail'] })
     qc.invalidateQueries({ queryKey: ['report-profile-record-schema'] })
   }
+}
+
+/** Review / keep / retire / restore (Phase 3). Retire and restore need a reason. */
+export const useCustomFieldLifecycle = () => {
+  const invalidate = useInvalidateAll()
+  return useMutation({
+    mutationFn: ({ id, action, reason }: { id: string; action: LifecycleAction; reason?: string }) =>
+      api.post<CustomField>(`/students/custom-attributes/${id}/${action}`, { reason: reason || null }),
+    onSuccess: invalidate,
+  })
 }
 
 export const useRequestCustomField = () => {

@@ -11,7 +11,7 @@
  * Each tab and action only shows for someone who holds the permission it needs.
  */
 import { useEffect, useState } from 'react'
-import { Plus, Table2, Copy, Check, X, RefreshCw } from 'lucide-react'
+import { Plus, Table2, X, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger,
@@ -37,6 +37,8 @@ import {
   type CustomField, type CustomFieldStatus, type CustomFieldType,
 } from '@/features/statutory/customFields'
 import { AssessmentPanel, VerdictBadge } from '@/features/statutory/AssessmentPanel'
+import { ACTION_LABEL, CopyPath, StatusBadge, fmt } from '@/features/statutory/customAttrUi'
+import { CatalogueTab } from '@/features/statutory/CustomAttributeCatalogue'
 
 const TYPES: { v: CustomFieldType; l: string }[] = [
   { v: 'code', l: 'Code (e.g. 01, 02)' },
@@ -45,40 +47,10 @@ const TYPES: { v: CustomFieldType; l: string }[] = [
   { v: 'date', l: 'Date' },
 ]
 
-const STATUS_BADGE: Record<CustomFieldStatus, { label: string; variant: 'warning' | 'info' | 'destructive' | 'success' | 'secondary' }> = {
-  pending: { label: 'Awaiting decision', variant: 'warning' },
-  approved: { label: 'Approved — not active', variant: 'info' },
-  rejected: { label: 'Rejected', variant: 'destructive' },
-  active: { label: 'Active', variant: 'success' },
-  review: { label: 'Under review', variant: 'warning' },
-  retired: { label: 'Retired', variant: 'secondary' },
-}
-
-const ACTION_LABEL: Record<string, string> = {
-  requested: 'Requested', approved: 'Approved', rejected: 'Rejected', activated: 'Activated',
-  withdrawn: 'Withdrawn', migrated: 'Carried over (pre-governance)', assessed: 'Checked',
-}
-
-const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleString() : '')
-
-function StatusBadge({ status }: { status: CustomFieldStatus }) {
-  const b = STATUS_BADGE[status] ?? { label: status, variant: 'secondary' as const }
-  return <Badge variant={b.variant}>{b.label}</Badge>
-}
-
-function CopyPath({ path }: { path: string }) {
-  const [copied, setCopied] = useState(false)
-  return (
-    <button type="button" title="Copy the mapping path"
-      className="inline-flex items-center gap-1 font-mono text-xs text-muted-foreground hover:text-foreground"
-      onClick={() => { navigator.clipboard?.writeText(path).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1200) }) }}>
-      {path}{copied ? <Check className="h-3 w-3 text-[hsl(var(--success))]" /> : <Copy className="h-3 w-3" />}
-    </button>
-  )
-}
-
-/** The per-field data-entry modal: every student in a scrollable grid with a value box. */
-function ValuesDialog({ field, onClose }: { field: CustomField; onClose: () => void }) {
+/** The per-field data-entry modal: every student in a scrollable grid with a value box.
+ *  A retired attribute opens read-only — its values are kept and can be looked at. */
+export function ValuesDialog({ field, onClose }: { field: CustomField; onClose: () => void }) {
+  const readOnly = field.status === 'retired'
   const { toast } = useToast()
   const { data, isLoading } = useCustomFieldValues(field.id)
   const save = useSetCustomFieldValues(field.id)
@@ -114,16 +86,21 @@ function ValuesDialog({ field, onClose }: { field: CustomField; onClose: () => v
     <Dialog open onOpenChange={(o) => { if (!o) onClose() }}>
       <DialogContent className="flex max-h-[88vh] max-w-2xl flex-col overflow-hidden">
         <DialogHeader className="flex-none">
-          <DialogTitle>Enter data — {field.label}</DialogTitle>
+          <DialogTitle>{readOnly ? 'Values' : 'Enter data'} — {field.label}</DialogTitle>
         </DialogHeader>
-        <p className="flex-none text-helper">
+        {readOnly ? (
+          <p className="flex-none text-helper">
+            This attribute is retired: its values are kept for the record but can&apos;t be changed,
+            and no return reads them. Restore it to use it again.
+          </p>
+        ) : <p className="flex-none text-helper">
           Maps to <span className="font-mono text-xs">{field.sourcePath}</span>.{' '}
           {field.trackHistory
             ? 'This attribute keeps dated history: changed values are recorded from the date below, and the return reads the value in force at the end of each period.'
             : 'Leave a row blank to clear it.'}{' '}
           HESA is strict — enter the exact coded value the specification expects.
-        </p>
-        {field.trackHistory && (
+        </p>}
+        {field.trackHistory && !readOnly && (
           <div className="flex-none flex items-end gap-2">
             <div className="space-y-1">
               <Label htmlFor="cf-eff">Changed values take effect from</Label>
@@ -149,12 +126,16 @@ function ValuesDialog({ field, onClose }: { field: CustomField; onClose: () => v
                     <TableCell className="font-mono text-xs">{r.studentRef}</TableCell>
                     <TableCell>{r.studentName}</TableCell>
                     <TableCell>
-                      <Input
-                        className="h-8"
-                        type={field.dataType === 'date' ? 'date' : field.dataType === 'number' ? 'number' : 'text'}
-                        value={draft[r.studentId] ?? ''}
-                        onChange={(e) => setDraft((d) => ({ ...d, [r.studentId]: e.target.value }))}
-                      />
+                      {readOnly ? (
+                        <span className="font-mono text-xs">{r.value ?? '—'}</span>
+                      ) : (
+                        <Input
+                          className="h-8"
+                          type={field.dataType === 'date' ? 'date' : field.dataType === 'number' ? 'number' : 'text'}
+                          value={draft[r.studentId] ?? ''}
+                          onChange={(e) => setDraft((d) => ({ ...d, [r.studentId]: e.target.value }))}
+                        />
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -163,10 +144,12 @@ function ValuesDialog({ field, onClose }: { field: CustomField; onClose: () => v
           )}
         </div>
         <DialogFooter className="flex-none">
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={onSave} disabled={save.isPending}>
-            {save.isPending ? 'Saving…' : 'Save values'}
-          </Button>
+          <Button variant="outline" onClick={onClose}>{readOnly ? 'Close' : 'Cancel'}</Button>
+          {!readOnly && (
+            <Button onClick={onSave} disabled={save.isPending}>
+              {save.isPending ? 'Saving…' : 'Save values'}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -572,7 +555,12 @@ export function CustomAttributesDialog() {
             </TabsList>
             <div className="-mr-2 mt-3 min-h-0 flex-1 overflow-y-auto pr-2">
               <TabsContent value="attributes" className="mt-0">
-                <AttributesTab canEnterData={canEnterData} canConfigure={canConfigure} onEnter={setEntering} />
+                {canGovern ? (
+                  <CatalogueTab canGovern={canGovern} canApprove={canApprove} canEnterData={canEnterData}
+                    canConfigure={canConfigure} onValues={setEntering} />
+                ) : (
+                  <AttributesTab canEnterData={canEnterData} canConfigure={canConfigure} onEnter={setEntering} />
+                )}
               </TabsContent>
               {canGovern && (
                 <TabsContent value="requests" className="mt-0">

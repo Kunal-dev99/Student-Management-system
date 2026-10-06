@@ -384,6 +384,10 @@ class CustomAttributeCheckIn(BaseModel):
     dataType: str | None = None
 
 
+class CustomAttributeReasonIn(BaseModel):
+    reason: str | None = None
+
+
 class CustomAttributeDecisionIn(BaseModel):
     reason: str | None = None
     # Approve only: make it live straight away (records approve then activate).
@@ -417,6 +421,97 @@ async def list_custom_attributes(
     if set(wanted) - set(CustomStatus.LIVE) and not any(principal.has_permission(c) for c in _GOVERNANCE):
         raise PermissionError("Missing permission: custom_attribute.request")
     return await _fields_out(session, await CustomFieldService(session).list_fields(wanted))
+
+
+async def _catalogue_out(session: AsyncSession, fields) -> list[dict]:
+    fields = list(fields)
+    rows = await _fields_out(session, fields)
+    usage = await CustomFieldService(session).usage(fields)
+    for f, row in zip(fields, rows):
+        row["usage"] = usage.get(f.id)
+    return rows
+
+
+@router.get("/custom-attributes/catalogue",
+            summary="Every attribute that was ever made live (active, review, retired) with usage")
+async def custom_attribute_catalogue(
+    status: str | None = Query(None, description="Comma-separated statuses; default active, review, retired"),
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_any_permission(*_GOVERNANCE)),
+) -> list[dict]:
+    wanted = _statuses(status) or (CustomStatus.ACTIVE, CustomStatus.REVIEW, CustomStatus.RETIRED)
+    return await _catalogue_out(session, await CustomFieldService(session).list_fields(wanted))
+
+
+@router.get("/custom-attributes/{field_id}", summary="One attribute: usage, mappings, decision trail")
+async def custom_attribute_detail(
+    field_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_any_permission(*_GOVERNANCE)),
+) -> dict:
+    svc = CustomFieldService(session)
+    field = await svc.get_field(field_id)
+    out = (await _catalogue_out(session, [field]))[0]
+    out["dependencies"] = await svc.dependencies(field)
+    out["events"] = [_custom_event_out(e) for e in await svc.events(field_id)]
+    return out
+
+
+@router.get("/custom-attributes/{field_id}/dependencies",
+            summary="Report-profile fields mapped to this attribute (and whether they block retiring it)")
+async def custom_attribute_dependencies(
+    field_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_any_permission("reporting.read", *_GOVERNANCE)),
+) -> list[dict]:
+    svc = CustomFieldService(session)
+    return await svc.dependencies(await svc.get_field(field_id))
+
+
+@router.post("/custom-attributes/{field_id}/review", summary="Put an active attribute under review")
+async def review_custom_attribute(
+    field_id: uuid.UUID,
+    body: CustomAttributeReasonIn,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_any_permission(*_GOVERNANCE)),
+) -> dict:
+    field = await CustomFieldService(session).start_review(field_id, principal=principal, reason=body.reason or "")
+    return (await _catalogue_out(session, [field]))[0]
+
+
+@router.post("/custom-attributes/{field_id}/keep", summary="End a review: the attribute is still needed")
+async def keep_custom_attribute(
+    field_id: uuid.UUID,
+    body: CustomAttributeReasonIn | None = None,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_permission("custom_attribute.approve")),
+) -> dict:
+    field = await CustomFieldService(session).keep(field_id, principal=principal,
+                                                    reason=(body.reason if body else None))
+    return (await _catalogue_out(session, [field]))[0]
+
+
+@router.post("/custom-attributes/{field_id}/retire",
+             summary="Retire an attribute under review (values and history are kept)")
+async def retire_custom_attribute(
+    field_id: uuid.UUID,
+    body: CustomAttributeReasonIn,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_permission("custom_attribute.approve")),
+) -> dict:
+    field = await CustomFieldService(session).retire(field_id, principal=principal, reason=body.reason or "")
+    return (await _catalogue_out(session, [field]))[0]
+
+
+@router.post("/custom-attributes/{field_id}/restore", summary="Bring a retired attribute back (reason required)")
+async def restore_custom_attribute(
+    field_id: uuid.UUID,
+    body: CustomAttributeReasonIn,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_permission("custom_attribute.approve")),
+) -> dict:
+    field = await CustomFieldService(session).restore(field_id, principal=principal, reason=body.reason or "")
+    return (await _catalogue_out(session, [field]))[0]
 
 
 @router.post("/custom-attribute-requests", status_code=201, summary="Request a new custom student attribute")

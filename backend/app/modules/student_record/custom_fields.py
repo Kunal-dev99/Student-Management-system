@@ -216,6 +216,141 @@ class CustomFieldService:
         await self.session.delete(field)
         await self.session.commit()
 
+    # --- lifecycle after activation (Phase 3) ---------------------------------------------------
+    # active -> review -> retired, review -> active (keep), retired -> active (restore). Retiring
+    # takes the attribute out of every live path (values, mapping, the return) and deletes
+    # nothing: its values and dated history stay, readable, and come back on restore.
+
+    async def start_review(self, field_id: uuid.UUID, *, principal: Principal | None, reason: str,
+                           system: bool = False) -> StudentCustomField:
+        reason = (reason or "").strip()
+        if not reason:
+            raise ValidationAppError("Say why this attribute should be reviewed.")
+        field = await self.get_field(field_id, for_update=True)
+        self._require_status(field, Status.ACTIVE, "put under review")
+        field.status = Status.REVIEW
+        await self._event(field, "review_started", Status.ACTIVE, Status.REVIEW, principal, reason,
+                          detail={"system": True} if system else None)
+        await self.session.commit()
+        await self.session.refresh(field)
+        return field
+
+    async def keep(self, field_id: uuid.UUID, *, principal: Principal, reason: str | None = None) -> StudentCustomField:
+        """End a review without retiring: the attribute is still needed."""
+        field = await self.get_field(field_id, for_update=True)
+        self._require_status(field, Status.REVIEW, "keep")
+        field.status = Status.ACTIVE
+        await self._event(field, "kept", Status.REVIEW, Status.ACTIVE, principal, (reason or "").strip() or None)
+        await self.session.commit()
+        await self.session.refresh(field)
+        return field
+
+    async def retire(self, field_id: uuid.UUID, *, principal: Principal, reason: str) -> StudentCustomField:
+        reason = (reason or "").strip()
+        if not reason:
+            raise ValidationAppError("A reason is required to retire an attribute.")
+        field = await self.get_field(field_id, for_update=True)
+        self._require_status(field, Status.REVIEW, "retire")
+        # Whoever raised the review doesn't also close it by retiring. A system-raised review has
+        # no person, so anyone with the approve right may retire it.
+        started = (await self.session.execute(
+            select(StudentCustomFieldEvent.actor_user_id)
+            .where(StudentCustomFieldEvent.custom_field_id == field.id,
+                   StudentCustomFieldEvent.action == "review_started")
+            .order_by(StudentCustomFieldEvent.created_at.desc()).limit(1)
+        )).scalar_one_or_none()
+        if started is not None and started == principal.user_id:
+            raise PermissionError("You put this attribute under review, so someone else must retire it.")
+        live = [d for d in await self.dependencies(field) if d["blocksRetirement"]]
+        if live:
+            raise ConflictError(
+                f"'{field.label}' is still mapped in "
+                + ", ".join(f"{d['profileCode']} {d['academicYear']} ({d['targetField']})" for d in live)
+                + ". Re-map or remove those fields first; signed-off returns are unaffected."
+            )
+        values = await self.value_count(field.id)
+        field.status = Status.RETIRED
+        await self._event(field, "retired", Status.REVIEW, Status.RETIRED, principal, reason,
+                          detail={"valuesRetained": values})
+        await self.session.commit()
+        await self.session.refresh(field)
+        return field
+
+    async def restore(self, field_id: uuid.UUID, *, principal: Principal, reason: str) -> StudentCustomField:
+        reason = (reason or "").strip()
+        if not reason:
+            raise ValidationAppError("A reason is required to restore an attribute.")
+        field = await self.get_field(field_id, for_update=True)
+        self._require_status(field, Status.RETIRED, "restore")
+        field.status = Status.ACTIVE
+        await self._event(field, "restored", Status.RETIRED, Status.ACTIVE, principal, reason,
+                          detail={"valuesRetained": await self.value_count(field.id)})
+        await self.session.commit()
+        await self.session.refresh(field)
+        return field
+
+    async def dependencies(self, field: StudentCustomField) -> list[dict]:
+        """Every report-profile field mapped to this attribute. A mapping in an active profile
+        that isn't signed off blocks retirement (it would silently start reading blank); a
+        signed-off return is a frozen snapshot and doesn't."""
+        from app.modules.exports.models import ReportFieldMapping, ReportProfile
+
+        rows = (await self.session.execute(
+            select(ReportFieldMapping, ReportProfile)
+            .join(ReportProfile, ReportProfile.id == ReportFieldMapping.profile_id)
+            .where(ReportFieldMapping.source_expression == f"custom.{field.key}")
+            .order_by(ReportProfile.academic_year.desc(), ReportProfile.code)
+        )).all()
+        return [{
+            "profileId": str(p.id), "profileCode": p.code, "profileName": p.name,
+            "academicYear": p.academic_year, "profileActive": bool(p.is_active),
+            "signedOff": p.signed_off_at is not None,
+            "mappingId": str(m.id), "targetField": m.target_field, "required": bool(m.required),
+            "blocksRetirement": bool(p.is_active) and p.signed_off_at is None,
+        } for m, p in rows]
+
+    async def value_count(self, field_id: uuid.UUID) -> int:
+        from sqlalchemy import func
+
+        return int((await self.session.execute(
+            select(func.count()).select_from(StudentCustomValue)
+            .where(StudentCustomValue.custom_field_id == field_id,
+                   StudentCustomValue.value.is_not(None), StudentCustomValue.value != "")
+        )).scalar_one())
+
+    async def usage(self, fields) -> dict:
+        """Per attribute: filled values, last value change, and how many profile fields map it.
+        Three grouped queries for the whole catalogue, no per-row lookups."""
+        from sqlalchemy import func
+
+        from app.modules.exports.models import ReportFieldMapping
+
+        fields = list(fields)
+        ids = [f.id for f in fields]
+        if not ids:
+            return {}
+        filled = dict((await self.session.execute(
+            select(StudentCustomValue.custom_field_id, func.count())
+            .where(StudentCustomValue.custom_field_id.in_(ids),
+                   StudentCustomValue.value.is_not(None), StudentCustomValue.value != "")
+            .group_by(StudentCustomValue.custom_field_id)
+        )).all())
+        updated = dict((await self.session.execute(
+            select(StudentCustomValue.custom_field_id, func.max(StudentCustomValue.updated_at))
+            .where(StudentCustomValue.custom_field_id.in_(ids))
+            .group_by(StudentCustomValue.custom_field_id)
+        )).all())
+        by_path = dict((await self.session.execute(
+            select(ReportFieldMapping.source_expression, func.count())
+            .where(ReportFieldMapping.source_expression.in_([f"custom.{f.key}" for f in fields]))
+            .group_by(ReportFieldMapping.source_expression)
+        )).all())
+        return {f.id: {
+            "valueCount": int(filled.get(f.id, 0)),
+            "lastValueUpdate": updated[f.id].isoformat() if updated.get(f.id) else None,
+            "mappingCount": int(by_path.get(f"custom.{f.key}", 0)),
+        } for f in fields}
+
     async def events(self, field_id: uuid.UUID | None = None, *, limit: int = 200) -> list[StudentCustomFieldEvent]:
         q = select(StudentCustomFieldEvent).order_by(StudentCustomFieldEvent.created_at.desc()).limit(limit)
         if field_id is not None:
@@ -331,7 +466,9 @@ class CustomFieldService:
     async def field_values(self, field_id: uuid.UUID) -> list[dict]:
         """Every student with their current value for this field (blank if unset) — drives the
         data-entry grid."""
-        await self.live_field(field_id)
+        field = await self.get_field(field_id)
+        if field.status not in (*Status.LIVE, Status.RETIRED):
+            raise WorkflowError(f"'{field.label}' is {field.status}; it has no values yet.")
         existing = {
             v.student_id: v.value
             for v in (await self.session.execute(
