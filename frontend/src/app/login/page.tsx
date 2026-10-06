@@ -79,7 +79,8 @@ export default function LoginPage() {
     setError(null)
     setSubmitting(true)
     try {
-      await login(email, password)
+      // The picked institution is enforced: an account from another institution is refused.
+      await login(email, password, tenants.data?.length ? tenantId : null)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Login failed')
     } finally {
@@ -147,7 +148,7 @@ export default function LoginPage() {
             </Select>
             <p className="text-helper text-xs flex items-center gap-1">
               <Building2 className="h-3 w-3" />
-              Your email decides which institution you sign in to; this only sets the branding.
+              Pick the institution your account belongs to; signing in to another one is refused.
             </p>
           </div>
           )}

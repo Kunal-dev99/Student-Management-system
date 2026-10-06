@@ -60,7 +60,9 @@ async def _pre_auth_scope(request: Request, session: AsyncSession, *, email: str
 @auth_router.post("/login", response_model=TokenPair, summary="Password grant")
 async def login(body: LoginRequest, request: Request, session: AsyncSession = Depends(get_session)) -> TokenPair:
     async with _pre_auth_scope(request, session, email=body.email):
-        access, refresh, _ = await _service(session).authenticate(body.email, body.password)
+        access, refresh, _ = await _service(session).authenticate(
+            body.email, body.password, expected_tenant_id=body.tenant_id,
+        )
     return TokenPair(access_token=access, refresh_token=refresh)
 
 

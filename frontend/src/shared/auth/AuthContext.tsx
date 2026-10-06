@@ -37,7 +37,8 @@ export interface Principal {
 interface AuthState {
   principal: Principal | null
   loading: boolean
-  login: (email: string, password: string) => Promise<void>
+  /** ``tenantId``: the institution picked on the sign-in page, if there is a picker. */
+  login: (email: string, password: string, tenantId?: string | null) => Promise<void>
   logout: () => void
   hasPermission: (code: string) => boolean
   /** A feature is on unless the institution explicitly turned it off (default-on). */
@@ -91,8 +92,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [clearCache])
 
   const login = useCallback(
-    async (email: string, password: string) => {
-      const tokens = await rawLogin(email, password)
+    async (email: string, password: string, tenantId?: string | null) => {
+      const tokens = await rawLogin(email, password, tenantId)
       clearCache()
       setAccessToken(tokens.accessToken)
       refreshToken.current = tokens.refreshToken

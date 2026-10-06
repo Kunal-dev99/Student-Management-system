@@ -44,9 +44,11 @@ custom attributes.
    accepted (no duplicate warning against ICR's attribute of the same name): each institution
    has its own catalogue.
 4. As **approver@oxbridge.demo**, approve it. Sign back in as ICR: its catalogue is unchanged.
-5. Note: the login page's *Institution* picker only changes the logo/colours on a shared address;
-   the account decides which institution you enter. In production each institution has its own
-   web address and a login for another institution is refused there.
+5. Show the guard: on the sign-in page pick **Institute of Cancer Research** and sign in as
+   approver@oxbridge.demo → refused: "This account isn't registered with Institute of Cancer
+   Research. Choose your own institution and sign in again." Pick Oxbridge University → signed in.
+   (A wrong password always says just "Invalid email or password", whatever is picked.) In
+   production each institution has its own web address, which enforces the same rule.
 
 ## Older demo logins (still valid, ICR)
 

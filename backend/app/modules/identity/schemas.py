@@ -14,6 +14,10 @@ class _CamelModel(BaseModel):
 class LoginRequest(_CamelModel):
     email: EmailStr
     password: str
+    # The institution picked on the sign-in page (shared-address / demo deployments). When given,
+    # signing in is refused unless the account belongs to it — picking ICR and signing in with
+    # another institution's account must not quietly land you in that other institution.
+    tenant_id: uuid.UUID | None = None
 
 
 class TokenPair(_CamelModel):
