@@ -16,6 +16,7 @@ reports, and switching history on is one-way so the audit trail can't be dropped
 """
 from __future__ import annotations
 
+import logging
 import re
 import uuid
 from datetime import date, datetime, timezone
@@ -32,9 +33,12 @@ from app.modules.person.models import Person
 from app.modules.student_record.models import (
     Student,
     StudentCustomField,
+    StudentCustomFieldAssessment,
     StudentCustomFieldEvent,
     StudentCustomValue,
 )
+
+log = logging.getLogger("pgr.custom_attributes")
 
 _ALLOWED_TYPES = {"string", "number", "date", "code"}
 _KEY_RE = re.compile(r"[^a-z0-9]+")
@@ -136,6 +140,14 @@ class CustomFieldService:
         await self.session.flush()
         await self._event(field, "requested", None, Status.PENDING, principal, reason,
                           detail={"dataType": data_type, "trackHistory": bool(track_history)})
+        # Assess straight away so the approver sees it. The check is advisory: if it fails the
+        # request still stands (the savepoint keeps a failed check from poisoning the
+        # transaction), and it can be re-run from the queue.
+        try:
+            async with self.session.begin_nested():
+                await self._assess(field, principal)
+        except Exception:                       # noqa: BLE001 — advisory step, logged
+            log.exception("Assessment of requested attribute %s failed", field.key)
         await self.session.commit()
         await self.session.refresh(field)
         return field
@@ -149,6 +161,14 @@ class CustomFieldService:
         field = await self.get_field(field_id, for_update=True)
         self._require_status(field, Status.PENDING, "approve")
         self._refuse_self_decision(field, principal)
+        latest = (await self.latest_assessments([field.id])).get(field.id)
+        if latest is None:
+            latest = await self._assess(field, principal)
+        if latest.verdict == "duplicate" and not (reason or "").strip():
+            raise ValidationAppError(
+                f"'{field.label}' looks like a duplicate ({'; '.join(latest.result.get('flags', [])[:2])}). "
+                "Give a reason to approve it anyway."
+            )
         field.status = Status.APPROVED
         self._stamp_decision(field, principal, reason)
         await self._event(field, "approved", Status.PENDING, Status.APPROVED, principal, field.decision_reason)
@@ -201,6 +221,49 @@ class CustomFieldService:
         if field_id is not None:
             q = q.where(StudentCustomFieldEvent.custom_field_id == field_id)
         return list((await self.session.execute(q)).scalars().all())
+
+    # --- assessment (Phase 2) ------------------------------------------------------------------
+
+    async def assess(self, field_id: uuid.UUID, *, principal: Principal) -> StudentCustomFieldAssessment:
+        """Re-run the necessity check (e.g. after a new spec version was accepted)."""
+        field = await self.get_field(field_id)
+        row = await self._assess(field, principal)
+        await self.session.commit()
+        return row
+
+    async def preview_assessment(self, *, label: str, reason: str, data_type: str | None) -> dict:
+        """The same check for a request not yet raised — drives the warning in the request form."""
+        from app.modules.student_record.custom_attr_assessment import assess
+
+        return await assess(self.session, label=label, reason=reason, data_type=data_type)
+
+    async def latest_assessments(self, field_ids) -> dict:
+        ids = list(field_ids)
+        if not ids:
+            return {}
+        rows = (await self.session.execute(
+            select(StudentCustomFieldAssessment)
+            .where(StudentCustomFieldAssessment.custom_field_id.in_(ids))
+            .order_by(StudentCustomFieldAssessment.created_at)
+        )).scalars().all()
+        return {r.custom_field_id: r for r in rows}     # later rows overwrite earlier ones
+
+    async def _assess(self, field: StudentCustomField, principal: Principal | None) -> StudentCustomFieldAssessment:
+        from app.modules.student_record.custom_attr_assessment import assess
+
+        result = await assess(self.session, label=field.label, reason=field.reason,
+                              data_type=field.data_type, exclude_field_id=field.id)
+        row = StudentCustomFieldAssessment(
+            custom_field_id=field.id, verdict=result["verdict"],
+            specification=result["hesa"]["specification"], result=result,
+            assessed_by_user_id=principal.user_id if principal else None,
+        )
+        self.session.add(row)
+        await self._event(field, "assessed", field.status, field.status, principal,
+                          "; ".join(result["flags"]) or None,
+                          detail={"verdict": result["verdict"], "specification": result["hesa"]["specification"]})
+        await self.session.flush()
+        return row
 
     @staticmethod
     def _require_status(field: StudentCustomField, expected: str, action: str) -> None:

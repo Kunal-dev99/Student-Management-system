@@ -143,10 +143,10 @@ async def test_full_flow_maker_checker_into_the_return(gov):
     csv_text = (await c.get(f"/api/v1/exports/{job['id']}/download", headers=hs["admin1"])).text
     assert csv_text.strip().splitlines() == ["HUSID,CARELEAVER", "PGR-A,01"]
 
-    # The decision trail reads requested → approved → activated.
+    # The decision trail reads requested → assessed (automatic) → approved → activated.
     detail = (await c.get(f"{REQ}/{f['id']}", headers=hs["admin1"])).json()
-    assert [e["action"] for e in reversed(detail["events"])] == ["requested", "approved", "activated"]
-    assert detail["events"][1]["notes"] == "Needed for 26/27"
+    assert [e["action"] for e in reversed(detail["events"])] == ["requested", "assessed", "approved", "activated"]
+    assert next(e for e in detail["events"] if e["action"] == "approved")["notes"] == "Needed for 26/27"
 
 
 async def test_approve_and_activate_in_one_step(gov):
@@ -155,7 +155,7 @@ async def test_approve_and_activate_in_one_step(gov):
     r = await c.post(f"{REQ}/{f['id']}/approve", headers=hs["admin1"], json={"activate": True})
     assert r.status_code == 200 and r.json()["status"] == "active"
     detail = (await c.get(f"{REQ}/{f['id']}", headers=hs["admin1"])).json()
-    assert [e["action"] for e in reversed(detail["events"])] == ["requested", "approved", "activated"]
+    assert [e["action"] for e in reversed(detail["events"])] == ["requested", "assessed", "approved", "activated"]
 
 
 async def test_rejection_needs_a_reason_and_is_final(gov):

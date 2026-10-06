@@ -11,7 +11,7 @@
  * Each tab and action only shows for someone who holds the permission it needs.
  */
 import { useEffect, useState } from 'react'
-import { Plus, Table2, Copy, Check, X } from 'lucide-react'
+import { Plus, Table2, Copy, Check, X, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger,
@@ -32,10 +32,11 @@ import { useAuth } from '@/shared/auth/AuthContext'
 import {
   useCustomFields, useCustomFieldRequests, useCustomFieldEvents,
   useRequestCustomField, useApproveCustomField, useRejectCustomField, useActivateCustomField,
-  useWithdrawCustomField, useEnableCustomFieldHistory,
+  useWithdrawCustomField, useEnableCustomFieldHistory, useCheckCustomField, useReassessCustomField,
   useCustomFieldValues, useSetCustomFieldValues,
   type CustomField, type CustomFieldStatus, type CustomFieldType,
 } from '@/features/statutory/customFields'
+import { AssessmentPanel, VerdictBadge } from '@/features/statutory/AssessmentPanel'
 
 const TYPES: { v: CustomFieldType; l: string }[] = [
   { v: 'code', l: 'Code (e.g. 01, 02)' },
@@ -55,7 +56,7 @@ const STATUS_BADGE: Record<CustomFieldStatus, { label: string; variant: 'warning
 
 const ACTION_LABEL: Record<string, string> = {
   requested: 'Requested', approved: 'Approved', rejected: 'Rejected', activated: 'Activated',
-  withdrawn: 'Withdrawn', migrated: 'Carried over (pre-governance)',
+  withdrawn: 'Withdrawn', migrated: 'Carried over (pre-governance)', assessed: 'Checked',
 }
 
 const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleString() : '')
@@ -177,9 +178,13 @@ function DecisionDialog({ field, mode, onClose }: { field: CustomField; mode: 'a
   const { toast } = useToast()
   const approve = useApproveCustomField()
   const reject = useRejectCustomField()
+  const reassess = useReassessCustomField()
   const [reason, setReason] = useState('')
   const [activate, setActivate] = useState(true)
+  const [assessment, setAssessment] = useState(field.assessment ?? null)
   const busy = approve.isPending || reject.isPending
+  // Approving something the check calls a duplicate needs a stated reason (the backend enforces it).
+  const needsOverride = mode === 'approve' && assessment?.verdict === 'duplicate'
 
   const onSubmit = async () => {
     try {
@@ -201,7 +206,7 @@ function DecisionDialog({ field, mode, onClose }: { field: CustomField; mode: 'a
 
   return (
     <Dialog open onOpenChange={(o) => { if (!o) onClose() }}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="flex max-h-[88vh] max-w-xl flex-col overflow-y-auto">
         <DialogHeader><DialogTitle>{mode === 'approve' ? 'Approve' : 'Reject'} “{field.label}”</DialogTitle></DialogHeader>
         <div className="space-y-3 text-sm">
           <div className="rounded-md border border-border bg-muted/30 p-3 space-y-1">
@@ -213,8 +218,22 @@ function DecisionDialog({ field, mode, onClose }: { field: CustomField; mode: 'a
             <p><span className="text-muted-foreground">Requested by</span> {field.requestedByEmail ?? 'unknown'} · {fmt(field.createdAt)}</p>
             <p><span className="text-muted-foreground">Reason:</span> {field.reason}</p>
           </div>
+          {assessment ? <AssessmentPanel a={assessment} /> : (
+            <p className="text-helper">This request hasn&apos;t been checked yet.</p>
+          )}
+          <Button size="sm" variant="ghost" className="h-7 px-2" disabled={reassess.isPending}
+            onClick={async () => {
+              try { setAssessment(await reassess.mutateAsync(field.id)) } catch (e) {
+                toast({ title: 'Could not run the check', description: (e as Error).message, variant: 'destructive' })
+              }
+            }}>
+            <RefreshCw className="h-3.5 w-3.5 mr-1" /> {reassess.isPending ? 'Checking…' : 'Re-run the check'}
+          </Button>
           <div className="space-y-1.5">
-            <Label htmlFor="cf-decision">{mode === 'approve' ? 'Note (optional)' : 'Reason for rejecting (required)'}</Label>
+            <Label htmlFor="cf-decision">
+              {mode === 'reject' ? 'Reason for rejecting (required)'
+                : needsOverride ? 'Why approve it anyway? (required — it looks like a duplicate)' : 'Note (optional)'}
+            </Label>
             <Textarea id="cf-decision" className="min-h-[70px]" value={reason} onChange={(e) => setReason(e.target.value)}
               placeholder={mode === 'approve' ? 'e.g. Confirmed against the 2026/27 spec.' : 'e.g. Already held in the core record as …'} />
           </div>
@@ -231,7 +250,7 @@ function DecisionDialog({ field, mode, onClose }: { field: CustomField; mode: 'a
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
           <Button variant={mode === 'reject' ? 'destructive' : 'default'} onClick={onSubmit}
-            disabled={busy || (mode === 'reject' && !reason.trim())}>
+            disabled={busy || ((mode === 'reject' || needsOverride) && !reason.trim())}>
             {busy ? 'Saving…' : mode === 'approve' ? (activate ? 'Approve & activate' : 'Approve') : 'Reject request'}
           </Button>
         </DialogFooter>
@@ -328,8 +347,14 @@ function RequestsTab({ canApprove, myUserId }: { canApprove: boolean; myUserId: 
                   <StatusBadge status={f.status} />
                   <Badge variant="secondary">{f.dataType}</Badge>
                   {f.trackHistory && <Badge variant="info">dated history</Badge>}
+                  {f.status === 'pending' && f.assessment && <VerdictBadge verdict={f.assessment.verdict} />}
                 </div>
                 <p className="text-xs text-muted-foreground">{f.reason}</p>
+                {f.status === 'pending' && f.assessment?.hesa.match && (
+                  <p className="text-xs text-muted-foreground">
+                    HESA <span className="font-mono">{f.assessment.hesa.match.field}</span> · {f.assessment.hesa.specification}
+                  </p>
+                )}
                 <p className="text-xs text-muted-foreground">
                   Requested by {mine ? 'you' : (f.requestedByEmail ?? 'unknown')} · {fmt(f.createdAt)}
                 </p>
@@ -396,6 +421,13 @@ function NewRequestTab({ onRequested }: { onRequested: () => void }) {
   const [dataType, setDataType] = useState<CustomFieldType>('code')
   const [reason, setReason] = useState('')
   const [trackHistory, setTrackHistory] = useState(false)
+  // Check as they type (debounced) — duplicates, HESA match, suggested type.
+  const [probe, setProbe] = useState({ label: '', reason: '' })
+  useEffect(() => {
+    const t = setTimeout(() => setProbe({ label: label.trim(), reason: reason.trim() }), 600)
+    return () => clearTimeout(t)
+  }, [label, reason])
+  const check = useCheckCustomField({ ...probe, dataType }, probe.label.length >= 3)
 
   const onCreate = async () => {
     try {
@@ -447,6 +479,17 @@ function NewRequestTab({ onRequested }: { onRequested: () => void }) {
           </span>
         </span>
       </label>
+      {check.data && (
+        <div className="space-y-1.5">
+          <AssessmentPanel a={check.data} compact />
+          {check.data.suggested.dataType !== dataType && (
+            <Button size="sm" variant="ghost" className="h-7 px-2"
+              onClick={() => setDataType(check.data!.suggested.dataType)}>
+              Use the suggested type ({check.data.suggested.dataType})
+            </Button>
+          )}
+        </div>
+      )}
       <Button size="sm" onClick={onCreate} disabled={!label.trim() || !reason.trim() || create.isPending}>
         {create.isPending ? 'Sending…' : 'Submit request'}
       </Button>

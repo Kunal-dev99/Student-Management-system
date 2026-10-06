@@ -31,6 +31,42 @@ export interface CustomField {
   decidedAt: string | null
   decisionReason: string | null
   createdAt: string | null
+  /** Latest necessity check (governance Phase 2); null if it hasn't run. */
+  assessment?: CustomFieldAssessment | null
+}
+
+export type AssessmentVerdict = 'duplicate' | 'review' | 'supported' | 'no_hesa_basis'
+
+export interface HesaFieldMatch {
+  pack: string
+  academicYear: string
+  version: number
+  field: string
+  description: string
+  allowed: string[]
+  required: boolean
+  source: string
+  keyedAt: string
+  score: number
+  match: 'exact' | 'near'
+  how: 'named' | 'description'
+}
+
+export interface CustomFieldAssessment {
+  id?: string
+  at?: string | null
+  verdict: AssessmentVerdict
+  flags: string[]
+  coreMatches: { path: string; label: string; type: string; score: number; match: 'exact' | 'near' }[]
+  customMatches: { id: string; key: string; label: string; status: CustomFieldStatus; score: number; match: 'exact' | 'near' }[]
+  hesa: {
+    requirement: 'required' | 'optional' | 'already_sourced' | 'not_found'
+    match: HesaFieldMatch | null
+    alternatives: HesaFieldMatch[]
+    specification: string | null
+  }
+  suggested: { dataType: CustomFieldType; allowedValues: string[] }
+  method: string
 }
 
 export interface CustomFieldEvent {
@@ -120,6 +156,24 @@ export const useActivateCustomField = () => {
   const invalidate = useInvalidateAll()
   return useMutation({
     mutationFn: (id: string) => api.post<CustomField>(`${REQ}/${id}/activate`),
+    onSuccess: invalidate,
+  })
+}
+
+/** Preview the necessity check for a request that hasn't been raised (nothing is saved). */
+export const useCheckCustomField = (body: { label: string; reason: string; dataType: CustomFieldType }, enabled: boolean) =>
+  useQuery({
+    queryKey: ['custom-field-check', body.label, body.reason, body.dataType],
+    queryFn: () => api.post<CustomFieldAssessment>(`${REQ}/check`, body),
+    enabled,
+    staleTime: 60_000,
+  })
+
+/** Re-run the check for a raised request (e.g. after a new spec version was accepted). */
+export const useReassessCustomField = () => {
+  const invalidate = useInvalidateAll()
+  return useMutation({
+    mutationFn: (id: string) => api.post<CustomFieldAssessment>(`${REQ}/${id}/assess`),
     onSuccess: invalidate,
   })
 }

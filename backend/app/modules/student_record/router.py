@@ -351,9 +351,24 @@ async def _user_emails(session: AsyncSession, fields) -> dict:
     return dict((await session.execute(select(User.id, User.email).where(User.id.in_(ids)))).all())
 
 
-async def _fields_out(session: AsyncSession, fields) -> list[dict]:
+def _assessment_out(a) -> dict | None:
+    if a is None:
+        return None
+    return {"id": str(a.id), "verdict": a.verdict, "specification": a.specification,
+            "at": a.created_at.isoformat() if a.created_at else None, **(a.result or {})}
+
+
+async def _fields_out(session: AsyncSession, fields, *, with_assessment: bool = True) -> list[dict]:
+    fields = list(fields)
     emails = await _user_emails(session, fields)
-    return [_custom_field_out(f, emails) for f in fields]
+    latest = await CustomFieldService(session).latest_assessments(f.id for f in fields) if with_assessment else {}
+    out = []
+    for f in fields:
+        row = _custom_field_out(f, emails)
+        if with_assessment:
+            row["assessment"] = _assessment_out(latest.get(f.id))
+        out.append(row)
+    return out
 
 
 class CustomAttributeRequestIn(BaseModel):
@@ -361,6 +376,12 @@ class CustomAttributeRequestIn(BaseModel):
     dataType: str = "string"
     reason: str = Field(min_length=1)
     trackHistory: bool = False
+
+
+class CustomAttributeCheckIn(BaseModel):
+    label: str = Field(min_length=1, max_length=120)
+    reason: str = ""
+    dataType: str | None = None
 
 
 class CustomAttributeDecisionIn(BaseModel):
@@ -409,6 +430,41 @@ async def request_custom_attribute(
         track_history=body.trackHistory,
     )
     return (await _fields_out(session, [field]))[0]
+
+
+@router.post("/custom-attribute-requests/check",
+             summary="Check a prospective request (duplicates, HESA match, suggested type) without raising it")
+async def check_custom_attribute(
+    body: CustomAttributeCheckIn,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_any_permission(*_GOVERNANCE)),
+) -> dict:
+    return await CustomFieldService(session).preview_assessment(
+        label=body.label, reason=body.reason, data_type=body.dataType,
+    )
+
+
+@router.post("/custom-attribute-requests/{field_id}/assess", summary="Re-run the necessity check")
+async def assess_custom_attribute(
+    field_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_any_permission(*_GOVERNANCE)),
+) -> dict:
+    return _assessment_out(await CustomFieldService(session).assess(field_id, principal=principal))
+
+
+@router.get("/custom-attribute-requests/{field_id}/assessment", summary="The latest necessity check")
+async def get_custom_attribute_assessment(
+    field_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_any_permission(*_GOVERNANCE)),
+) -> dict:
+    svc = CustomFieldService(session)
+    await svc.get_field(field_id)
+    latest = (await svc.latest_assessments([field_id])).get(field_id)
+    if latest is None:
+        raise NotFoundError("This attribute has not been assessed yet")
+    return _assessment_out(latest)
 
 
 @router.get("/custom-attribute-requests", summary="Attribute requests (default: pending, approved, rejected)")

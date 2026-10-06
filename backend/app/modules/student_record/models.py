@@ -480,6 +480,26 @@ class StudentCustomFieldEvent(UUIDMixin, TenantMixin, Base):
     )
 
 
+class StudentCustomFieldAssessment(UUIDMixin, TenantMixin, Base):
+    """A stored necessity check of a requested attribute (governance Phase 2): duplicate check
+    against the core record and other attributes, HESA spec match, type inference. Re-running
+    adds a row; the latest is the one an approver sees."""
+    __tablename__ = "student_custom_field_assessment"
+
+    custom_field_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("student_custom_field.id", ondelete="CASCADE"), index=True
+    )
+    verdict: Mapped[str] = mapped_column(String(20))      # duplicate | review | supported | no_hesa_basis
+    specification: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    result: Mapped[dict] = mapped_column(JSON)
+    assessed_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+
 class StudentCustomValue(UUIDMixin, TenantMixin, TimestampMixin, Base):
     __tablename__ = "student_custom_value"
     __table_args__ = (
