@@ -99,9 +99,9 @@ tables (the attributes and their values are kept; statuses are lost and come bac
 
 ## Known limits / follow-ups
 
-- Spec resolver falls back to the latest accepted year when a year has no accepted version of its
-  own, instead of that year's baseline (pre-existing; affects compile, sign-off and the Phase 4/6
-  HESA signals). Raised as a separate task.
+- Spec resolver (fixed on this branch, `b33ebef`): a year with no accepted version now uses its
+  own shipped baseline instead of another year's accepted version. A year with neither (e.g.
+  2025/26, which has no baseline in code) still falls back to the latest accepted version.
 - Pydantic body-validation errors app-wide return FastAPI's `{"detail": …}` rather than the error
   envelope (pre-existing). The governance endpoints validate in the service instead. Raised as a
   separate task.
