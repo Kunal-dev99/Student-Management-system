@@ -46,3 +46,6 @@ class MeResponse(_CamelModel):
     # funnel when an institution recruits elsewhere — ICR G2). The API stays the enforcement
     # layer; these only drive what the nav shows.
     features: dict[str, bool] = Field(default_factory=dict)
+    # The institution this session acts as (the account's own, reconciled with the host). The
+    # client brands the app from this — never from the login page's branding picker.
+    tenant_id: uuid.UUID | None = None

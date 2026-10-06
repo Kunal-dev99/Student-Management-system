@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/shared/api/client'
+import { useAuth } from '@/shared/auth/AuthContext'
 
 export interface Tenant {
   id: string
@@ -16,12 +17,11 @@ export interface Tenant {
 export const TENANT_STORAGE_KEY = 'pgr.login.tenant'
 
 /**
- * The current tenant — chosen on the login page, stored in localStorage.
- * Used by the app shell to brand the sidebar with the tenant's colour + short logo.
+ * The institution to brand the app with (sidebar colour, short logo, name).
  *
- * Data is still shared today (MT-2 will spread tenant_id across the domain and enable
- * RLS). This hook only reads branding so the UI visibly matches the tenant the user
- * signed in against.
+ * Signed in, it is ALWAYS the account's own institution (from /me): the login page's picker
+ * only sets branding for the login screen itself, and must never make one institution's
+ * session look like another's. Before sign-in, the picker's choice (localStorage) is used.
  */
 export function useTenant(): Tenant | null {
   const q = useQuery({
@@ -44,7 +44,10 @@ export function useTenant(): Tenant | null {
     return () => window.removeEventListener('storage', onStorage)
   }, [])
 
+  const { principal } = useAuth()
   const list = q.data ?? []
+  const own = principal?.tenantId ? list.find((t) => t.id === principal.tenantId) : undefined
+  if (own) return own
   if (id) {
     const hit = list.find((t) => t.id === id)
     if (hit) return hit

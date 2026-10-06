@@ -119,6 +119,7 @@ async def me(
     # treats any absent key as on). The API stays the enforcement layer regardless.
     features = {"recruitment": bool(await setting_value(session, "recruitment.enabled"))}
     features.update(await disabled_nav_map(session))
+    from app.core.tenant_context import get_current_tenant
 
     return MeResponse(
         authenticated=True,
@@ -128,4 +129,6 @@ async def me(
         roles=principal.roles,
         permissions=principal.permissions,
         features=features,
+        # The tenant get_current_principal settled on for this request (token vs host).
+        tenant_id=get_current_tenant() or principal.tenant_id,
     )
