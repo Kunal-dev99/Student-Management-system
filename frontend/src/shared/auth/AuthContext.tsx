@@ -10,6 +10,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import {
   api,
   rawLogin,
@@ -29,12 +30,15 @@ export interface Principal {
   permissions: string[]
   /** Institution feature flags (e.g. { recruitment: false }) — shape the UI, not enforcement. */
   features?: Record<string, boolean>
+  /** The institution this session belongs to — the app is branded from this. */
+  tenantId?: string | null
 }
 
 interface AuthState {
   principal: Principal | null
   loading: boolean
-  login: (email: string, password: string) => Promise<void>
+  /** ``tenantId``: the institution picked on the sign-in page, if there is a picker. */
+  login: (email: string, password: string, tenantId?: string | null) => Promise<void>
   logout: () => void
   hasPermission: (code: string) => boolean
   /** A feature is on unless the institution explicitly turned it off (default-on). */
@@ -54,6 +58,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [principal, setPrincipal] = useState<Principal | null>(null)
   const [loading, setLoading] = useState(true)
   const refreshToken = useRef<string | null>(null)
+  // Everything fetched belongs to the person (and institution) signed in when it was fetched.
+  // Drop it whenever that changes, or the next user briefly sees the previous user's data
+  // (e.g. another institution's dashboard figures) until each query happens to refetch.
+  const queryClient = useQueryClient()
+  const clearCache = useCallback(() => queryClient.clear(), [queryClient])
 
   const loadMe = useCallback(async () => {
     const me = await api.get<Principal>('/me')
@@ -79,17 +88,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     refreshToken.current = null
     try { localStorage.removeItem(REFRESH_KEY) } catch {}
     setPrincipal(null)
-  }, [])
+    clearCache()
+  }, [clearCache])
 
   const login = useCallback(
-    async (email: string, password: string) => {
-      const tokens = await rawLogin(email, password)
+    async (email: string, password: string, tenantId?: string | null) => {
+      const tokens = await rawLogin(email, password, tenantId)
+      clearCache()
       setAccessToken(tokens.accessToken)
       refreshToken.current = tokens.refreshToken
       try { localStorage.setItem(REFRESH_KEY, tokens.refreshToken) } catch {}
       await loadMe()
     },
-    [loadMe],
+    [loadMe, clearCache],
   )
 
   // Wire the client's 401-recovery to this provider.
@@ -100,12 +111,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       refreshToken.current = null
       try { localStorage.removeItem(REFRESH_KEY) } catch {}
       setPrincipal(null)
+      clearCache()
     })
     return () => {
       setRefreshHandler(null)
       setOnAuthFailure(null)
     }
-  }, [doRefresh])
+  }, [doRefresh, clearCache])
 
   // On first load, try to silently restore a session from the stored refresh token.
   useEffect(() => {

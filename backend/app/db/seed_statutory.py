@@ -96,8 +96,10 @@ async def _custom_field(session, c: dict) -> int:
         select(StudentCustomField).where(StudentCustomField.key == c["key"])
     )).scalar_one_or_none()
     if field is None:
+        # Seeded attributes come from a curated, already-reviewed config, so they arrive live
+        # unless the file says otherwise.
         field = StudentCustomField(key=c["key"], label=c["label"], data_type=c.get("data_type") or "string",
-                                   reason=c.get("reason") or "")
+                                   reason=c.get("reason") or "", status=c.get("status") or "active")
         session.add(field)
     else:
         field.label = c["label"]

@@ -35,10 +35,15 @@ async def _active_for_code(
 ) -> StatutorySpecVersion | None:
     """The accepted spec version to use for a return code.
 
-    With ``academic_year`` (the profile's own year), the *exact-year* active row is
-    preferred — an advisory accepted against 2027/28 must never leak into a 2026/27
-    profile's validation. Falls back to the latest year only when no row for the given
-    year exists (baseline behaviour for a profile whose year has no ingested advisory).
+    With ``academic_year`` (the profile's own year), the order is:
+
+    1. the *exact-year* active row — an advisory accepted against 2027/28 must never leak into
+       a 2026/27 profile's validation;
+    2. ``None`` when the code ships a baseline for that exact year — that year is on its
+       baseline, not on some other year's accepted version (an accepted 2029/30 pack used to
+       stand in for a 2026/27 profile whose own baseline existed);
+    3. only then the latest year's row, for a year that has neither.
+
     Callers without a year (bulk pickers, legacy paths) still get "latest wins".
     """
     q = (
@@ -60,6 +65,8 @@ async def _active_for_code(
         ).scalars().first()
         if exact is not None:
             return exact
+        if spec_pack(_pack_key(code, academic_year)) is not None:
+            return None
     rows = (await session.execute(q)).scalars().all()
     return rows[0] if rows else None
 
@@ -98,7 +105,10 @@ async def resolve_fields(
     ``academic_year`` so a same-year accepted advisory is used and cross-year advisories don't
     leak in."""
     row = await _active_for_code(session, code, academic_year)
-    return list(row.fields or []) if row else list(spec_for(code))
+    if row is not None:
+        return list(row.fields or [])
+    baseline = spec_pack(_pack_key(code, academic_year)) if academic_year else None
+    return list(baseline["fields"]) if baseline else list(spec_for(code))
 
 
 async def resolve_rules(
@@ -109,7 +119,9 @@ async def resolve_rules(
     resolution to the profile's own year (see ``_active_for_code``)."""
     from app.modules.exports.statutory import _rule_key   # avoid import cycle
     row = await _active_for_code(session, code, academic_year)
-    all_rules = list(row.rules or []) if row else list(rules_for(code))
+    baseline = spec_pack(_pack_key(code, academic_year)) if academic_year and row is None else None
+    all_rules = (list(row.rules or []) if row is not None
+                 else list(baseline["rules"]) if baseline else list(rules_for(code)))
     # disabled_rule_keys carries either legacy string entries or the newer dict shape
     # {ruleKey, reason, at, byUserId, byUserName}. Accept both so old data still filters.
     disabled = {

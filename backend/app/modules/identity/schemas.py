@@ -14,6 +14,10 @@ class _CamelModel(BaseModel):
 class LoginRequest(_CamelModel):
     email: EmailStr
     password: str
+    # The institution picked on the sign-in page (shared-address / demo deployments). When given,
+    # signing in is refused unless the account belongs to it — picking ICR and signing in with
+    # another institution's account must not quietly land you in that other institution.
+    tenant_id: uuid.UUID | None = None
 
 
 class TokenPair(_CamelModel):
@@ -46,3 +50,6 @@ class MeResponse(_CamelModel):
     # funnel when an institution recruits elsewhere — ICR G2). The API stays the enforcement
     # layer; these only drive what the nav shows.
     features: dict[str, bool] = Field(default_factory=dict)
+    # The institution this session acts as (the account's own, reconciled with the host). The
+    # client brands the app from this — never from the login page's branding picker.
+    tenant_id: uuid.UUID | None = None

@@ -40,6 +40,9 @@ async def ctx():
         await s.refresh(role, ["permissions"]); role.permissions = list(perms.values())
         user = User(email="a@t.com", password_hash=hash_password("pw"), is_active=True)
         s.add(user); await s.flush(); await s.refresh(user, ["roles"]); user.roles = [role]
+        # A second admin, so maker-checker flows (custom attributes) have someone to approve.
+        checker = User(email="b@t.com", password_hash=hash_password("pw"), is_active=True)
+        s.add(checker); await s.flush(); await s.refresh(checker, ["roles"]); checker.roles = [role]
 
         prog = Programme(name="PhD CS", code="PHD-CS"); s.add(prog); await s.flush()
 
@@ -389,18 +392,17 @@ async def test_default_value_satisfies_a_required_field_for_signoff(ctx):
 
 @pytest.mark.asyncio
 async def test_custom_attribute_end_to_end_into_the_return(ctx):
+    from tests.integration.custom_attr_helpers import live_attribute
     c, h = ctx
-    # Create a custom attribute (reason is mandatory).
-    no_reason = await c.post("/api/v1/students/custom-fields", headers=h,
+    tok = (await c.post("/api/v1/auth/login", json={"email": "b@t.com", "password": "pw"})).json()
+    h2 = {"Authorization": f"Bearer {tok['accessToken']}"}
+    # Request a custom attribute (reason is mandatory), then a second admin approves it.
+    no_reason = await c.post("/api/v1/students/custom-attribute-requests", headers=h,
                              json={"label": "Care leaver", "dataType": "code"})
-    assert no_reason.status_code == 400
+    assert no_reason.status_code in (400, 422)
 
-    created = await c.post("/api/v1/students/custom-fields", headers=h, json={
-        "label": "Care leaver flag", "dataType": "code",
-        "reason": "HESA CARELEAVER — not held in the core model yet.",
-    })
-    assert created.status_code == 201, created.text
-    field = created.json()
+    field = await live_attribute(c, h, h2, label="Care leaver flag", dataType="code",
+                                 reason="HESA CARELEAVER — not held in the core model yet.")
     assert field["key"] == "care_leaver_flag"
     assert field["sourcePath"] == "custom.care_leaver_flag"
 

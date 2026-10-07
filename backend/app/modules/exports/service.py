@@ -57,6 +57,7 @@ class ExportService:
 
         engine = StatutoryEngine(self.session)
         result = await engine.generate(profile_id, as_at=as_at, known_at=known_at)
+        await engine.note_usage(result["profile"], purpose="generate", row_count=result["rowCount"])
 
         buf = io.StringIO()
         w = csv.writer(buf)
@@ -80,6 +81,8 @@ class ExportService:
             "profile": profile,
             "asAt": result.get("asAt"), "knownAt": result.get("knownAt"),
             "validation": result["validation"],
+            # Custom attribute governance, Phase 5 — what the return loaded, and how long it took.
+            "runtime": result.get("runtime"),
         }
 
     async def _run_students_statutory(self) -> tuple[str, int, str]:

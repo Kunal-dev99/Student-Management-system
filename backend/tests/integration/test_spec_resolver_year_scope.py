@@ -123,3 +123,31 @@ async def test_no_year_argument_preserves_legacy_latest_wins(session):
     row = await _active_for_code(session, CODE)
     assert row is not None
     assert row.academic_year == "2028/29"
+
+
+@pytest.mark.asyncio
+async def test_a_year_on_its_own_baseline_is_not_replaced_by_a_later_years_version(session):
+    """Regression: a 2026/27 profile with no accepted 2026/27 version was checked against an
+    accepted 2029/30 version (5 fields) instead of the shipped 2026/27 baseline (24 fields), so
+    the compile gate and mapping checks ignored most of the return. The year's own baseline
+    wins over another year's accepted version."""
+    from app.modules.exports.spec_resolver import active_version_for_code
+    from app.modules.exports.specs import spec_pack
+
+    session.add(StatutorySpecVersion(
+        pack_code=CODE, name="HESA Student", academic_year="2029/30", version=2,
+        status=SpecVersionStatus.active,
+        fields=[{"field": "OWNSTU"}, {"field": "SEXID"}], rules=[POISONED_RULE],
+    ))
+    await session.commit()
+    baseline = spec_pack(f"{CODE}:2026/27")
+
+    fields = [f["field"] for f in await resolve_fields(session, CODE, "2026/27")]
+    assert fields == [f["field"] for f in baseline["fields"]] and "ETHNIC" in fields
+    rules = await resolve_rules(session, CODE, "2026/27")
+    assert POISONED_RULE not in rules and len(rules) == len(baseline["rules"])
+    # On its baseline there's no accepted version to edit (pack-level suppression refuses).
+    assert await active_version_for_code(session, CODE, "2026/27") is None
+    # A year with no baseline and no version of its own still falls back to the latest.
+    row = await _active_for_code(session, CODE, "2030/31")
+    assert row is not None and row.academic_year == "2029/30"

@@ -137,8 +137,12 @@ export const api = {
 }
 
 // Direct login/refresh calls that must NOT go through the 401-refresh loop.
-export async function rawLogin(email: string, password: string) {
-  const res = await raw('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }, null)
+/** ``tenantId``: the institution picked on the sign-in page; the server refuses an account that
+ *  belongs to a different one. */
+export async function rawLogin(email: string, password: string, tenantId?: string | null) {
+  const res = await raw('/auth/login', {
+    method: 'POST', body: JSON.stringify(tenantId ? { email, password, tenantId } : { email, password }),
+  }, null)
   const payload = await res.json().catch(() => null)
   if (!res.ok) throw new ApiError(res.status, payload?.error ?? { code: 'error', message: 'Login failed', requestId: 'unknown', details: [] })
   return payload as { accessToken: string; refreshToken: string; tokenType: string }

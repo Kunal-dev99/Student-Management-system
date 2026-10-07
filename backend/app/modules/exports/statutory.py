@@ -16,6 +16,8 @@ language: anything executable in configuration would be a security problem and a
 """
 from __future__ import annotations
 
+import logging
+import time
 import uuid
 from datetime import date, datetime, timezone
 from decimal import Decimal
@@ -25,6 +27,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ConflictError, NotFoundError, ValidationAppError, WorkflowError
 from app.modules.exports.models import ReportFieldMapping, ReportProfile
+
+log = logging.getLogger("pgr.statutory")
+
+
+def mapped_custom_keys(mappings) -> set[str]:
+    """The custom attributes a set of mappings reads — ``custom.<key>`` source paths
+    (custom attribute governance, Phase 5: a return loads only these)."""
+    out = set()
+    for m in mappings:
+        src = (getattr(m, "source_expression", m) or "").strip()
+        if src.startswith("custom."):
+            out.add(src[len("custom."):])
+    return out
 
 # --- transforms available to a mapping. Pure, total functions: no I/O, no failure. ---
 
@@ -213,7 +228,18 @@ class StatutoryEngine:
     """Builds a statutory extract purely from configuration."""
 
     def __init__(self, session: AsyncSession) -> None:
+        # What the last build_records() loaded (governance Phase 5 — observable runtime cost).
+        self.last_build_stats: dict = {}
         self.session = session
+
+    async def note_usage(self, profile, *, purpose: str, row_count: int) -> None:
+        """Record that a return read the custom attributes the last build loaded (governance
+        Phase 6). Only for real outputs — a file generated or downloaded, a sign-off — never a
+        validation preview. Adds rows; the caller commits."""
+        from app.modules.student_record.custom_attr_usage import record_usage
+
+        await record_usage(self.session, keys=self.last_build_stats.get("customKeysLoaded"),
+                           profile=profile, purpose=purpose, row_count=row_count)
 
     # ---------------- profiles ----------------
 
@@ -297,6 +323,26 @@ class StatutoryEngine:
         await self.session.refresh(profile)
         return profile
 
+    async def _check_custom_source(self, source_expression: str | None) -> None:
+        """A mapping may only read a live custom attribute: not a request still awaiting a
+        decision, a rejected one, or a retired one. Other paths are left to the existing checks."""
+        expr = (source_expression or "").strip()
+        if not expr.startswith("custom."):
+            return
+        from app.modules.student_record.custom_fields import Status as CustomStatus
+        from app.modules.student_record.models import StudentCustomField
+
+        key = expr[len("custom."):]
+        field = (await self.session.execute(
+            select(StudentCustomField).where(StudentCustomField.key == key)
+        )).scalar_one_or_none()
+        if field is None:
+            raise ValidationAppError(f"There is no custom attribute '{key}'.")
+        if field.status not in CustomStatus.LIVE:
+            raise ValidationAppError(
+                f"Custom attribute '{field.label}' is {field.status}; only an active attribute can be mapped."
+            )
+
     @staticmethod
     def _refuse_if_signed_off(profile: ReportProfile, action: str) -> None:
         """A signed-off profile is a historical fact; editing would rewrite what Registry attested to."""
@@ -315,6 +361,7 @@ class StatutoryEngine:
         profile = await self.get_profile(profile_id)
         self._refuse_if_signed_off(profile, "add a field")
         _validate_transform_chain(transform)
+        await self._check_custom_source(source_expression)
         existing = await self._mappings(profile_id)
         if any(m.target_field == target_field for m in existing):
             raise ConflictError(f"Field '{target_field}' is already mapped in this profile")
@@ -397,13 +444,19 @@ class StatutoryEngine:
 
     async def build_records(
         self, academic_year: str | None = None, *, as_at: date | None = None,
-        known_at: datetime | None = None,
+        known_at: datetime | None = None, custom_keys=None,
     ) -> list[dict]:
         """One flat dict per student — or, when an ``academic_year`` is supplied and the student
         transferred programme mid-year, one dict *per programme period* the student was on during
         that year. Each period's dict resolves ``programme`` from the programme in force for that
         window, so a single student can legitimately appear on the return under both programme
         codes (with the entry/end dates clipped to the period).
+
+        ``custom_keys`` (custom attribute governance, Phase 5): the ``custom.<key>`` attributes the
+        caller's mappings read. Only those are loaded and put on each record, so the cost of a
+        return follows what it maps, not how many attributes the institution has ever defined.
+        ``None`` loads every live attribute (callers with no profile). Either way only *live*
+        attributes are read. What was loaded is left on ``self.last_build_stats``.
 
         This is the *only* contract mappings depend on, so the domain model can evolve without
         breaking every configured return.
@@ -483,19 +536,28 @@ class StatutoryEngine:
         # Admin-defined custom attributes (HESA gap capture): expose each student's value under the
         # `custom.<key>` path so a mapping can read it. Every key is present (None when unset) so the
         # resolve() contract is deterministic regardless of which students have data entered.
+        from app.modules.student_record.custom_fields import Status as CustomStatus
         from app.modules.student_record.models import StudentCustomField, StudentCustomValue
-        custom_fields = list(
-            (await self.session.execute(select(StudentCustomField))).scalars().all()
-        )
+        wanted = None if custom_keys is None else {k for k in custom_keys if k}
+        custom_fields: list = []
+        if wanted is None or wanted:
+            q = select(StudentCustomField).where(StudentCustomField.status.in_(CustomStatus.LIVE))
+            if wanted is not None:
+                q = q.where(StudentCustomField.key.in_(wanted))
+            custom_fields = list((await self.session.execute(q)).scalars().all())
         custom_keys = [f.key for f in custom_fields]
         custom_by_student: dict = {}
         # Effective dating, Phase 6 — attributes that keep history are read as at the record's
         # date; the rest are a single current value.
         tracked_ids = {f.id for f in custom_fields if f.track_history}
         tracked_values: dict = {}   # custom_value_id -> (student_id, key)
+        values_loaded = 0
         if custom_fields:
             key_by_id = {f.id: f.key for f in custom_fields}
-            for v in (await self.session.execute(select(StudentCustomValue))).scalars().all():
+            for v in (await self.session.execute(
+                select(StudentCustomValue).where(StudentCustomValue.custom_field_id.in_(list(key_by_id)))
+            )).scalars().all():
+                values_loaded += 1
                 k = key_by_id.get(v.custom_field_id)
                 if k is None:
                     continue
@@ -516,6 +578,16 @@ class StatutoryEngine:
                     list(tracked_values), lo, hi, known_at=known_at)).items():
                 sid, k = tracked_values[vid]
                 custom_periods.setdefault(sid, {})[k] = periods
+        self.last_build_stats = {
+            "customScope": "all-live" if wanted is None else "profile",
+            "customKeysRequested": sorted(wanted) if wanted is not None else None,
+            "customKeysLoaded": sorted(custom_keys),
+            # Requested by a mapping but not live (retired, pending, missing) — read as blank.
+            "customKeysSkipped": sorted(wanted - set(custom_keys)) if wanted is not None else [],
+            "customValuesLoaded": values_loaded,
+            "datedCustomValues": len(tracked_values),
+        }
+        log.info("build_records custom attributes: %s", self.last_build_stats)
 
         def _custom_for(student_id, as_of: date | None = None) -> dict:
             held = custom_by_student.get(student_id, {})
@@ -958,8 +1030,10 @@ class StatutoryEngine:
         if not mappings:
             raise WorkflowError("This profile has no field mappings, so it cannot produce a return")
 
+        started = time.perf_counter()
         records = await self.build_records(academic_year=profile.academic_year, as_at=as_at,
-                                           known_at=known_at)
+                                           known_at=known_at, custom_keys=mapped_custom_keys(mappings))
+        build_ms = round((time.perf_counter() - started) * 1000, 1)
         header = [m.target_field for m in mappings]
         rows, issues = [], []
 
@@ -1078,6 +1152,8 @@ class StatutoryEngine:
         return {
             **extra,
             "profile": self.profile_out(profile),
+            # What the return actually loaded and how long building the records took.
+            "runtime": {**self.last_build_stats, "recordCount": len(records), "buildMs": build_ms},
             "asAt": as_at.isoformat() if as_at else None,
             "knownAt": known_at.isoformat() if known_at else None,
             "header": header,
@@ -1249,7 +1325,7 @@ class StatutoryEngine:
 
         profile = await self.get_profile(profile_id)
         mappings = await self._mappings(profile_id)
-        records = await self.build_records()
+        records = await self.build_records(custom_keys=mapped_custom_keys(mappings))
 
         groups: dict[tuple[str, str], dict] = {}
         for record in records:
@@ -1331,7 +1407,7 @@ class StatutoryEngine:
 
         profile = await self.get_profile(profile_id)
         mappings = await self._mappings(profile_id)
-        records = await self.build_records()
+        records = await self.build_records(custom_keys=mapped_custom_keys(mappings))
         keyed = {f["field"]: f.get("keyed_at") for f in await resolve_fields(self.session, profile.code, profile.academic_year)}
 
         NOT_KNOWN_HINTS = ["98", "99", "ZZ", "00", "unknown", "not known", "prefer not", "other"]
@@ -1483,6 +1559,8 @@ class StatutoryEngine:
             m.target_field for m in mappings if m.required and not _resolved(m)
         )
         spec = await resolve_fields(self.session, profile.code, profile.academic_year)
+        from app.modules.exports.custom_mapping import obsolete_mappings
+        obsolete = await obsolete_mappings(self.session, profile, mappings)
         # Carry the spec's recommended source/transform/default through so the "Map" affordance
         # on the sign-off tab can offer a one-click map for fields the spec pack already knows how
         # to source (avoids the modal-and-a-form-for-every-row UX complaint from ICR testing).
@@ -1508,7 +1586,10 @@ class StatutoryEngine:
             # Present-but-unmapped required fields — not "missing" (they're in the Fields tab) but
             # they still block sign-off. The UI shows a pointer to the Fields tab for these.
             "unmappedRequired": unmapped_required,
-            "signOffReady": (not missing) and (not unmapped_required) and bool(mappings),
+            # Custom attribute governance, Phase 4 — a mapping to a retired / never-live / deleted
+            # custom attribute would quietly read blank, so it blocks sign-off until re-mapped.
+            "obsoleteMappings": obsolete,
+            "signOffReady": (not missing) and (not unmapped_required) and (not obsolete) and bool(mappings),
             # Suppressed rules are attested to at sign-off, so surface them wherever the sign-off
             # UI is rendered — not only inside a validation result.
             "suppressions": await self._collect_suppressions(profile),
@@ -1529,6 +1610,8 @@ class StatutoryEngine:
             raise NotFoundError("Field mapping not found")
         if changes.get("transform"):
             _validate_transform_chain(changes["transform"])
+        if changes.get("source_expression") and changes["source_expression"] != m.source_expression:
+            await self._check_custom_source(changes["source_expression"])
         for k, v in changes.items():
             if v is not None:
                 setattr(m, k, v)
@@ -1571,6 +1654,13 @@ class StatutoryEngine:
             raise ConflictError("Profile is already signed off")
         report = await self.compile(profile_id)
         if not report["signOffReady"]:
+            obsolete = report.get("obsoleteMappings", [])
+            if obsolete:
+                raise WorkflowError(
+                    "Cannot sign off: " + "; ".join(f"{o['targetField']} reads {o['sourceExpression']} — {o['reason']}"
+                                                   for o in obsolete[:5])
+                    + " Re-map these fields first."
+                )
             blockers = [m["field"] for m in report["missing"]] + report.get("unmappedRequired", [])
             if blockers:
                 shown = ", ".join(blockers[:8])
@@ -1581,6 +1671,7 @@ class StatutoryEngine:
             raise WorkflowError("Cannot sign off: profile has no field mappings")
         signed_at = datetime.now(timezone.utc)
         gen = await self.generate(profile_id, as_at=as_at, known_at=signed_at)
+        await self.note_usage(profile, purpose="sign_off", row_count=gen["rowCount"])
         if not gen["validation"]["valid"]:
             raise WorkflowError(
                 f"Cannot sign off: {gen['validation']['errors']} validation error(s) in the current "

@@ -10,11 +10,12 @@ import uuid
 from datetime import date
 
 from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.authorization import student_scope
-from app.core.dependencies import get_current_principal, require_permission
-from app.core.errors import NotFoundError, ValidationAppError
+from app.core.dependencies import get_current_principal, require_any_permission, require_permission
+from app.core.errors import NotFoundError, PermissionError, ValidationAppError
 from app.core.pagination import PageParams, list_envelope, page_params
 from app.core.principal import Principal
 from app.db.session import get_session
@@ -24,6 +25,7 @@ from app.modules.student_record.constants import (
     StudentStatus,
 )
 from app.modules.student_record.custom_fields import CustomFieldService
+from app.modules.student_record.custom_fields import Status as CustomStatus
 from app.modules.student_record.import_service import (
     DEFAULT_IMPORT_TEMPLATE,
     CohortImportService,
@@ -311,37 +313,392 @@ async def set_import_template(
 # --- Admin-defined custom student attributes (HESA gap capture) --------------------------------
 # Declared before /{student_id} so "custom-fields" isn't captured as a student id.
 
-def _custom_field_out(f) -> dict:
+def _custom_field_out(f, emails: dict | None = None) -> dict:
+    emails = emails or {}
     return {
         "id": str(f.id), "key": f.key, "label": f.label, "dataType": f.data_type,
         "reason": f.reason, "sourcePath": f"custom.{f.key}",
         "trackHistory": bool(f.track_history),
+        "status": f.status,
+        "requestedBy": str(f.created_by_user_id) if f.created_by_user_id else None,
+        "requestedByEmail": emails.get(f.created_by_user_id),
+        "decidedBy": str(f.decided_by_user_id) if f.decided_by_user_id else None,
+        "decidedByEmail": emails.get(f.decided_by_user_id),
+        "decidedAt": f.decided_at.isoformat() if f.decided_at else None,
+        "decisionReason": f.decision_reason,
         "createdAt": f.created_at.isoformat() if f.created_at else None,
     }
 
 
-@router.get("/custom-fields", summary="List admin-defined custom student attributes")
+def _custom_event_out(e) -> dict:
+    return {
+        "id": str(e.id), "customFieldId": str(e.custom_field_id) if e.custom_field_id else None,
+        "key": e.field_key, "label": e.field_label, "action": e.action,
+        "fromStatus": e.from_status, "toStatus": e.to_status,
+        "actorEmail": e.actor_email, "notes": e.notes, "detail": e.detail,
+        "at": e.created_at.isoformat() if e.created_at else None,
+    }
+
+
+async def _user_emails(session: AsyncSession, fields) -> dict:
+    from sqlalchemy import select
+
+    from app.modules.identity.models import User
+
+    ids = {i for f in fields for i in (f.created_by_user_id, f.decided_by_user_id) if i}
+    if not ids:
+        return {}
+    return dict((await session.execute(select(User.id, User.email).where(User.id.in_(ids)))).all())
+
+
+def _assessment_out(a) -> dict | None:
+    if a is None:
+        return None
+    return {"id": str(a.id), "verdict": a.verdict, "specification": a.specification,
+            "at": a.created_at.isoformat() if a.created_at else None, **(a.result or {})}
+
+
+async def _fields_out(session: AsyncSession, fields, *, with_assessment: bool = True) -> list[dict]:
+    fields = list(fields)
+    emails = await _user_emails(session, fields)
+    latest = await CustomFieldService(session).latest_assessments(f.id for f in fields) if with_assessment else {}
+    out = []
+    for f in fields:
+        row = _custom_field_out(f, emails)
+        if with_assessment:
+            row["assessment"] = _assessment_out(latest.get(f.id))
+        out.append(row)
+    return out
+
+
+# Lengths and required values are checked by the service, not by pydantic constraints: the
+# service answers with the standard error envelope the frontend reads, where a pydantic failure
+# would answer with FastAPI's bare {"detail": [...]}.
+class CustomAttributeRequestIn(BaseModel):
+    label: str = ""
+    dataType: str = "string"
+    reason: str = ""
+    trackHistory: bool = False
+
+
+class CustomAttributeCheckIn(BaseModel):
+    label: str = ""
+    reason: str = ""
+    dataType: str | None = None
+
+
+class CustomAttributeReasonIn(BaseModel):
+    reason: str | None = None
+
+
+class CustomAttributeDecisionIn(BaseModel):
+    reason: str | None = None
+    # Approve only: make it live straight away (records approve then activate).
+    activate: bool = False
+
+
+_GOVERNANCE = ("custom_attribute.request", "custom_attribute.approve")
+
+
+def _statuses(raw: str | None) -> tuple[str, ...] | None:
+    return tuple(s.strip() for s in raw.split(",") if s.strip()) if raw else None
+
+
+@router.get("/custom-fields", summary="Live custom student attributes (the ones that take values)")
 async def list_custom_fields(
     session: AsyncSession = Depends(get_session),
     _=Depends(require_permission("student.read")),
 ) -> list[dict]:
-    return [_custom_field_out(f) for f in await CustomFieldService(session).list_fields()]
+    return await _fields_out(session, await CustomFieldService(session).list_fields(CustomStatus.LIVE))
 
 
-@router.post("/custom-fields", status_code=201, summary="Create a custom student attribute")
-async def create_custom_field(
-    body: dict,
+@router.get("/custom-attributes", summary="Custom attribute catalogue, filterable by status")
+async def list_custom_attributes(
+    status: str | None = Query(None, description="Comma-separated: pending, approved, rejected, "
+                                                 "active, review, retired. Default: live (active, review)."),
     session: AsyncSession = Depends(get_session),
-    principal: Principal = Depends(require_permission("admin.configure")),
+    principal: Principal = Depends(require_permission("student.read")),
+) -> list[dict]:
+    wanted = _statuses(status) or CustomStatus.LIVE
+    # Requests that were never made live are governance business, not something every reader sees.
+    if set(wanted) - set(CustomStatus.LIVE) and not any(principal.has_permission(c) for c in _GOVERNANCE):
+        raise PermissionError("Missing permission: custom_attribute.request")
+    return await _fields_out(session, await CustomFieldService(session).list_fields(wanted))
+
+
+async def _catalogue_out(session: AsyncSession, fields) -> list[dict]:
+    fields = list(fields)
+    rows = await _fields_out(session, fields)
+    usage = await CustomFieldService(session).usage(fields)
+    for f, row in zip(fields, rows):
+        row["usage"] = usage.get(f.id)
+    return rows
+
+
+@router.get("/custom-attributes/catalogue",
+            summary="Every attribute that was ever made live (active, review, retired) with usage")
+async def custom_attribute_catalogue(
+    status: str | None = Query(None, description="Comma-separated statuses; default active, review, retired"),
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_any_permission(*_GOVERNANCE)),
+) -> list[dict]:
+    wanted = _statuses(status) or (CustomStatus.ACTIVE, CustomStatus.REVIEW, CustomStatus.RETIRED)
+    return await _catalogue_out(session, await CustomFieldService(session).list_fields(wanted))
+
+
+async def _health_out(session: AsyncSession, fields) -> list[dict]:
+    from app.modules.student_record.custom_attr_usage import health
+
+    fields = list(fields)
+    rows = await _fields_out(session, fields)
+    signals = await health(session, fields)
+    for f, row in zip(fields, rows):
+        row["health"] = signals.get(f.id)
+    return rows
+
+
+@router.get("/custom-attributes/dashboard",
+            summary="Usage and lifecycle review for every active / under-review attribute")
+async def custom_attribute_dashboard(
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_any_permission(*_GOVERNANCE)),
+) -> list[dict]:
+    fields = await CustomFieldService(session).list_fields((CustomStatus.ACTIVE, CustomStatus.REVIEW))
+    rows = await _health_out(session, fields)
+    # Review candidates first, then under review, then the rest by label.
+    rank = {"review": 0, "under review": 1}
+    return sorted(rows, key=lambda r: (rank.get(r["health"]["recommendation"], 2), r["label"]))
+
+
+@router.get("/custom-attributes/review-candidates",
+            summary="Active attributes the review rules flag (none are changed automatically)")
+async def custom_attribute_review_candidates(
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_any_permission(*_GOVERNANCE)),
+) -> list[dict]:
+    fields = await CustomFieldService(session).list_fields((CustomStatus.ACTIVE,))
+    return [r for r in await _health_out(session, fields) if r["health"]["reviewCandidate"]]
+
+
+@router.get("/custom-attributes/{field_id}/usage", summary="When and where returns read this attribute")
+async def custom_attribute_usage(
+    field_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_any_permission(*_GOVERNANCE)),
 ) -> dict:
-    field = await CustomFieldService(session).create_field(
-        label=(body or {}).get("label", ""),
-        data_type=(body or {}).get("dataType", "string"),
-        reason=(body or {}).get("reason", ""),
-        user_id=principal.user_id,
-        track_history=bool((body or {}).get("trackHistory", False)),
+    from app.modules.student_record.custom_attr_usage import usage_detail
+
+    return await usage_detail(session, await CustomFieldService(session).get_field(field_id))
+
+
+@router.get("/custom-attributes/{field_id}/health", summary="Usage signals and the review recommendation")
+async def custom_attribute_health(
+    field_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_any_permission(*_GOVERNANCE)),
+) -> dict:
+    return (await _health_out(session, [await CustomFieldService(session).get_field(field_id)]))[0]
+
+
+@router.get("/custom-attributes/{field_id}", summary="One attribute: usage, mappings, decision trail")
+async def custom_attribute_detail(
+    field_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_any_permission(*_GOVERNANCE)),
+) -> dict:
+    svc = CustomFieldService(session)
+    field = await svc.get_field(field_id)
+    out = (await _catalogue_out(session, [field]))[0]
+    out["dependencies"] = await svc.dependencies(field)
+    out["events"] = [_custom_event_out(e) for e in await svc.events(field_id)]
+    return out
+
+
+@router.get("/custom-attributes/{field_id}/dependencies",
+            summary="Report-profile fields mapped to this attribute (and whether they block retiring it)")
+async def custom_attribute_dependencies(
+    field_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_any_permission("reporting.read", *_GOVERNANCE)),
+) -> list[dict]:
+    svc = CustomFieldService(session)
+    return await svc.dependencies(await svc.get_field(field_id))
+
+
+@router.post("/custom-attributes/{field_id}/review", summary="Put an active attribute under review")
+async def review_custom_attribute(
+    field_id: uuid.UUID,
+    body: CustomAttributeReasonIn,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_any_permission(*_GOVERNANCE)),
+) -> dict:
+    field = await CustomFieldService(session).start_review(field_id, principal=principal, reason=body.reason or "")
+    return (await _catalogue_out(session, [field]))[0]
+
+
+@router.post("/custom-attributes/{field_id}/keep", summary="End a review: the attribute is still needed")
+async def keep_custom_attribute(
+    field_id: uuid.UUID,
+    body: CustomAttributeReasonIn | None = None,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_permission("custom_attribute.approve")),
+) -> dict:
+    field = await CustomFieldService(session).keep(field_id, principal=principal,
+                                                    reason=(body.reason if body else None))
+    return (await _catalogue_out(session, [field]))[0]
+
+
+@router.post("/custom-attributes/{field_id}/retire",
+             summary="Retire an attribute under review (values and history are kept)")
+async def retire_custom_attribute(
+    field_id: uuid.UUID,
+    body: CustomAttributeReasonIn,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_permission("custom_attribute.approve")),
+) -> dict:
+    field = await CustomFieldService(session).retire(field_id, principal=principal, reason=body.reason or "")
+    return (await _catalogue_out(session, [field]))[0]
+
+
+@router.post("/custom-attributes/{field_id}/restore", summary="Bring a retired attribute back (reason required)")
+async def restore_custom_attribute(
+    field_id: uuid.UUID,
+    body: CustomAttributeReasonIn,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_permission("custom_attribute.approve")),
+) -> dict:
+    field = await CustomFieldService(session).restore(field_id, principal=principal, reason=body.reason or "")
+    return (await _catalogue_out(session, [field]))[0]
+
+
+@router.post("/custom-attribute-requests", status_code=201, summary="Request a new custom student attribute")
+async def request_custom_attribute(
+    body: CustomAttributeRequestIn,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_permission("custom_attribute.request")),
+) -> dict:
+    field = await CustomFieldService(session).request_field(
+        label=body.label, data_type=body.dataType, reason=body.reason, principal=principal,
+        track_history=body.trackHistory,
     )
-    return _custom_field_out(field)
+    return (await _fields_out(session, [field]))[0]
+
+
+@router.post("/custom-attribute-requests/check",
+             summary="Check a prospective request (duplicates, HESA match, suggested type) without raising it")
+async def check_custom_attribute(
+    body: CustomAttributeCheckIn,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_any_permission(*_GOVERNANCE)),
+) -> dict:
+    return await CustomFieldService(session).preview_assessment(
+        label=body.label, reason=body.reason, data_type=body.dataType,
+    )
+
+
+@router.post("/custom-attribute-requests/{field_id}/assess", summary="Re-run the necessity check")
+async def assess_custom_attribute(
+    field_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_any_permission(*_GOVERNANCE)),
+) -> dict:
+    return _assessment_out(await CustomFieldService(session).assess(field_id, principal=principal))
+
+
+@router.get("/custom-attribute-requests/{field_id}/assessment", summary="The latest necessity check")
+async def get_custom_attribute_assessment(
+    field_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_any_permission(*_GOVERNANCE)),
+) -> dict:
+    svc = CustomFieldService(session)
+    await svc.get_field(field_id)
+    latest = (await svc.latest_assessments([field_id])).get(field_id)
+    if latest is None:
+        raise NotFoundError("This attribute has not been assessed yet")
+    return _assessment_out(latest)
+
+
+@router.get("/custom-attribute-requests", summary="Attribute requests (default: pending, approved, rejected)")
+async def list_custom_attribute_requests(
+    status: str | None = Query(None, description="Comma-separated statuses"),
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_any_permission(*_GOVERNANCE)),
+) -> list[dict]:
+    wanted = _statuses(status) or (CustomStatus.PENDING, CustomStatus.APPROVED, CustomStatus.REJECTED)
+    return await _fields_out(session, await CustomFieldService(session).list_fields(wanted))
+
+
+@router.get("/custom-attribute-events", summary="Decision trail across all custom attributes")
+async def list_custom_attribute_events(
+    limit: int = Query(200, ge=1, le=1000),
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_any_permission(*_GOVERNANCE)),
+) -> list[dict]:
+    return [_custom_event_out(e) for e in await CustomFieldService(session).events(limit=limit)]
+
+
+@router.get("/custom-attribute-requests/{field_id}", summary="One attribute request with its decision trail")
+async def get_custom_attribute_request(
+    field_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _=Depends(require_any_permission(*_GOVERNANCE)),
+) -> dict:
+    svc = CustomFieldService(session)
+    out = (await _fields_out(session, [await svc.get_field(field_id)]))[0]
+    out["events"] = [_custom_event_out(e) for e in await svc.events(field_id)]
+    return out
+
+
+@router.post("/custom-attribute-requests/{field_id}/approve", summary="Approve a request (not your own)")
+async def approve_custom_attribute(
+    field_id: uuid.UUID,
+    body: CustomAttributeDecisionIn | None = None,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_permission("custom_attribute.approve")),
+) -> dict:
+    body = body or CustomAttributeDecisionIn()
+    field = await CustomFieldService(session).approve(
+        field_id, principal=principal, reason=body.reason, activate=body.activate,
+    )
+    return (await _fields_out(session, [field]))[0]
+
+
+@router.post("/custom-attribute-requests/{field_id}/reject", summary="Reject a request (reason required)")
+async def reject_custom_attribute(
+    field_id: uuid.UUID,
+    body: CustomAttributeDecisionIn,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_permission("custom_attribute.approve")),
+) -> dict:
+    field = await CustomFieldService(session).reject(field_id, principal=principal, reason=body.reason or "")
+    return (await _fields_out(session, [field]))[0]
+
+
+@router.post("/custom-attribute-requests/{field_id}/activate", summary="Make an approved attribute live")
+async def activate_custom_attribute(
+    field_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_permission("custom_attribute.approve")),
+) -> dict:
+    field = await CustomFieldService(session).activate(field_id, principal=principal)
+    return (await _fields_out(session, [field]))[0]
+
+
+@router.delete("/custom-attribute-requests/{field_id}", status_code=204, response_class=Response,
+               summary="Withdraw a pending request")
+async def withdraw_custom_attribute(
+    field_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    principal: Principal = Depends(require_any_permission(*_GOVERNANCE)),
+):
+    svc = CustomFieldService(session)
+    field = await svc.get_field(field_id)
+    # The requester withdraws their own; a checker may clear any pending request.
+    if field.created_by_user_id != principal.user_id and not principal.has_permission("custom_attribute.approve"):
+        raise PermissionError("Only the requester or an approver can withdraw this request.")
+    await svc.withdraw(field_id, principal=principal)
+    return Response(status_code=204)
 
 
 @router.post("/custom-fields/{field_id}/track-history", summary="Start keeping dated history (one-way)")
@@ -350,18 +707,11 @@ async def enable_custom_field_history(
     session: AsyncSession = Depends(get_session),
     principal: Principal = Depends(require_permission("admin.configure")),
 ) -> dict:
-    return _custom_field_out(await CustomFieldService(session).enable_history(field_id, user_id=principal.user_id))
+    field = await CustomFieldService(session).enable_history(field_id, user_id=principal.user_id)
+    return (await _fields_out(session, [field]))[0]
 
-
-@router.delete("/custom-fields/{field_id}", status_code=204, response_class=Response,
-               summary="Delete a custom student attribute and its values")
-async def delete_custom_field(
-    field_id: uuid.UUID,
-    session: AsyncSession = Depends(get_session),
-    _=Depends(require_permission("admin.configure")),
-):
-    await CustomFieldService(session).delete_field(field_id)
-    return Response(status_code=204)
+# There is deliberately no hard delete of an attribute: decided attributes are kept for the record
+# and active ones hold student data. A pending request is withdrawn (above).
 
 
 @router.get("/custom-fields/{field_id}/values",

@@ -7,7 +7,7 @@ lookups. Portable types only (D-04).
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy import (
@@ -436,11 +436,92 @@ class StudentCustomField(UUIDMixin, TenantMixin, TimestampMixin, Base):
     track_history: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     # Why this attribute was created — mandatory commentary, shown in the picker and the audit trail.
     reason: Mapped[str] = mapped_column(Text)
+    # The requester (maker). Kept under its original name; the API calls it ``requestedBy``.
     created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
+    # Governance — an attribute is requested, decided by someone other than the requester, and
+    # only then made active. Only live attributes (active, under review) take values, appear in
+    # the mapping picker and are read by a return. See custom_fields.Status.
+    status: Mapped[str] = mapped_column(String(20), default="pending", server_default="pending", index=True)
+    decided_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # The checker's reason — mandatory on rejection, optional on approval.
+    decision_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Never loaded through the definition (governance Phase 5): every catalogue/list query used to
+    # pull every student's value for every attribute via selectin. Values are always queried
+    # explicitly; deleting a definition leaves the value rows to the database's ON DELETE CASCADE.
     values: Mapped[list["StudentCustomValue"]] = relationship(
-        back_populates="field", cascade="all, delete-orphan", lazy="selectin"
+        back_populates="field", lazy="noload", passive_deletes=True
+    )
+
+
+class StudentCustomFieldEvent(UUIDMixin, TenantMixin, Base):
+    """One lifecycle decision on a custom attribute (requested, approved, rejected, activated, …).
+    Append-only. The attribute's key and label are copied in so the trail still reads after a
+    withdrawn request is removed."""
+    __tablename__ = "student_custom_field_event"
+
+    custom_field_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("student_custom_field.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    field_key: Mapped[str] = mapped_column(String(60))
+    field_label: Mapped[str] = mapped_column(String(120))
+    action: Mapped[str] = mapped_column(String(30))
+    from_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    to_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    actor_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    actor_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    detail: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class StudentCustomFieldAssessment(UUIDMixin, TenantMixin, Base):
+    """A stored necessity check of a requested attribute (governance Phase 2): duplicate check
+    against the core record and other attributes, HESA spec match, type inference. Re-running
+    adds a row; the latest is the one an approver sees."""
+    __tablename__ = "student_custom_field_assessment"
+
+    custom_field_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("student_custom_field.id", ondelete="CASCADE"), index=True
+    )
+    verdict: Mapped[str] = mapped_column(String(20))      # duplicate | review | supported | no_hesa_basis
+    specification: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    result: Mapped[dict] = mapped_column(JSON)
+    assessed_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class StudentCustomFieldUsage(UUIDMixin, TenantMixin, Base):
+    """A return read this attribute (governance Phase 6): one row per attribute each time a return
+    is produced for real — generated, downloaded or signed off. Drives "last used" and the
+    lifecycle review. The profile's code and year are copied in so the row outlives the profile."""
+    __tablename__ = "student_custom_field_usage"
+    __table_args__ = (Index("ix_custom_field_usage_field_used", "custom_field_id", "used_at"),)
+
+    custom_field_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("student_custom_field.id", ondelete="CASCADE"), index=True
+    )
+    profile_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("report_profile.id", ondelete="SET NULL"), nullable=True
+    )
+    profile_code: Mapped[str] = mapped_column(String(40))
+    academic_year: Mapped[str] = mapped_column(String(9))
+    purpose: Mapped[str] = mapped_column(String(20))         # generate | download | sign_off
+    row_count: Mapped[int] = mapped_column(Integer, default=0)
+    used_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
 
 

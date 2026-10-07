@@ -84,7 +84,9 @@ class IdentityService:
         self.repo.add_refresh_token(user_id, claims["jti"], _utc_from_ts(claims["exp"]))
         return token
 
-    async def authenticate(self, email: str, password: str) -> tuple[str, str, Principal]:
+    async def authenticate(
+        self, email: str, password: str, *, expected_tenant_id: uuid.UUID | None = None,
+    ) -> tuple[str, str, Principal]:
         settings = get_settings()
         user = await self.repo.get_user_by_email(email)
         if user is None or not user.is_active or not user.password_hash:
@@ -102,6 +104,19 @@ class IdentityService:
                 logger.warning("account locked after repeated failures: user %s", user.id)
             await self.repo.session.commit()
             raise AuthError("Invalid email or password")
+        # The institution picked at sign-in must be the account's own. Checked only after the
+        # password is verified, so the message can't be used to discover which institution an
+        # email belongs to; not counted as a failed attempt (the credentials were right).
+        if expected_tenant_id is not None and user.tenant_id != expected_tenant_id:
+            from app.modules.tenant.models import Tenant
+
+            picked = await self.repo.session.get(Tenant, expected_tenant_id)
+            logger.info("sign-in refused: user %s picked tenant %s, belongs to %s",
+                        user.id, expected_tenant_id, user.tenant_id)
+            raise AuthError(
+                f"This account isn't registered with {picked.name if picked else 'the selected institution'}. "
+                "Choose your own institution and sign in again."
+            )
         # Success: reset counters, stamp login, issue tokens.
         user.failed_login_count = 0
         user.locked_until = None

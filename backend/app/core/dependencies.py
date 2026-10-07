@@ -80,3 +80,15 @@ def require_permission(code: str):
         return principal
 
     return _guard
+
+
+def require_any_permission(*codes: str):
+    """Dependency factory — the caller needs at least one of ``codes``. The 403 names the first
+    code, so the frontend's "Missing permission: <code>" translation still applies."""
+
+    async def _guard(principal: Principal = Depends(get_current_principal)) -> Principal:
+        if not any(principal.has_permission(c) for c in codes):
+            raise PermissionError(f"Missing permission: {codes[0]}")
+        return principal
+
+    return _guard
